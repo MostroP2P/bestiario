@@ -17,6 +17,9 @@ produces network-wide and per-instance statistics. Read `docs/SPEC.md` before
 changing anything — it is the source of truth for event formats, the data
 model, the metrics catalog and the CLI.
 
+`docs/ROADMAP.md` is the implementation plan: phases, and one row per
+pull request. Work is delivered one PR per row.
+
 ## Ground rules
 
 - Target the **latest mostrod** (`MostroP2P/mostro`, `main`) and the latest
