@@ -1,0 +1,17 @@
+[package]
+name = "bestiario-stats"
+description = "Pure aggregations over Mostro network data. Performs no I/O, by construction."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# This list *is* the no-I/O invariant of docs/SPEC.md §8, enforced by cargo
+# rather than by convention: sqlx, nostr-sdk, tokio and reqwest are simply not
+# reachable from this crate. scripts/check-stats-deps.sh fails the build if
+# the list grows without someone deciding it should.
+[dependencies]
+chrono.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
