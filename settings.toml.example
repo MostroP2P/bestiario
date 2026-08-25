@@ -1,0 +1,46 @@
+# bestiario configuration. Copy to settings.toml and edit.
+# Every value here is validated at startup; see docs/SPEC.md §9.
+
+[nostr]
+# Relays to read from. `ws://` is accepted for a local relay.
+relays = ["wss://relay.mostro.network", "wss://nos.lol"]
+
+# Discover additional relays from each instance's NIP-65 list (kind 10002).
+discover_relays = false
+
+# How far to rewind the cursor when resuming a live subscription, to tolerate
+# clock skew between relays. Duplicates are absorbed by the dedup step.
+resume_overlap_secs = 3600
+
+[indexer]
+# Instance pubkeys to follow, in hex.
+instances = [
+  "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390",
+]
+
+# Index any pubkey publishing events tagged y = ["mostro", ...], rather than
+# only the ones listed above. With this off, `instances` may not be empty.
+accept_unknown_instances = false
+
+# One of: mainnet, testnet, signet, regtest.
+networks = ["mainnet"]
+
+# Unix timestamp to backfill down to. 0 means everything the relays still hold.
+backfill_from = 1735689600
+
+[assumptions]
+# The share of its fee an instance forwards as the dev fee. Instances do not
+# publish this, so every metric derived from it is reported as inferred
+# (docs/SPEC.md §5). The daemon default is 0.30.
+dev_fee_percentage_default = 0.30
+
+# Per-instance overrides, if an operator states a different value.
+# [assumptions.dev_fee_percentage]
+# "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390" = 0.50
+
+[database]
+url = "sqlite://bestiario.db"
+
+[report]
+# Currency that inferred volume is converted into.
+reference_currency = "USD"
