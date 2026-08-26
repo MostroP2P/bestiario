@@ -54,6 +54,11 @@ where
 /// `None` means the instance had published no fee yet at that moment, which is
 /// a real answer and not a zero: valuing a trade at a fee nobody announced
 /// would invent volume.
+///
+/// Two versions can share a `created_at`. NIP-01 retains the lexicographically
+/// lowest event id in that case, and so does this lookup — a fee that
+/// disagreed with the version the relays keep would follow every inferred
+/// volume figure derived from it.
 pub async fn fee_in_force<'e, E>(
     executor: E,
     pubkey: &str,
@@ -65,7 +70,7 @@ where
     sqlx::query_scalar::<_, Option<f64>>(
         "SELECT fee FROM instance_info
          WHERE pubkey = ? AND created_at <= ? AND fee IS NOT NULL
-         ORDER BY created_at DESC, event_id DESC LIMIT 1",
+         ORDER BY created_at DESC, event_id ASC LIMIT 1",
     )
     .bind(pubkey)
     .bind(at_ts)
@@ -98,7 +103,7 @@ where
     sqlx::query_as::<_, InfoRow>(
         "SELECT event_id, pubkey, created_at, fee, max_order_amount, min_order_amount,
                 fiat_currencies, mostro_version, protocol_version, ln_networks, bond_enabled
-         FROM instance_info WHERE pubkey = ? ORDER BY created_at DESC, event_id DESC LIMIT 1",
+         FROM instance_info WHERE pubkey = ? ORDER BY created_at DESC, event_id ASC LIMIT 1",
     )
     .bind(pubkey)
     .fetch_optional(executor)

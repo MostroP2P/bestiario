@@ -171,6 +171,23 @@ async fn a_dispute_that_never_names_an_initiator_has_none() {
 }
 
 #[tokio::test]
+async fn versions_sharing_a_second_are_settled_by_the_lower_event_id() {
+    // created_at has one-second resolution. NIP-01 retains the
+    // lexicographically lowest event id for an addressable event, so the
+    // projected status has to agree with the version the relays keep.
+    let pool = migrated().await;
+    let mut lower = version(T0, Status::Settled);
+    lower.event_id = format!("0{}", "a".repeat(63));
+    let mut higher = version(T0, Status::Released);
+    higher.event_id = format!("f{}", "a".repeat(63));
+
+    ingest(&pool, &higher).await;
+    ingest(&pool, &lower).await;
+
+    assert_eq!(projection(&pool).await.final_status, Status::Settled);
+}
+
+#[tokio::test]
 async fn refreshing_twice_leaves_the_same_row() {
     let pool = migrated().await;
 

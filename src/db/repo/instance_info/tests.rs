@@ -186,6 +186,34 @@ async fn the_latest_version_is_the_newest_one() {
 }
 
 #[tokio::test]
+async fn versions_sharing_a_second_are_settled_by_the_lower_event_id() {
+    // A live subscription can store both versions before the relay resolves
+    // the replacement. NIP-01 keeps the lowest event id, and so must the fee
+    // lookup: every inferred volume figure of SPEC 6.6 is derived from it.
+    let pool = migrated().await;
+    let mut lower = info(PUBKEY, JULY, Some(0.006));
+    lower.event_id = format!("0{}", "a".repeat(63));
+    let mut higher = info(PUBKEY, JULY, Some(0.02));
+    higher.event_id = format!("f{}", "a".repeat(63));
+
+    ingest(&pool, &higher).await;
+    ingest(&pool, &lower).await;
+
+    assert_eq!(
+        fee_in_force(&pool, PUBKEY, AUGUST).await.expect("lookup"),
+        Some(0.006)
+    );
+    assert_eq!(
+        latest(&pool, PUBKEY)
+            .await
+            .expect("latest")
+            .expect("stored")
+            .fee,
+        Some(0.006)
+    );
+}
+
+#[tokio::test]
 async fn an_unknown_instance_has_no_latest_version() {
     let pool = migrated().await;
 
