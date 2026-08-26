@@ -52,6 +52,51 @@ pub enum IngestOutcome {
     Rejected(Rejection),
 }
 
+/// What a run of the pipeline did, in three numbers.
+///
+/// Kept here rather than in the commands because `backfill` and `sync` both
+/// summarise a run and there is one right way to add these up.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Counts {
+    pub stored: u64,
+    pub duplicate: u64,
+    pub rejected: u64,
+}
+
+impl Counts {
+    /// Adds one outcome to the tally.
+    pub fn record(&mut self, outcome: &IngestOutcome) {
+        match outcome {
+            IngestOutcome::Stored => self.stored += 1,
+            IngestOutcome::Duplicate => self.duplicate += 1,
+            IngestOutcome::Rejected(_) => self.rejected += 1,
+        }
+    }
+
+    /// How many events were looked at at all.
+    pub fn total(&self) -> u64 {
+        self.stored + self.duplicate + self.rejected
+    }
+}
+
+impl std::ops::AddAssign for Counts {
+    fn add_assign(&mut self, other: Self) {
+        self.stored += other.stored;
+        self.duplicate += other.duplicate;
+        self.rejected += other.rejected;
+    }
+}
+
+impl std::fmt::Display for Counts {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} stored, {} already known, {} rejected",
+            self.stored, self.duplicate, self.rejected
+        )
+    }
+}
+
 /// Why an event was not indexed.
 ///
 /// Each variant carries what the decision was made on, because a rejection
