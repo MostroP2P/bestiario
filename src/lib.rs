@@ -22,10 +22,12 @@
 //! restricted dependency list is what enforces its no-I/O invariant. It is
 //! re-exported here as [`stats`] so callers keep saying `bestiario::stats::…`.
 
+pub mod cli;
 pub mod commands;
 pub mod config;
 pub mod db;
 pub mod ingest;
+pub mod logging;
 pub mod nostr;
 pub mod report;
 
