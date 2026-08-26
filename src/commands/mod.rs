@@ -5,8 +5,10 @@
 //! they assemble the layers below. See `docs/SPEC.md` §10.
 
 use anyhow::{Context as _, Result};
+use chrono::Utc;
 use sqlx::SqlitePool;
 
+pub mod backfill;
 pub mod range;
 
 use crate::cli::{Cli, Command, StatsCommand};
@@ -46,7 +48,7 @@ pub async fn run(cli: &Cli) -> Result<()> {
 
 async fn dispatch(context: &Context<'_>) -> Result<()> {
     match &context.cli.command {
-        Command::Backfill { .. } => not_yet("backfill", 20),
+        Command::Backfill { kind } => backfill::run(context, *kind, Utc::now().timestamp()).await,
         Command::Sync => not_yet("sync", 21),
         Command::Summary => not_yet("summary", 28),
         Command::Instances => not_yet("instances", 27),

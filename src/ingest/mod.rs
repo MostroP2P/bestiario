@@ -9,4 +9,4 @@
 pub mod parse;
 pub mod pipeline;
 
-pub use pipeline::{IngestOutcome, Pipeline, Policy, Rejection};
+pub use pipeline::{Counts, IngestOutcome, Pipeline, Policy, Rejection};
