@@ -73,20 +73,8 @@ pub async fn connect(url: &str) -> Result<SqlitePool, DbError> {
         });
     }
 
-    let options = SqliteConnectOptions::from_str(url)
-        .map_err(|source| DbError::Url {
-            url: url.to_string(),
-            source,
-        })?
-        .create_if_missing(true)
-        .journal_mode(SqliteJournalMode::Wal)
-        .synchronous(SqliteSynchronous::Normal)
-        .foreign_keys(true)
-        .busy_timeout(BUSY_TIMEOUT);
-
-    SqlitePoolOptions::new()
-        .max_connections(max_connections_for(url))
-        .connect_with(options)
+    pool_options_for(url)
+        .connect_with(connect_options_for(url)?)
         .await
         .map_err(|source| DbError::Connect {
             url: url.to_string(),
@@ -108,12 +96,46 @@ pub async fn connect_and_migrate(url: &str) -> Result<SqlitePool, DbError> {
     Ok(pool)
 }
 
-/// An in-memory database belongs to the connection that opened it, so a pool
-/// of several would hand out connections to several *different* empty
-/// databases — migrations would appear to vanish between calls. Tests are the
-/// only user of these URLs, and one connection is all they need.
-fn max_connections_for(url: &str) -> u32 {
-    if is_in_memory(url) { 1 } else { 5 }
+/// The per-connection settings. Split out so that tests can build a pool that
+/// differs only in its pool policy.
+fn connect_options_for(url: &str) -> Result<SqliteConnectOptions, DbError> {
+    Ok(SqliteConnectOptions::from_str(url)
+        .map_err(|source| DbError::Url {
+            url: url.to_string(),
+            source,
+        })?
+        .create_if_missing(true)
+        .journal_mode(SqliteJournalMode::Wal)
+        .synchronous(SqliteSynchronous::Normal)
+        .foreign_keys(true)
+        .busy_timeout(BUSY_TIMEOUT))
+}
+
+/// An in-memory database lives *inside* the connection that opened it. Two
+/// consequences, both of which the defaults get wrong:
+///
+/// - A pool of several connections is several *different* empty databases, so
+///   migrations appear to vanish between calls. Hence one connection.
+/// - `sqlx` reaps connections that sit idle (600s by default) or grow old
+///   (1800s), and with `min_connections` at zero it may reap the only one
+///   there is. That does not just drop a connection, it destroys the
+///   database: the next acquire opens a fresh, empty, unmigrated one. So the
+///   connection is pinned and expiry is switched off.
+///
+/// File-backed databases have neither problem — the data outlives any
+/// connection — so they keep the ordinary defaults.
+fn pool_options_for(url: &str) -> SqlitePoolOptions {
+    let options = SqlitePoolOptions::new();
+
+    if is_in_memory(url) {
+        options
+            .max_connections(1)
+            .min_connections(1)
+            .idle_timeout(None)
+            .max_lifetime(None)
+    } else {
+        options.max_connections(5)
+    }
 }
 
 fn is_in_memory(url: &str) -> bool {
