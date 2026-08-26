@@ -110,6 +110,69 @@ pub(crate) fn expect_kind(event: &Event, expected: u16) -> Result<(), ParseError
     }
 }
 
+/// Parse a tag that has to be a *finite* number.
+///
+/// `f64::from_str` accepts `NaN`, `inf` and `-inf`, and any of the three would
+/// pass silently through the parser and into a sum, an average or a
+/// percentile, where it poisons every figure computed with it — and reaches
+/// SQLite, which stores non-finite floats as NULL. A value that cannot be
+/// added up is not a number this project has any use for.
+pub(crate) fn finite(
+    tag: &'static str,
+    value: &str,
+    expected: &'static str,
+) -> Result<f64, ParseError> {
+    let parsed: f64 = number(tag, value, expected)?;
+
+    if parsed.is_finite() {
+        Ok(parsed)
+    } else {
+        Err(ParseError::NotANumber {
+            tag,
+            value: value.to_string(),
+            expected,
+        })
+    }
+}
+
+/// Parse a tag that has to be a UUID, returning it in its canonical form.
+///
+/// `d` is the natural key of an order and of a dispute: it is what versions
+/// are grouped by and what the projections are keyed on. A value that is not
+/// a UUID — an empty string above all — would merge unrelated events into one
+/// order, so the shape is checked here rather than trusted.
+pub(crate) fn uuid(tag: &'static str, value: &str) -> Result<String, ParseError> {
+    ::uuid::Uuid::parse_str(value)
+        .map(|uuid| uuid.to_string())
+        .map_err(|_| ParseError::UnknownValue {
+            tag,
+            value: value.to_string(),
+            expected: "a UUID",
+        })
+}
+
+/// Check the `z` discriminator of a kind that publishes one.
+///
+/// The kind number says which parser to use; `z` says what the publisher
+/// meant the event to be. They agree on every event ever captured, and an
+/// event where they disagree is one nobody has a use for.
+pub(crate) fn expect_discriminator(
+    event: &Event,
+    expected: &'static str,
+) -> Result<(), ParseError> {
+    let found = required(event, "z")?;
+
+    if found == expected {
+        Ok(())
+    } else {
+        Err(ParseError::UnknownValue {
+            tag: "z",
+            value: found,
+            expected,
+        })
+    }
+}
+
 /// Parse a required numeric tag, naming what the value should have looked like.
 pub(crate) fn number<T: std::str::FromStr>(
     tag: &'static str,

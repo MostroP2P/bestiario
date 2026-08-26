@@ -14,11 +14,17 @@
 
 use nostr_sdk::prelude::Event;
 
-use super::{ParseError, expect_kind, number, optional, required, tag_values};
+use super::{
+    ParseError, expect_discriminator, expect_kind, finite, number, optional, required, tag_values,
+    uuid,
+};
 use crate::network::Network;
 
 /// The kind this parser accepts.
 pub const KIND: u16 = 38383;
+
+/// The value of the `z` tag an order carries.
+pub const DISCRIMINATOR: &str = "order";
 
 /// Which side the *maker* is on, as published in the `k` tag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -145,6 +151,7 @@ impl FiatAmount {
 /// Turn a 38383 event into an [`OrderVersion`].
 pub fn parse(event: &Event) -> Result<OrderVersion, ParseError> {
     expect_kind(event, KIND)?;
+    expect_discriminator(event, DISCRIMINATOR)?;
 
     let network = optional(event, "network")?
         .map(|value| parse_network(&value))
@@ -152,7 +159,7 @@ pub fn parse(event: &Event) -> Result<OrderVersion, ParseError> {
 
     Ok(OrderVersion {
         event_id: event.id.to_hex(),
-        order_id: required(event, "d")?,
+        order_id: uuid("d", &required(event, "d")?)?,
         pubkey: event.pubkey.to_hex(),
         created_at: event.created_at.as_secs() as i64,
         direction: Direction::parse(&required(event, "k")?)?,
@@ -161,7 +168,7 @@ pub fn parse(event: &Event) -> Result<OrderVersion, ParseError> {
         amount_sats: number("amt", &required(event, "amt")?, "an amount in sats")?,
         fiat: parse_fiat_amount(event)?,
         payment_methods: parse_payment_methods(event)?,
-        premium: number("premium", &required(event, "premium")?, "a percentage")?,
+        premium: finite("premium", &required(event, "premium")?, "a percentage")?,
         network,
         expires_at: number(
             "expires_at",
@@ -178,10 +185,10 @@ fn parse_fiat_amount(event: &Event) -> Result<FiatAmount, ParseError> {
 
     match values.as_slice() {
         [] => Err(ParseError::EmptyTag { tag: "fa" }),
-        [amount] => Ok(FiatAmount::Fixed(number("fa", amount, "a fiat amount")?)),
+        [amount] => Ok(FiatAmount::Fixed(finite("fa", amount, "a fiat amount")?)),
         [min, max] => Ok(FiatAmount::Range {
-            min: number("fa", min, "the minimum of a range")?,
-            max: number("fa", max, "the maximum of a range")?,
+            min: finite("fa", min, "the minimum of a range")?,
+            max: finite("fa", max, "the maximum of a range")?,
         }),
         values => Err(ParseError::WrongValueCount {
             tag: "fa",
