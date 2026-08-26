@@ -17,15 +17,20 @@
 
 pub mod dev_fee;
 pub mod dispute;
+pub mod identity;
 pub mod info;
 pub mod order;
 pub mod rates;
 pub mod relay_list;
 
+pub use identity::{MOSTRO, instance_name, is_mostro, platform};
+
 #[cfg(test)]
 pub(crate) mod fixtures;
 
 use nostr_sdk::prelude::Event;
+
+use crate::network::Network;
 
 /// Why an event could not be turned into a typed value.
 ///
@@ -287,4 +292,28 @@ pub(crate) fn number<T: std::str::FromStr>(
         value: value.to_string(),
         expected,
     })
+}
+
+/// The `network` tag, shared by orders (38383) and dev fees (8383).
+///
+/// An unrecognised value is an error rather than a `None`: the network filter
+/// of `docs/SPEC.md` §8.1 decides what to count, and a network it has never
+/// heard of has to be seen by whoever runs the indexer instead of quietly
+/// joining the mainnet figures.
+pub(crate) fn optional_network(event: &Event) -> Result<Option<Network>, ParseError> {
+    let Some(value) = optional(event, "network")? else {
+        return Ok(None);
+    };
+
+    match value.as_str() {
+        "mainnet" => Ok(Some(Network::Mainnet)),
+        "testnet" => Ok(Some(Network::Testnet)),
+        "signet" => Ok(Some(Network::Signet)),
+        "regtest" => Ok(Some(Network::Regtest)),
+        _ => Err(ParseError::UnknownValue {
+            tag: "network",
+            value,
+            expected: "`mainnet`, `testnet`, `signet` or `regtest`",
+        }),
+    }
 }

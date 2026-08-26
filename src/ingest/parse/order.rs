@@ -16,7 +16,7 @@ use nostr_sdk::prelude::Event;
 
 use super::{
     ParseError, expect_discriminator, expect_kind, finite, non_blank, non_negative, number,
-    optional, required, tag_values, uuid,
+    optional_network, required, tag_values, uuid,
 };
 use crate::network::Network;
 
@@ -153,10 +153,6 @@ pub fn parse(event: &Event) -> Result<OrderVersion, ParseError> {
     expect_kind(event, KIND)?;
     expect_discriminator(event, DISCRIMINATOR)?;
 
-    let network = optional(event, "network")?
-        .map(|value| parse_network(&value))
-        .transpose()?;
-
     Ok(OrderVersion {
         event_id: event.id.to_hex(),
         order_id: uuid("d", &required(event, "d")?)?,
@@ -173,7 +169,7 @@ pub fn parse(event: &Event) -> Result<OrderVersion, ParseError> {
         fiat: parse_fiat_amount(event)?,
         payment_methods: parse_payment_methods(event)?,
         premium: finite("premium", &required(event, "premium")?, "a percentage")?,
-        network,
+        network: optional_network(event)?,
         expires_at: non_negative(
             "expires_at",
             number::<i64>(
@@ -235,24 +231,6 @@ fn parse_payment_methods(event: &Event) -> Result<Vec<String>, ParseError> {
 /// A fiat amount is a quantity of money: finite, and never negative.
 fn fiat_amount(value: &str, expected: &'static str) -> Result<f64, ParseError> {
     non_negative("fa", finite("fa", value, expected)?, expected)
-}
-
-/// An unrecognised network is an error rather than a `None`: the network
-/// filter of `docs/SPEC.md` §8.1 decides what to count, and a value it has
-/// never heard of has to be seen by whoever runs the indexer instead of
-/// quietly joining the mainnet figures.
-fn parse_network(value: &str) -> Result<Network, ParseError> {
-    match value {
-        "mainnet" => Ok(Network::Mainnet),
-        "testnet" => Ok(Network::Testnet),
-        "signet" => Ok(Network::Signet),
-        "regtest" => Ok(Network::Regtest),
-        _ => Err(ParseError::UnknownValue {
-            tag: "network",
-            value: value.to_string(),
-            expected: "`mainnet`, `testnet`, `signet` or `regtest`",
-        }),
-    }
 }
 
 #[cfg(test)]
