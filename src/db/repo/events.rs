@@ -17,7 +17,8 @@ pub struct EventRecord {
     pub kind: i64,
     /// The event's own `created_at`, not the moment it was received.
     pub created_at: i64,
-    /// The `d` tag of an addressable event; `None` for the regular kinds.
+    /// The `d` tag of an addressable event; `None` for the regular kinds, and
+    /// `None` too when the event repeats the tag and so has no single key.
     pub d_tag: Option<String>,
     pub raw_json: String,
     pub relay_url: String,
@@ -34,6 +35,8 @@ impl EventRecord {
             kind: i64::from(event.kind.as_u16()),
             created_at: event.created_at.as_secs() as i64,
             d_tag: crate::ingest::parse::tag_values(event, "d")
+                .ok()
+                .flatten()
                 .and_then(|values| values.first().cloned()),
             raw_json: event.as_json(),
             relay_url: relay_url.to_string(),
