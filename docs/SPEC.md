@@ -617,22 +617,52 @@ Default output is a table; `--json` emits `{ "generated_at", "range",
 - **E2E**: `nostr-sdk` with the `local-relay` feature (as the daemon uses):
   start a local relay, publish fixtures, run `backfill` + `stats --json` and
   compare with the expected result.
-- Coverage target ≥ 80% (`cargo-llvm-cov`).
+- Coverage (`cargo-llvm-cov`) is enforced in two steps:
+  - **≥ 80%** from the moment the E2E test exists, which is what makes the
+    number mean something. Below that the figure only measures how much
+    scaffolding has been written.
+  - **≥ 95% overall, and 100% for the pure layers** (`crates/stats` and
+    `ingest::parse`) in the hardening phase (§13.4). Those two layers are
+    plain functions over plain data with no I/O to stand in the way, so
+    anything uncovered there is a case nobody thought about rather than a
+    case that is awkward to reach.
+
+  The overall gate stops short of 100% deliberately. The residue is I/O
+  failure handling — a relay that drops mid-subscription, a disk that fills
+  — where a test costs more to write and maintain than the line is worth.
+  What is *not* acceptable is leaving an aggregation or a parser branch
+  uncovered, which is why those two are held to 100% separately rather than
+  averaged into a single number that can hide them.
 
 ## 13. Phases
 
 High-level ordering only. The PR-by-PR breakdown lives in
-`docs/ROADMAP.md`, which splits these four into six numbered phases
-(0–5) with dependencies; when the two disagree, the roadmap is the
-operational plan and this section is the intent.
+`docs/ROADMAP.md`, which splits these five into seven numbered phases
+(0–6, since the foundations below come before phase 1 here) with
+dependencies; when the two disagree, the roadmap is the operational
+plan and this section is the intent.
 
 1. **Core**: config, migrations, Nostr client, ingestion of
    38383/8383/38386/38385, projections, `backfill`, `sync`,
-   `stats orders|dev-fees|disputes`, `instances`. Table + JSON.
+   `stats orders|dev-fees|disputes`, `instances`. Table + JSON. Ends with a
+   **`README.md`**: what bestiario is, what it can and cannot measure, how to
+   install and configure it, and a worked example of every command that
+   exists by then. This is the first point at which the tool is usable by
+   someone who did not write it, and it does not ship without the document
+   that makes that true.
 2. **Valuation**: 30078 ingestion, `stats volume --in USD`, inferred vs.
-   observed volume, pending metrics (time-to-fill, funnel).
+   observed volume, pending metrics (time-to-fill, funnel). The README gains
+   the observed/inferred glossary of §5, since from here on some numbers
+   carry assumptions and a reader has to be able to tell which.
 3. **Discovery**: 10002, `accept_unknown_instances`, monthly series.
-4. **Exposure**: HTTP API over `stats/` (out of this spec's scope).
+4. **Hardening**: raise coverage to the second gate of §12 — ≥ 95% overall
+   and 100% across `crates/stats` and `ingest::parse` — and close whatever
+   the gap analysis turns up. Deliberately its own phase rather than a
+   standing rule: the useful moment to hunt uncovered branches is when the
+   metric catalog has stopped moving, and doing it earlier means writing
+   tests for code that is about to change.
+5. **Exposure**: HTTP API over the aggregation crate (out of this spec's
+   scope).
 
 ## 14. Open questions
 
