@@ -27,6 +27,8 @@ jobs:
         run: cargo fmt --all --check
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - name: roadmap dependency graph
+        run: python3 scripts/check-roadmap.py
       - name: stats layer declares no I/O dependencies
         run: ./scripts/check-stats-deps.sh
       - name: stats layer does not reach std I/O

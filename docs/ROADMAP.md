@@ -20,7 +20,13 @@ source of truth for formats, schema and metrics. This document only answers
   `Depends` column alone, and every row's dependencies are listed in full —
   including the ones a reader might assume from adjacency. The numbering is
   kept monotonic with dependencies wherever possible so the two rarely
-  disagree.
+  disagree, but a row that needs an earlier one has to say so; being the next
+  number is not a dependency.
+- `Depends` is transitive: listing a row implies everything that row depends
+  on. A row therefore names the *ends* of the chains it needs, not every
+  ancestor. The last row of all, PR 45, names enough of them to reach every
+  other row in the plan — checked, not assumed, by the script in
+  [Verifying the graph](#verifying-the-graph).
 - `Depends` lists PRs that must be merged first. PRs with no shared dependency
   can be developed in parallel branches.
 - Deliberate bundling: some rows group several trivial tasks (e.g. all four
@@ -121,8 +127,8 @@ renderer in `report/`.
 | 27 | `feat(cmd): instances — the bestiary` | M | 24, 15 | SPEC §6.5 profiles: name, pubkey, versions, fee, limits, accepted fiat, bond policy, first/last activity, silence detection. `bestiario instances` (list) and `bestiario instance <PUBKEY\|NAME>` (profile + that instance's numbers from §6.1/6.6/6.7 + market share). |
 | 28 | `feat(cmd): summary` | M | 24, 25, 26 | View 1 of SPEC §6.10: created, completed, rate, sats volume, active instances, top fiat, top methods, open disputes, for the selected range. Table and JSON. |
 | 29 | `feat(cmd): compare and orders <ID>` | M | 27, 28 | Bundled: view 3 (one row per instance: completed, volume, completion rate, fee, dev fee sent, dispute rate, version) and the single-order lifecycle view (every version in chronological order + its dev fee). Both are thin assemblies over aggregations that already exist. |
-| 30 | `test: end-to-end backfill and stats against a local relay` | M | 20, 28 | SPEC §12 E2E: start the local relay, publish the fixture set, run `backfill` then `summary --json`, compare against a committed expected JSON. Enforce the first of the two coverage gates of SPEC §12 — 80% — in CI from this PR onward; the second is PR 45. |
-| 31 | `docs: README` | M | 30 | The document that turns a working binary into a usable tool: what bestiario is, **what it cannot measure** (SPEC §6.9, stated up front rather than discovered later), install, configure, first backfill, and a worked example — real output, not a synopsis — of every command that exists by then. Deliberately at the end of phase 2 rather than with the rest of the documentation in PR 44: this is the first point at which someone who did not write it can run it, and a tool nobody else can run is not finished. Test: the commands in the README are executed by the E2E suite from PR 30, so a README that has drifted fails CI rather than misleading a reader. |
+| 30 | `test: end-to-end backfill and stats against a local relay` | M | 02, 20, 28 | SPEC §12 E2E: start the local relay, publish the fixture set, run `backfill` then `summary --json`, compare against a committed expected JSON. Enforce the first of the two coverage gates of SPEC §12 — 80% — in CI from this PR onward; the second is PR 45. |
+| 31 | `docs: README` | M | 29, 30 | The document that turns a working binary into a usable tool: what bestiario is, **what it cannot measure** (SPEC §6.9, stated up front rather than discovered later), install, configure, first backfill, and a worked example — real output, not a synopsis — of every command that exists by then. Deliberately at the end of phase 2 rather than with the rest of the documentation in PR 44: this is the first point at which someone who did not write it can run it, and a tool nobody else can run is not finished. Test: the commands in the README are executed by the E2E suite from PR 30, so a README that has drifted fails CI rather than misleading a reader. |
 
 ---
 
@@ -151,7 +157,7 @@ Where the observed/inferred distinction of SPEC §5 starts earning its keep.
 | 41 | `feat(ingest): accept unknown instances` | S | 18 | Honour `accept_unknown_instances = true`: any pubkey publishing events with `y = ["mostro", …]` is indexed and auto-registered in `instances`. Test: an unknown pubkey is rejected with the flag off and stored with it on. |
 | 42 | `feat(cmd): series` | L | 34, 24 | `bestiario series <metric> --by month\|week\|day --split instance\|kind\|fiat`, over any metric family from §6.1/6.2/6.6/6.7, with Δ per bucket. Needs a small metric-registry indirection so new metrics become series-able without touching this command. |
 | 43 | `feat(cmd): market <FIAT>` | M | 37, 38 | View 5 of SPEC §6.10 for a single currency: buy/sell pressure, premium, methods, time to fill, and which instances trade it. |
-| 44 | `docs: usage guide and metric glossary` | M | 42 | Extends the README of PR 31 to cover what phases 3 and 4 added: a worked example of every remaining view, and — the part that matters — a glossary separating **observed**, **inferred** and **derived** per SPEC §5. From phase 3 onward some numbers carry an assumption, and a reader who cannot tell which will quote an inferred figure as a measurement. |
+| 44 | `docs: usage guide and metric glossary` | M | 31, 42 | Extends the README of PR 31 to cover what phases 3 and 4 added: a worked example of every remaining view, and — the part that matters — a glossary separating **observed**, **inferred** and **derived** per SPEC §5. From phase 3 onward some numbers carry an assumption, and a reader who cannot tell which will quote an inferred figure as a measurement. |
 
 ---
 
@@ -163,7 +169,7 @@ moving; done earlier it means writing tests for code that is about to change.
 
 | # | Title | Size | Depends | Scope |
 |---|---|---|---|---|
-| 45 | `test: raise coverage to the second gate` | L | 44 | Raise the CI gate from the 80% of PR 30 to **≥ 95% overall, and 100% for `crates/stats` and `ingest::parse`** (SPEC §12). Those two layers are plain functions over plain data, so an uncovered line there is a case nobody thought about, not a case that is awkward to reach — which is why they are gated separately instead of averaged into one number that can hide them. Work: a per-crate coverage report in CI, then close the gaps, which in practice means the parser branches for malformed tags and the aggregation branches for empty and single-element inputs. The overall gate stops at 95% on purpose: the residue is I/O failure handling — a relay dropping mid-subscription, a full disk — where the test costs more than the line is worth, and that judgement is recorded here rather than left as an unexplained shortfall. |
+| 45 | `test: raise coverage to the second gate` | L | 22, 36, 37, 38, 39, 40, 41, 42, 43, 44 | Raise the CI gate from the 80% of PR 30 to **≥ 95% overall, and 100% for `crates/stats` and `ingest::parse`** (SPEC §12). Those two layers are plain functions over plain data, so an uncovered line there is a case nobody thought about, not a case that is awkward to reach — which is why they are gated separately instead of averaged into one number that can hide them. Work: a per-crate coverage report in CI, then close the gaps, which in practice means the parser branches for malformed tags and the aggregation branches for empty and single-element inputs. The overall gate stops at 95% on purpose: the residue is I/O failure handling — a relay dropping mid-subscription, a full disk — where the test costs more than the line is worth, and that judgement is recorded here rather than left as an unexplained shortfall. |
 
 ---
 
@@ -180,6 +186,22 @@ and the metric set has stopped moving.
 | 49 | `feat(api): OpenAPI schema and JSON contract tests` | M | 47 | Generated schema plus tests asserting the HTTP JSON matches the CLI `--json` envelope exactly — one contract, two transports. |
 
 ---
+
+## Verifying the graph
+
+Two properties are worth checking mechanically rather than by reading, because
+both failed review at least once:
+
+1. Numbering is contiguous, and every `Depends` entry names a row that exists
+   and precedes it.
+2. **Every row is reachable from PR 45.** The hardening pass measures coverage
+   of the finished project, so anything it does not transitively depend on is
+   work that could legitimately land after it — which would make the coverage
+   figure a measurement of an incomplete tree.
+
+```bash
+python3 scripts/check-roadmap.py
+```
 
 ## Sequencing notes
 
