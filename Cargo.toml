@@ -1,6 +1,45 @@
-[package]
-name = "bestiario"
+[workspace]
+members = ["crates/stats"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+repository = "https://github.com/MostroP2P/bestiario"
+
+# Shared so that the workspace pins one version of anything both crates use.
+[workspace.dependencies]
+chrono = "0.4.45"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+thiserror = "2.0.20"
+uuid = { version = "1.25", features = ["serde"] }
+
+[package]
+name = "bestiario"
+description = "Indexes the public Nostr events published by Mostro instances and produces network-wide statistics"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
+bestiario-stats = { path = "crates/stats" }
+
+nostr-sdk = "0.45.2"
+mostro-core = "0.14.5"
+sqlx = { version = "0.9.0", features = ["sqlite", "runtime-tokio", "migrate"] }
+tokio = { version = "1.53", features = ["macros", "rt-multi-thread", "signal"] }
+toml = "1.1"
+config = "0.15"
+clap = { version = "4.6", features = ["derive"] }
+comfy-table = "8.0"
+anyhow = "1.0.104"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true

@@ -1,0 +1,33 @@
+# Applied to the stats crate only, via CLIPPY_CONF_DIR in CI.
+#
+# Cargo already keeps the I/O *crates* out of this crate's dependency list, so
+# sqlx, nostr-sdk, tokio and reqwest are unreachable here. What cargo cannot
+# keep out is `std`, which is always in scope and can open files, sockets and
+# processes. These are the entry points into it.
+#
+# clippy resolves paths rather than matching text, so `use std::{fs::File,
+# io::Write}` is caught the same as `std::fs::File` written out in full.
+
+disallowed-types = [
+    { path = "std::fs::File", reason = "the stats crate performs no I/O (docs/SPEC.md §8)" },
+    { path = "std::fs::OpenOptions", reason = "the stats crate performs no I/O" },
+    { path = "std::fs::DirBuilder", reason = "the stats crate performs no I/O" },
+    { path = "std::net::TcpStream", reason = "the stats crate performs no I/O" },
+    { path = "std::net::TcpListener", reason = "the stats crate performs no I/O" },
+    { path = "std::net::UdpSocket", reason = "the stats crate performs no I/O" },
+    { path = "std::process::Command", reason = "the stats crate spawns nothing" },
+]
+
+disallowed-methods = [
+    { path = "std::fs::read", reason = "the stats crate performs no I/O (docs/SPEC.md §8)" },
+    { path = "std::fs::read_to_string", reason = "the stats crate performs no I/O" },
+    { path = "std::fs::write", reason = "the stats crate performs no I/O" },
+    { path = "std::fs::copy", reason = "the stats crate performs no I/O" },
+    { path = "std::fs::remove_file", reason = "the stats crate performs no I/O" },
+    { path = "std::fs::remove_dir_all", reason = "the stats crate performs no I/O" },
+    { path = "std::fs::create_dir", reason = "the stats crate performs no I/O" },
+    { path = "std::fs::create_dir_all", reason = "the stats crate performs no I/O" },
+    { path = "std::io::stdin", reason = "the stats crate returns values, it does not read input" },
+    { path = "std::io::stdout", reason = "the stats crate returns values; rendering lives in report/" },
+    { path = "std::io::stderr", reason = "the stats crate returns values; logging is the caller's job" },
+]
