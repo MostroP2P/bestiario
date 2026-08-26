@@ -95,6 +95,12 @@ where
 /// `canceled_at` from the *first* version to reach that status, because an
 /// instance republishes a status when some other field changes and the sale
 /// happened at the first one.
+///
+/// Two versions can share a `created_at`, since it has one-second resolution.
+/// NIP-01 settles that tie for an addressable event by retaining the
+/// lexicographically **lowest** event id, so that is the version projected
+/// here: picking the other one would make bestiario disagree with what the
+/// relays themselves keep.
 pub async fn refresh_projection<'e, E>(executor: E, order_id: &str) -> Result<(), sqlx::Error>
 where
     E: Executor<'e, Database = Sqlite>,
@@ -110,7 +116,7 @@ where
                 span.success_at, span.canceled_at
          FROM (
              SELECT * FROM order_versions WHERE order_id = ?1
-             ORDER BY created_at DESC, event_id DESC LIMIT 1
+             ORDER BY created_at DESC, event_id ASC LIMIT 1
          ) AS latest
          JOIN (
              SELECT MIN(created_at) AS first_seen_at,
