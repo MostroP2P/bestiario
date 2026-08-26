@@ -26,9 +26,9 @@ jobs:
       - name: cargo fmt
         run: cargo fmt --all --check
       - name: cargo clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - name: stats layer performs no I/O
-        run: ./scripts/check-stats-purity.sh
+        run: ./scripts/check-stats-deps.sh
 
   test:
     name: Test
@@ -38,7 +38,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: cargo test
-        run: cargo test --all-features
+        run: cargo test --workspace --all-features
 
   coverage:
     name: Coverage
@@ -54,4 +54,4 @@ jobs:
         # Reported, not enforced. The 80% gate of docs/SPEC.md §12 is turned on
         # in roadmap PR 30, once the E2E test exists to make the number mean
         # something.
-        run: cargo llvm-cov --all-features --summary-only
+        run: cargo llvm-cov --workspace --all-features --summary-only
