@@ -11,6 +11,7 @@
 
 mod csv;
 
+pub mod dev_fees;
 pub mod events;
 pub mod instances;
 pub mod orders;
