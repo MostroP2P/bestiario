@@ -39,7 +39,7 @@ about enters the system through a 38383.
 | `premium` | premium % | premium distribution |
 | `network` | `mainnet`, `testnet`, … | filter out test networks |
 | `expires_at` | unix ts | order TTL |
-| `y` | `["mostro", instance_name?]` | **instance name** |
+| `y` | `[platform, instance_name?]` | **platform filter** + instance name |
 | `z` | `order` | discriminator |
 | `rating` | maker reputation JSON | ignored (out of scope) |
 
@@ -53,6 +53,19 @@ Notes:
   software — the quickest way to tell that a node is a Mostro node — and the
   second identifies the instance. The second value is optional: an instance
   with no configured name publishes just `["mostro"]`. See §3.
+- **Not every NIP-69 order on the Mostro relays is a Mostro order.** A 200-order
+  sample of `wss://relay.mostro.network` (2026-08-26, see
+  `tests/fixtures/README.md`) carried orders with `y[0]` = `telegram`,
+  `hodlhodl`, `Bitblik` and `Bitway` alongside `mostro`. bestiario measures the
+  Mostro network, so ingestion filters on `y[0] == "mostro"` (§8.1); without it
+  `accept_unknown_instances = true` would fold other platforms into the figures.
+- `expires_at` is published by **every** Mostro order in that sample (175/175);
+  the orders that omitted it all came from other platforms. Treat it as
+  mandatory for `y[0] == "mostro"`.
+- Real events carry tags this table does not list — `layer`, `expiration`
+  (NIP-40), `source`, `name`, `bond`, `reserved_at`, `created_at`, `paid_at`,
+  `category`, `taker_fees`. They are not parsed; `events.raw_json` keeps them
+  so a later phase can use them without re-capturing.
 - Addressable: the relay keeps only the latest version per
   `(pubkey, kind, d)`. bestiario persists **every version** it sees
   (`order_versions`) to reconstruct the lifecycle.
@@ -113,6 +126,12 @@ Tags used: `fee`, `max_order_amount`, `min_order_amount`,
 `fiat_currencies_accepted` (csv), `mostro_version`, `mostro_commit_hash`,
 `protocol_version`, `lnd_networks`, `bond_enabled`, `bond_*`, `y`, `z`=`info`.
 
+`protocol_version` is **optional**: 2 of the 20 instances sampled on
+2026-08-26 omit it. Real events also carry `expiration_hours`,
+`expiration_seconds`, `max_orders_per_response`, `pow`, `pow_first_contact`,
+the hold-invoice window/CLTV parameters and a set of `lnd_*` fields; they are
+unparsed and kept in `events.raw_json`.
+
 Every version is persisted (history of `fee`, which changes over time; the
 value in force *at the time of the order* is needed).
 
@@ -138,6 +157,13 @@ name comes from the second value of the `y` tag of any event (38383, 8383,
 [NIP-69](https://nips.nostr.com/69) `y` tag described in §2.1, where the first
 value is always the software (`mostro`) and the second the node name. Rules:
 
+- **A third of the network publishes no name.** 9 of the 22 Mostro instances
+  in the 2026-08-26 sample send `y = ["mostro"]` with nothing after it, so an
+  unnamed instance is the normal case, not an edge case: reports must render
+  it and `--instance` must resolve it by pubkey alone.
+- The same instance may publish its name on one kind and omit it on another
+  (`b3626fe9…` names itself on its orders and not on its disputes), so the
+  name is taken from whichever event carries it.
 - The most recently observed name wins (`instances.name`, `name_seen_at`).
 - The name history is also kept in `instance_names` in case an instance is
   renamed.
@@ -514,11 +540,13 @@ that reaches for them does not compile.
 2. `event.verify()` (signature + id). On failure → discard and log.
 3. `pubkey ∈ configured instances` (or `accept_unknown_instances = true`) →
    otherwise discard.
-4. Filter `network` per config (`networks = ["mainnet"]`) for 38383/8383.
-5. Dedup: `INSERT OR IGNORE INTO events`. If it already existed → stop.
-6. Parse by kind → insert into the specific table + update the projection
+4. `y[0] == "mostro"` → otherwise discard: the Mostro relays also carry
+   NIP-69 orders from other platforms (§2.1).
+5. Filter `network` per config (`networks = ["mainnet"]`) for 38383/8383.
+6. Dedup: `INSERT OR IGNORE INTO events`. If it already existed → stop.
+7. Parse by kind → insert into the specific table + update the projection
    (`orders`/`disputes`/`instances`) in the same transaction.
-7. Advance `sync_state(relay, kind)` to the `max(created_at)` seen.
+8. Advance `sync_state(relay, kind)` to the `max(created_at)` seen.
 
 ### 8.2 Backfill and live sync
 
@@ -680,5 +708,5 @@ plan and this section is the intent.
 - Dispute rate: since 38386 has no `order-id`, should we propose adding the
   tag to `mostro`? It would be a small upstream change and would make the
   metric observable.
-- Instances that publish no name in `y`: keep a manual alias in config
-  (`[instances.aliases]`)?
+- Instances that publish no name in `y` (a third of the network, §3): keep a
+  manual alias in config (`[instances.aliases]`)?
