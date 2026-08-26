@@ -15,8 +15,8 @@
 use nostr_sdk::prelude::Event;
 
 use super::{
-    ParseError, expect_discriminator, expect_kind, finite, number, optional, required, tag_values,
-    uuid,
+    ParseError, expect_discriminator, expect_kind, finite, non_blank, non_negative, number,
+    optional, required, tag_values, uuid,
 };
 use crate::network::Network;
 
@@ -165,14 +165,22 @@ pub fn parse(event: &Event) -> Result<OrderVersion, ParseError> {
         direction: Direction::parse(&required(event, "k")?)?,
         status: Status::parse(&required(event, "s")?)?,
         fiat_code: required(event, "f")?,
-        amount_sats: number("amt", &required(event, "amt")?, "an amount in sats")?,
+        amount_sats: non_negative(
+            "amt",
+            number("amt", &required(event, "amt")?, "an amount in sats")?,
+            "an amount in sats",
+        )?,
         fiat: parse_fiat_amount(event)?,
         payment_methods: parse_payment_methods(event)?,
         premium: finite("premium", &required(event, "premium")?, "a percentage")?,
         network,
-        expires_at: number(
+        expires_at: non_negative(
             "expires_at",
-            &required(event, "expires_at")?,
+            number::<i64>(
+                "expires_at",
+                &required(event, "expires_at")?,
+                "a unix timestamp",
+            )?,
             "a unix timestamp",
         )?,
     })
@@ -181,15 +189,28 @@ pub fn parse(event: &Event) -> Result<OrderVersion, ParseError> {
 /// `fa` with one value is an amount; with two it is the `[min, max]` of a
 /// pending range order. Any other count is malformed.
 fn parse_fiat_amount(event: &Event) -> Result<FiatAmount, ParseError> {
-    let values = tag_values(event, "fa").ok_or(ParseError::MissingTag { tag: "fa" })?;
+    let values = tag_values(event, "fa")?.ok_or(ParseError::MissingTag { tag: "fa" })?;
 
     match values.as_slice() {
         [] => Err(ParseError::EmptyTag { tag: "fa" }),
-        [amount] => Ok(FiatAmount::Fixed(finite("fa", amount, "a fiat amount")?)),
-        [min, max] => Ok(FiatAmount::Range {
-            min: finite("fa", min, "the minimum of a range")?,
-            max: finite("fa", max, "the maximum of a range")?,
-        }),
+        [amount] => Ok(FiatAmount::Fixed(fiat_amount(amount, "a fiat amount")?)),
+        [min, max] => {
+            let min = fiat_amount(min, "the minimum of a range")?;
+            let max = fiat_amount(max, "the maximum of a range")?;
+
+            // A range order is an invitation to pick a number between the
+            // two. Inverted, it invites nothing, and every later comparison
+            // against it — does this order cover 10 000 ARS? — silently
+            // answers no.
+            if min > max {
+                return Err(ParseError::InvertedRange {
+                    tag: "fa",
+                    min,
+                    max,
+                });
+            }
+            Ok(FiatAmount::Range { min, max })
+        }
         values => Err(ParseError::WrongValueCount {
             tag: "fa",
             count: values.len(),
@@ -200,12 +221,20 @@ fn parse_fiat_amount(event: &Event) -> Result<FiatAmount, ParseError> {
 
 /// `pm` carries one value per method, all in a single tag.
 fn parse_payment_methods(event: &Event) -> Result<Vec<String>, ParseError> {
-    let values = tag_values(event, "pm").ok_or(ParseError::MissingTag { tag: "pm" })?;
+    let values = tag_values(event, "pm")?.ok_or(ParseError::MissingTag { tag: "pm" })?;
 
     if values.is_empty() {
         return Err(ParseError::EmptyTag { tag: "pm" });
     }
-    Ok(values)
+    values
+        .into_iter()
+        .map(|method| non_blank("pm", method, "a payment method"))
+        .collect()
+}
+
+/// A fiat amount is a quantity of money: finite, and never negative.
+fn fiat_amount(value: &str, expected: &'static str) -> Result<f64, ParseError> {
+    non_negative("fa", finite("fa", value, expected)?, expected)
 }
 
 /// An unrecognised network is an error rather than a `None`: the network

@@ -63,40 +63,143 @@ pub enum ParseError {
         count: usize,
         expected: &'static str,
     },
+
+    #[error("`{tag}` appears {count} times: expected it once")]
+    RepeatedTag { tag: &'static str, count: usize },
+
+    #[error("`{tag}` is blank: expected {expected}")]
+    BlankValue {
+        tag: &'static str,
+        expected: &'static str,
+    },
+
+    #[error("`{tag}` = `{value}`: expected {expected}")]
+    OutOfRange {
+        tag: &'static str,
+        value: String,
+        expected: &'static str,
+    },
+
+    #[error("`{tag}` = `[{min}, {max}]`: expected the minimum not to exceed the maximum")]
+    InvertedRange {
+        tag: &'static str,
+        min: f64,
+        max: f64,
+    },
 }
 
-/// Every value of the first `name` tag, or `None` if the event has no such tag.
+/// The values of every occurrence of the `name` tag.
 ///
-/// Nostr allows repeated tags; Mostro does not use them, so the first
-/// occurrence is the one that counts and a second would be invisible here.
-pub(crate) fn tag_values(event: &Event, name: &str) -> Option<Vec<String>> {
+/// Nostr allows a tag to repeat. Only 10002 uses that (one `r` per relay);
+/// for every other kind a repeat means two answers to a question that has
+/// one, which is why [`tag_values`] refuses to pick between them.
+pub(crate) fn repeated_tag_values(event: &Event, name: &str) -> Vec<Vec<String>> {
     event
         .tags
         .iter()
         .map(|tag| tag.clone().to_vec())
-        .find(|values| values.first().map(String::as_str) == Some(name))
+        .filter(|values| values.first().map(String::as_str) == Some(name))
         .map(|values| values[1..].to_vec())
+        .collect()
 }
 
-/// The single value of a required tag.
-pub(crate) fn required(event: &Event, tag: &'static str) -> Result<String, ParseError> {
-    let values = tag_values(event, tag).ok_or(ParseError::MissingTag { tag })?;
-    match values.len() {
-        0 => Err(ParseError::EmptyTag { tag }),
-        1 => Ok(values.into_iter().next().expect("length checked")),
-        count => Err(ParseError::WrongValueCount {
-            tag,
-            count,
-            expected: "exactly one value",
-        }),
+/// The values of the `name` tag, or `None` if the event has no such tag.
+///
+/// A repeated tag is an error rather than a first-one-wins: an event that
+/// publishes `d` twice has no single natural key, and silently taking the
+/// first would let the second say anything at all.
+pub(crate) fn tag_values(
+    event: &Event,
+    name: &'static str,
+) -> Result<Option<Vec<String>>, ParseError> {
+    let mut occurrences = repeated_tag_values(event, name);
+
+    match occurrences.len() {
+        0 => Ok(None),
+        1 => Ok(Some(occurrences.remove(0))),
+        count => Err(ParseError::RepeatedTag { tag: name, count }),
     }
 }
 
-/// The single value of a tag that may be absent, but not empty if present.
+/// The single, non-blank value of a required tag.
+///
+/// A blank value is rejected rather than stored: `["f", ""]` would open a
+/// currency bucket named after nothing, and `["pm", ""]` a payment method
+/// nobody offers.
+pub(crate) fn required(event: &Event, tag: &'static str) -> Result<String, ParseError> {
+    let values = tag_values(event, tag)?.ok_or(ParseError::MissingTag { tag })?;
+    let value = match values.len() {
+        0 => return Err(ParseError::EmptyTag { tag }),
+        1 => values.into_iter().next().expect("length checked"),
+        count => {
+            return Err(ParseError::WrongValueCount {
+                tag,
+                count,
+                expected: "exactly one value",
+            });
+        }
+    };
+
+    non_blank(tag, value, "a value")
+}
+
+/// The single value of a tag that may be absent.
+///
+/// A tag published with a blank value reads as absent. Real instances do
+/// publish `["fiat_currencies_accepted", ""]` and `["lnd_uris", ""]`, and
+/// "published nothing" and "published an empty string" are not two different
+/// answers worth storing apart.
 pub(crate) fn optional(event: &Event, tag: &'static str) -> Result<Option<String>, ParseError> {
-    match tag_values(event, tag) {
-        None => Ok(None),
-        Some(_) => required(event, tag).map(Some),
+    let Some(values) = tag_values(event, tag)? else {
+        return Ok(None);
+    };
+    let value = match values.len() {
+        0 => return Ok(None),
+        1 => values.into_iter().next().expect("length checked"),
+        count => {
+            return Err(ParseError::WrongValueCount {
+                tag,
+                count,
+                expected: "exactly one value",
+            });
+        }
+    };
+
+    Ok(Some(value).filter(|value| !value.trim().is_empty()))
+}
+
+/// Reject a value that is empty or nothing but whitespace.
+pub(crate) fn non_blank(
+    tag: &'static str,
+    value: String,
+    expected: &'static str,
+) -> Result<String, ParseError> {
+    if value.trim().is_empty() {
+        Err(ParseError::BlankValue { tag, expected })
+    } else {
+        Ok(value)
+    }
+}
+
+/// Reject a quantity that cannot be negative — an amount of money, or a
+/// timestamp. A negative one does not just look wrong, it *subtracts* from
+/// the volume figures it lands in.
+pub(crate) fn non_negative<T>(
+    tag: &'static str,
+    value: T,
+    expected: &'static str,
+) -> Result<T, ParseError>
+where
+    T: PartialOrd + Default + std::fmt::Display + Copy,
+{
+    if value < T::default() {
+        Err(ParseError::OutOfRange {
+            tag,
+            value: value.to_string(),
+            expected,
+        })
+    } else {
+        Ok(value)
     }
 }
 

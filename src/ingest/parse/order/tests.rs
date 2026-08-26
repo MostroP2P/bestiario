@@ -183,9 +183,12 @@ fn an_order_whose_d_is_not_a_uuid_is_rejected() {
     }
 
     let error = parse(&order_but("d", &[""])).expect_err("empty d");
-    assert!(
-        matches!(error, ParseError::UnknownValue { tag: "d", .. }),
-        "{error}"
+    assert_eq!(
+        error,
+        ParseError::BlankValue {
+            tag: "d",
+            expected: "a value",
+        }
     );
 }
 
@@ -316,4 +319,78 @@ fn a_missing_network_parses_to_none_because_the_column_allows_it() {
     let order = parse(&order_but("network", &[])).expect("network is optional");
 
     assert_eq!(order.network, None);
+}
+
+#[test]
+fn a_negative_premium_is_kept_because_a_discount_is_a_real_offer() {
+    // 40 of the 200 captured orders publish one. Rejecting negatives here —
+    // as the amounts do — would silently drop every discounted order from the
+    // premium distribution and skew it upwards.
+    let order = parse(&order_but("premium", &["-5"])).expect("a discount is an offer");
+
+    assert_eq!(order.premium, -5.0);
+}
+
+#[test]
+fn a_negative_amount_is_rejected_because_it_would_subtract_from_the_volume() {
+    for (tag, value) in [("amt", "-1"), ("fa", "-1"), ("expires_at", "-1")] {
+        let error = parse(&order_but(tag, &[value])).expect_err(tag);
+
+        assert!(
+            matches!(error, ParseError::OutOfRange { .. }),
+            "{tag}: {error}"
+        );
+    }
+}
+
+#[test]
+fn an_inverted_range_is_rejected() {
+    // A range order is an invitation to pick a number between the two bounds.
+    // Inverted, it invites nothing, and every later "does this order cover
+    // 10 000 ARS?" silently answers no.
+    let error = parse(&order_but("fa", &["350", "5"])).expect_err("inverted range");
+
+    assert_eq!(
+        error,
+        ParseError::InvertedRange {
+            tag: "fa",
+            min: 350.0,
+            max: 5.0,
+        }
+    );
+}
+
+#[test]
+fn a_blank_payment_method_is_rejected() {
+    let error = parse(&order_but("pm", &["PIX", "  "])).expect_err("blank method");
+
+    assert_eq!(
+        error,
+        ParseError::BlankValue {
+            tag: "pm",
+            expected: "a payment method",
+        }
+    );
+}
+
+#[test]
+fn a_blank_fiat_code_is_rejected() {
+    let error = parse(&order_but("f", &[""])).expect_err("blank fiat code");
+
+    assert!(
+        matches!(error, ParseError::BlankValue { tag: "f", .. }),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_tag_published_twice_is_an_error_rather_than_a_first_one_wins() {
+    // An order that publishes `d` twice has no single natural key, and taking
+    // the first would let the second say anything at all.
+    let mut tags = valid_tags();
+    tags.push(("d", vec!["11111111-2222-3333-4444-555555555555"]));
+
+    let error = parse(&order_with(&tags)).expect_err("repeated d");
+
+    assert_eq!(error, ParseError::RepeatedTag { tag: "d", count: 2 });
 }
