@@ -9,6 +9,7 @@ use crate::ingest::parse::fixtures::load;
 
 const MEMORY: &str = "sqlite::memory:";
 const RELAY: &str = "wss://relay.mostro.network";
+const OTHER_RELAY: &str = "wss://relay.damus.io";
 const NOW: i64 = 1_787_800_000;
 
 async fn migrated() -> SqlitePool {
@@ -373,4 +374,30 @@ async fn a_malformed_event_is_rejected_but_stays_in_the_archive() {
     ));
     assert_eq!(count(&pool, EVENTS).await, 1);
     assert_eq!(count(&pool, ORDER_VERSIONS).await, 0);
+}
+
+#[tokio::test]
+async fn a_duplicate_from_a_second_relay_advances_that_relay_s_cursor() {
+    // Arrange
+    let pool = migrated().await;
+    let event = load(38383, "pending_range");
+    let pipeline = pipeline(&pool, open_policy());
+    pipeline.ingest(&event, RELAY, NOW).await.expect("first");
+
+    // Act
+    let outcome = pipeline
+        .ingest(&event, OTHER_RELAY, NOW)
+        .await
+        .expect("second relay");
+
+    // Assert
+    assert_eq!(outcome, IngestOutcome::Duplicate);
+    assert_eq!(count(&pool, EVENTS).await, 1);
+    // Cursors are per relay: the second relay has genuinely delivered this
+    // far, and leaving it at zero would make it re-send the same backlog.
+    let cursor = repo::sync_state::get(&pool, OTHER_RELAY, 38383)
+        .await
+        .expect("read")
+        .expect("cursor advanced");
+    assert_eq!(cursor.last_created_at, event.created_at.as_secs() as i64);
 }

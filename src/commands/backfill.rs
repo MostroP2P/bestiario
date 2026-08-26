@@ -12,9 +12,16 @@
 //! # Where it stops
 //!
 //! - an empty window, which is the relay saying it holds nothing older;
-//! - a window that came back with room to spare, which says the same thing
-//!   about the whole of the window rather than about its newest page;
 //! - reaching the floor the caller gave (`--from`, or `backfill_from`).
+//!
+//! A window that came back with room to spare is *not* one of them. The limit
+//! in a REQ is what the client asked for, not what the relay promised: a relay
+//! that caps its replies at a hundred events answers a request for five
+//! hundred with a page that looks unfinished and is not. Reading that as the
+//! end of the history would stop the walk at the newest hundred events and
+//! report a complete backfill. Only a window the relay answers with nothing
+//! at all says there is nothing older, so that is what the walk waits for —
+//! at the cost of one more round trip and one deduplicated event per walk.
 //!
 //! # The overlapping second
 //!
@@ -23,10 +30,11 @@
 //! stepping below would skip the rest of them. The one event that repeats is
 //! absorbed by the dedup step of §8.1 and costs a row that is not written.
 //!
-//! That overlap cannot make progress when a *full* window fits inside a
-//! single second — a relay whose limit is smaller than what it holds for that
-//! second. The walk then steps strictly below it and says so in the log:
-//! losing the rest of one second is bad, and looping on it forever is worse.
+//! That overlap cannot make progress when a whole page fits inside a single
+//! second — a relay holding more events in that second than one page carries.
+//! The walk then steps strictly below it, and says so in the log when the page
+//! came back full: losing the rest of one second is bad, and looping on it
+//! forever is worse.
 
 use anyhow::{Context as _, Result};
 use nostr_sdk::prelude::{Event, PublicKey, RelayUrl};
@@ -79,15 +87,22 @@ impl<'a> Backfill<'a> {
 
     /// Walks every connected relay, for every kind, over `range`.
     ///
-    /// Never fails: a relay that stops answering is logged and the walk moves
-    /// on to the next one, because a run that gave up on the first timeout
-    /// would leave the other relays unread for no reason.
-    pub async fn run(&self, kinds: &[u16], range: Range, now: i64) -> Counts {
+    /// A relay that stops answering is logged and the walk moves on to the
+    /// next one, because a run that gave up on the first timeout would leave
+    /// the other relays unread for no reason.
+    ///
+    /// A database that stops answering is the opposite case and is returned:
+    /// once writes are failing every later window fails too, and the archive
+    /// the summary would claim is on disk is not there. Worse, an event whose
+    /// write failed is not retried by the next run — §8.1 reads the archive
+    /// row first — so a run that swallowed the error would report a number it
+    /// cannot back up and exit zero.
+    pub async fn run(&self, kinds: &[u16], range: Range, now: i64) -> Result<Counts> {
         let mut counts = Counts::default();
 
         for relay in self.client.relays() {
             for &kind in kinds {
-                counts += self.walk(relay, kind, range, now).await;
+                counts += self.walk(relay, kind, range, now).await?;
             }
         }
 
@@ -98,11 +113,11 @@ impl<'a> Backfill<'a> {
             "backfill finished"
         );
 
-        counts
+        Ok(counts)
     }
 
     /// One relay, one kind, from the top of `range` down to its floor.
-    async fn walk(&self, relay: &RelayUrl, kind: u16, range: Range, now: i64) -> Counts {
+    async fn walk(&self, relay: &RelayUrl, kind: u16, range: Range, now: i64) -> Result<Counts> {
         let mut counts = Counts::default();
         let mut until = range.until();
 
@@ -129,9 +144,9 @@ impl<'a> Backfill<'a> {
                 break;
             }
 
-            let saturated = events.len() >= self.window_limit;
+            let full_page = events.len() >= self.window_limit;
             let oldest = Self::oldest(&events);
-            counts += self.ingest_all(&events, relay, now).await;
+            counts += self.ingest_all(&events, relay, now).await?;
 
             tracing::info!(
                 %relay,
@@ -142,56 +157,61 @@ impl<'a> Backfill<'a> {
                 "window walked"
             );
 
-            // A window the relay had room to answer in full is the whole of
-            // that window: there is nothing older left inside it to ask for.
-            if !saturated {
-                break;
-            }
-
-            // Otherwise step to the oldest second seen, keeping it, so that
-            // events sharing it are not skipped. `oldest < until` always —
-            // the relay only returns events below the bound — so the walk
-            // always moves, and the strict step below is what keeps it moving
-            // when a full window fits inside one second.
+            // Step to the oldest second seen, keeping it, so that events
+            // sharing it are not skipped. `oldest < until` always — the relay
+            // only returns events below the bound — so the walk always moves,
+            // and the strict step below is what keeps it moving when a whole
+            // page fits inside one second.
             let next = oldest + 1;
             until = if next < until {
                 next
             } else {
-                tracing::warn!(
-                    %relay,
-                    kind,
-                    second = oldest,
-                    limit = self.window_limit,
-                    "a full window fits inside one second; stepping past it, \
-                     events published in that second may be missed"
-                );
+                if full_page {
+                    // Only a page the relay filled to the brim is evidence
+                    // that the second was cut short. A shorter page ending in
+                    // the same second is the relay running out of events, and
+                    // the empty window that follows confirms it.
+                    tracing::warn!(
+                        %relay,
+                        kind,
+                        second = oldest,
+                        limit = self.window_limit,
+                        "a full page fits inside one second; stepping past it, \
+                         events published in that second may be missed"
+                    );
+                }
                 oldest
             };
         }
 
-        counts
+        Ok(counts)
     }
 
     /// Feeds one window to the pipeline, oldest first.
+    ///
+    /// The first write that fails ends the run. `SQLITE_BUSY`, a full disk or
+    /// a projection that will not refresh are not conditions the next event
+    /// recovers from, and an operator reading a summary needs it to be a
+    /// count of what is on disk.
     ///
     /// Order matters for the projections: a version arriving after a newer one
     /// is handled correctly by `refresh_projection`, but replaying in
     /// publication order keeps the intermediate states the projection passes
     /// through the ones the network really went through.
-    async fn ingest_all(&self, events: &[Event], relay: &RelayUrl, now: i64) -> Counts {
+    async fn ingest_all(&self, events: &[Event], relay: &RelayUrl, now: i64) -> Result<Counts> {
         let mut counts = Counts::default();
         let relay_url = relay.to_string();
 
         for event in events.iter().rev() {
-            match self.pipeline.ingest(event, &relay_url, now).await {
-                Ok(outcome) => counts.record(&outcome),
-                Err(error) => {
-                    tracing::error!(id = %event.id, %error, "could not store event");
-                }
-            }
+            let outcome = self
+                .pipeline
+                .ingest(event, &relay_url, now)
+                .await
+                .with_context(|| format!("storing event {} from {relay}", event.id))?;
+            counts.record(&outcome);
         }
 
-        counts
+        Ok(counts)
     }
 
     /// The `created_at` of the oldest event in a window.
@@ -253,9 +273,11 @@ pub async fn run(context: &Context<'_>, kind: Option<u16>, now: i64) -> Result<(
         .run(&kinds, range, now)
         .await;
 
+    // Disconnected whatever the walk decided: leaving sockets open behind a
+    // failed run would keep the relays holding a subscription nobody reads.
     client.shutdown().await;
 
-    report(context, &counts, range);
+    report(context, &counts?, range);
 
     Ok(())
 }
