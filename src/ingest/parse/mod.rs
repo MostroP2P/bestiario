@@ -37,7 +37,7 @@ use crate::network::Network;
 /// Each variant names the offending tag and what was expected of it: a
 /// rejection is only useful if the log line says which event, which tag, and
 /// what the parser wanted instead.
-#[derive(Debug, thiserror::Error, PartialEq)]
+#[derive(Debug, Clone, thiserror::Error, PartialEq)]
 pub enum ParseError {
     #[error("expected kind {expected}, got {found}")]
     WrongKind { expected: u16, found: u16 },
