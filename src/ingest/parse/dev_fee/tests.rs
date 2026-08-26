@@ -128,3 +128,47 @@ fn an_event_of_another_kind_is_rejected_before_any_tag_is_read() {
         }
     );
 }
+
+#[test]
+fn an_order_id_that_is_not_a_uuid_is_rejected() {
+    // The dev fee is joined to its order on this value alone, and the join
+    // has no foreign key to fall back on.
+    let error = dev_fee_but("order-id", Some("not-a-uuid"));
+    let error = parse(&error).expect_err("not a uuid");
+
+    assert!(
+        matches!(
+            error,
+            ParseError::UnknownValue {
+                tag: "order-id",
+                ..
+            }
+        ),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_negative_amount_is_rejected() {
+    // A dev fee is the evidence a trade settled; a negative one would
+    // subtract from the fees collected and, in phase 3, from the volume
+    // inferred from them.
+    let error = parse(&dev_fee_but("amount", Some("-1"))).expect_err("negative amount");
+
+    assert!(
+        matches!(error, ParseError::OutOfRange { tag: "amount", .. }),
+        "{error}"
+    );
+}
+
+#[test]
+fn an_event_without_the_dev_fee_discriminator_is_rejected() {
+    let error = parse(&dev_fee_but("z", None)).expect_err("no z");
+    assert_eq!(error, ParseError::MissingTag { tag: "z" });
+
+    let error = parse(&dev_fee_but("z", Some("order"))).expect_err("wrong z");
+    assert!(
+        matches!(error, ParseError::UnknownValue { tag: "z", .. }),
+        "{error}"
+    );
+}
