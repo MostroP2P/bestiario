@@ -236,6 +236,24 @@ async fn a_range_order_projects_no_single_fiat_amount() {
 }
 
 #[tokio::test]
+async fn versions_sharing_a_second_are_settled_by_the_lower_event_id() {
+    // created_at has one-second resolution, so a tie is possible. NIP-01
+    // retains the lexicographically lowest event id for an addressable event;
+    // projecting the other one would make bestiario disagree with what the
+    // relays keep.
+    let pool = migrated().await;
+    let mut lower = version(T0, Status::Success);
+    lower.event_id = format!("0{}", "a".repeat(63));
+    let mut higher = version(T0, Status::Canceled);
+    higher.event_id = format!("f{}", "a".repeat(63));
+
+    ingest(&pool, &higher).await;
+    ingest(&pool, &lower).await;
+
+    assert_eq!(projection(&pool).await.final_status, Status::Success);
+}
+
+#[tokio::test]
 async fn refreshing_twice_leaves_the_same_row() {
     let pool = migrated().await;
 
