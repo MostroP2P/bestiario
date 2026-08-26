@@ -59,6 +59,15 @@ A corpus that mixed platforms would have led to a parser written to tolerate a
 missing field that Mostro always sends. `every_mostro_order_publishes_expires_at`
 pins this down.
 
+### A pending range order does not always publish `amt = 0`
+
+`pending_range_with_fixed_sats.json` is `pending` with `fa = [5, 350]` **and**
+`amt = 6135`: the maker fixed the sats and left the fiat to the taker, which is
+the mirror image of the market-price order that fixes the fiat and leaves `amt`
+at 0. So `fa` having two values says nothing about `amt`, and neither field can
+be used to infer the other. The fixture was captured as `pending_fixed_amount`
+and renamed once the parser was written against it.
+
 ### Eight of the twenty-two Mostro instances publish no name
 
 Counting across all six captures, 22 distinct pubkeys publish with
@@ -105,10 +114,10 @@ optional in a way §2.4 does not say.
 | `other_platform_bitway.json` | `1d6b0525…` | Bitway | 1787734938 |
 | `other_platform_hodlhodl.json` | `273e7880…` | hodlhodl | 1787738113 |
 | `other_platform_telegram.json` | `a852e1c6…` | NOVARUZBOT🦫 | 1787737406 |
-| `pending_fixed_amount.json` | `82fa8cb9…` | Mostro | 1787723816 |
 | `pending_market_price.json` | `82fa8cb9…` | Mostro | 1787738870 |
 | `pending_multiple_payment_methods.json` | `0000cc02…` | NostroMostro 🇪🇸 | 1787737743 |
 | `pending_range.json` | `82fa8cb9…` | Mostro | 1787740678 |
+| `pending_range_with_fixed_sats.json` | `82fa8cb9…` | Mostro | 1787723816 |
 | `success.json` | `17b520bd…` | Fostro testing | 1787725716 |
 | `with_maker_rating.json` | `00037abd…` | Mostro Brasil | 1787738626 |
 
