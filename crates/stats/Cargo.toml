@@ -6,10 +6,15 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
-# This list *is* the no-I/O invariant of docs/SPEC.md §8, enforced by cargo
-# rather than by convention: sqlx, nostr-sdk, tokio and reqwest are simply not
-# reachable from this crate. scripts/check-stats-deps.sh fails the build if
-# the list grows without someone deciding it should.
+# A direct-dependency allowlist, and half of the no-I/O invariant of
+# docs/SPEC.md §8: because sqlx, nostr-sdk, tokio and reqwest are absent here,
+# they are not reachable from this crate at all. scripts/check-stats-deps.sh
+# fails the build if this list grows without someone deciding it should.
+#
+# Cargo cannot cover the other half. `std` is always in scope and can open
+# files, sockets and processes on its own. That side is enforced by
+# clippy.toml next to this file, which disallows those entry points by
+# resolved path.
 [dependencies]
 chrono.workspace = true
 serde.workspace = true
