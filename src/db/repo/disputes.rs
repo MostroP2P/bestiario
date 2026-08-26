@@ -63,6 +63,12 @@ where
 /// stopped having an initiator, and blanking the projection on such a version
 /// would lose a fact the history still holds.
 ///
+/// Two versions can share a `created_at`, since it has one-second resolution.
+/// NIP-01 settles that tie for an addressable event by retaining the
+/// lexicographically **lowest** event id, so that is the version projected
+/// here: picking the other one would make the dispute counts disagree with
+/// what the relays themselves keep.
+///
 /// A dispute with no versions leaves no row, so that a rebuild that empties
 /// the version table does not resurrect it.
 pub async fn refresh_projection<'e, E>(executor: E, dispute_id: &str) -> Result<(), sqlx::Error>
@@ -77,16 +83,16 @@ where
                 latest.status, known.initiator
          FROM (
              SELECT * FROM dispute_versions WHERE dispute_id = ?1
-             ORDER BY created_at DESC, event_id DESC LIMIT 1
+             ORDER BY created_at DESC, event_id ASC LIMIT 1
          ) AS latest
          JOIN (
              SELECT MAX(created_at) AS last_updated_at,
                     (SELECT opened_at FROM dispute_versions
                      WHERE dispute_id = ?1 AND opened_at IS NOT NULL
-                     ORDER BY created_at DESC, event_id DESC LIMIT 1) AS opened_at,
+                     ORDER BY created_at DESC, event_id ASC LIMIT 1) AS opened_at,
                     (SELECT initiator FROM dispute_versions
                      WHERE dispute_id = ?1 AND initiator IS NOT NULL
-                     ORDER BY created_at DESC, event_id DESC LIMIT 1) AS initiator
+                     ORDER BY created_at DESC, event_id ASC LIMIT 1) AS initiator
              FROM dispute_versions WHERE dispute_id = ?1
          ) AS known
          -- Required, not decoration: without it SQLite reads the following ON

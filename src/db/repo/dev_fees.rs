@@ -20,7 +20,7 @@
 //! before the payment it duplicates; deciding on arrival would flag whichever
 //! one the relay happened to send second.
 
-use sqlx::{Executor, Sqlite};
+use sqlx::{Acquire, Executor, Sqlite};
 
 use crate::ingest::parse::dev_fee::DevFee;
 use crate::network::Network;
@@ -38,13 +38,20 @@ pub struct StoredDevFee {
 /// Stores `fee` and refreshes the duplicate flags of its order.
 ///
 /// Idempotent: re-ingesting the same event leaves one row, still unflagged.
-/// The two statements are separate but the caller is already inside the
-/// pipeline's transaction (SPEC §8.1 step 7), so nothing observes the row
-/// between them.
-pub async fn insert<'e, E>(executor: E, fee: &DevFee) -> Result<(), sqlx::Error>
+///
+/// This is the one repository function that takes an [`Acquire`] rather than
+/// an `Executor`, because it issues two statements. An `Executor` is consumed
+/// by a single `execute`, and the pipeline's executor inside a transaction is
+/// a `&mut` reference, which cannot be copied for a second use. Acquiring once
+/// and reborrowing keeps both statements on the caller's own connection —
+/// against a pool as much as inside the transaction of SPEC §8.1 step 7,
+/// which is what makes them atomic when it matters.
+pub async fn insert<'a, A>(acquirer: A, fee: &DevFee) -> Result<(), sqlx::Error>
 where
-    E: Executor<'e, Database = Sqlite> + Copy,
+    A: Acquire<'a, Database = Sqlite>,
 {
+    let mut connection = acquirer.acquire().await?;
+
     sqlx::query(
         "INSERT OR IGNORE INTO dev_fees (
              event_id, pubkey, order_id, amount_sats, payment_hash, destination, network,
@@ -59,10 +66,10 @@ where
     .bind(&fee.destination)
     .bind(fee.network.map(Network::as_str))
     .bind(fee.created_at)
-    .execute(executor)
+    .execute(&mut *connection)
     .await?;
 
-    refresh_duplicates(executor, &fee.order_id).await
+    refresh_duplicates(&mut *connection, &fee.order_id).await
 }
 
 /// Recomputes `is_duplicate` for every fee of `order_id`.
