@@ -24,9 +24,10 @@ source of truth for formats, schema and metrics. This document only answers
   number is not a dependency.
 - `Depends` is transitive: listing a row implies everything that row depends
   on. A row therefore names the *ends* of the chains it needs, not every
-  ancestor. The last row of all, PR 45, names enough of them to reach every
-  other row in the plan — checked, not assumed, by the script in
-  [Verifying the graph](#verifying-the-graph).
+  ancestor. PR 45, the last required row, names enough of them to reach every
+  row before it — checked, not assumed, by the script in
+  [Verifying the graph](#verifying-the-graph). Phase 6 comes after it and is
+  optional, so it is deliberately outside that guarantee.
 - `Depends` lists PRs that must be merged first. PRs with no shared dependency
   can be developed in parallel branches.
 - Deliberate bundling: some rows group several trivial tasks (e.g. all four
@@ -194,10 +195,14 @@ both failed review at least once:
 
 1. Numbering is contiguous, and every `Depends` entry names a row that exists
    and precedes it.
-2. **Every row is reachable from PR 45.** The hardening pass measures coverage
-   of the finished project, so anything it does not transitively depend on is
-   work that could legitimately land after it — which would make the coverage
-   figure a measurement of an incomplete tree.
+2. **Every row before PR 45 is reachable from it.** The hardening pass
+   measures coverage of the finished project, so anything earlier that it does
+   not transitively depend on could legitimately land after it — which would
+   make the coverage figure a measurement of an incomplete tree. Phase 6 is
+   optional and comes afterwards by design, so it is excluded.
+3. **The detailed tables match the phase map.** The map is the declared
+   contents of the plan; checking the tables against their own length would
+   let a whole phase be deleted without complaint.
 
 ```bash
 python3 scripts/check-roadmap.py

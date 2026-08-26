@@ -637,9 +637,10 @@ Default output is a table; `--json` emits `{ "generated_at", "range",
 ## 13. Phases
 
 High-level ordering only. The PR-by-PR breakdown lives in
-`docs/ROADMAP.md`, which splits these five into numbered phases
-(0–5) with dependencies; when the two disagree, the roadmap is the
-operational plan and this section is the intent.
+`docs/ROADMAP.md`, which splits these five into seven numbered phases
+(0–6, since the foundations below come before phase 1 here) with
+dependencies; when the two disagree, the roadmap is the operational
+plan and this section is the intent.
 
 1. **Core**: config, migrations, Nostr client, ingestion of
    38383/8383/38386/38385, projections, `backfill`, `sync`,
