@@ -206,5 +206,39 @@ impl VersionRow {
     }
 }
 
+/// Every dispute any version has been seen of.
+pub async fn ids<'e, E>(executor: E) -> Result<Vec<String>, sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    sqlx::query_scalar::<_, String>(
+        "SELECT DISTINCT dispute_id FROM dispute_versions ORDER BY dispute_id",
+    )
+    .fetch_all(executor)
+    .await
+}
+
+/// Empties the projection, leaving the versions it is derived from.
+pub async fn clear_projection<'e, E>(executor: E) -> Result<(), sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    sqlx::query("DELETE FROM disputes")
+        .execute(executor)
+        .await?;
+    Ok(())
+}
+
+/// Empties the version table; see [`super::orders::clear_versions`].
+pub async fn clear_versions<'e, E>(executor: E) -> Result<(), sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    sqlx::query("DELETE FROM dispute_versions")
+        .execute(executor)
+        .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests;

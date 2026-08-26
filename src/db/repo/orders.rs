@@ -286,5 +286,42 @@ fn optional_network(stored: Option<&str>) -> Result<Option<Network>, String> {
     }
 }
 
+/// Every order any version has been seen of.
+///
+/// Read from `order_versions` rather than from `orders`, because the
+/// projection is the thing being rebuilt and an order whose row was lost
+/// still has to come back.
+pub async fn ids<'e, E>(executor: E) -> Result<Vec<String>, sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    sqlx::query_scalar::<_, String>(
+        "SELECT DISTINCT order_id FROM order_versions ORDER BY order_id",
+    )
+    .fetch_all(executor)
+    .await
+}
+
+/// Empties the projection, leaving the versions it is derived from.
+pub async fn clear_projection<'e, E>(executor: E) -> Result<(), sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    sqlx::query("DELETE FROM orders").execute(executor).await?;
+    Ok(())
+}
+
+/// Empties the version table, which only `rebuild --from-raw` has any reason
+/// to do: everything in it is re-derivable from `events.raw_json`.
+pub async fn clear_versions<'e, E>(executor: E) -> Result<(), sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    sqlx::query("DELETE FROM order_versions")
+        .execute(executor)
+        .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests;

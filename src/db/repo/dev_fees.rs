@@ -155,5 +155,26 @@ impl FeeRow {
     }
 }
 
+/// Every order a fee has been seen for.
+pub async fn order_ids<'e, E>(executor: E) -> Result<Vec<String>, sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    sqlx::query_scalar::<_, String>("SELECT DISTINCT order_id FROM dev_fees ORDER BY order_id")
+        .fetch_all(executor)
+        .await
+}
+
+/// Empties the table; see [`super::orders::clear_versions`].
+pub async fn clear<'e, E>(executor: E) -> Result<(), sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    sqlx::query("DELETE FROM dev_fees")
+        .execute(executor)
+        .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests;

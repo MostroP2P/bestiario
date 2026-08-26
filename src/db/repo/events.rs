@@ -10,7 +10,7 @@ use nostr_sdk::prelude::Event;
 use sqlx::{Executor, Sqlite};
 
 /// One row of `events`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
 pub struct EventRecord {
     pub id: String,
     pub pubkey: String,
@@ -86,6 +86,24 @@ where
         .await?;
 
     Ok(found.is_some())
+}
+
+/// Every archived event, oldest first.
+///
+/// Ordered so that a replay applies versions in the order the network
+/// published them: the projections are order-independent by construction, but
+/// a deterministic replay is what makes `rebuild` comparable to the run it is
+/// rebuilding.
+pub async fn all<'e, E>(executor: E) -> Result<Vec<EventRecord>, sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    sqlx::query_as::<_, EventRecord>(
+        "SELECT id, pubkey, kind, created_at, d_tag, raw_json, relay_url, seen_at
+         FROM events ORDER BY created_at, id",
+    )
+    .fetch_all(executor)
+    .await
 }
 
 #[cfg(test)]
