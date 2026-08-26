@@ -37,7 +37,7 @@ NIP-69 orders from several:
 
 | `y[0]` | Instances in the sample | Orders |
 |---|---|---|
-| `mostro` | 22 | 175 |
+| `mostro` | 11 | 172 |
 | `telegram` | 1 | 16 |
 | `hodlhodl` | 1 | 7 |
 | `Bitblik` | 2 | 3 |
@@ -52,17 +52,20 @@ platforms' activity into the Mostro figures. The
 
 Across the sample, `expires_at` appeared on 172 of 200 orders — which reads as
 "optional, tolerate its absence". Split by platform, the picture is different:
-**every one of the 175 Mostro orders published it**, and every order that
+**every one of the 172 Mostro orders published it**, and all 28 orders that
 omitted it came from another platform.
 
 A corpus that mixed platforms would have led to a parser written to tolerate a
 missing field that Mostro always sends. `every_mostro_order_publishes_expires_at`
 pins this down.
 
-### Nine of the twenty-two Mostro instances publish no name
+### Eight of the twenty-two Mostro instances publish no name
 
-`y = ["mostro"]` with nothing after it. This settles the open question in
-`docs/SPEC.md` §14: it is not a rare edge case, it is a third of the network.
+Counting across all six captures, 22 distinct pubkeys publish with
+`y[0] = "mostro"`. Eight of them never send a second value — `y = ["mostro"]`
+with nothing after it — and a ninth sends one on some kinds and not on others.
+This settles the open question in `docs/SPEC.md` §14: it is not a rare edge
+case, it is a third of the network.
 Reports have to render an instance with no name, and `--instance` has to
 resolve one by pubkey alone.
 

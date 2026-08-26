@@ -200,8 +200,24 @@ fn the_corpus_includes_platforms_that_are_not_mostro() {
 }
 
 #[test]
+fn the_kinds_that_carry_no_platform_tag_have_none() {
+    // Rates and relay lists publish no `y` at all, which is why the platform
+    // filter of SPEC 8.1 is scoped to the kinds that do carry one: applied to
+    // every kind it would discard every rate and every relay list.
+    for (path, event) in load_all() {
+        if !matches!(event.kind.as_u16(), 30078 | 10002) {
+            continue;
+        }
+        assert!(
+            tag_value(&event, "y").is_none(),
+            "{path} carries a y tag; the platform filter would have to cover its kind"
+        );
+    }
+}
+
+#[test]
 fn the_corpus_includes_instances_that_publish_no_name() {
-    // Nine of the twenty-two Mostro instances observed publish `y = ["mostro"]`
+    // Eight of the twenty-two Mostro instances observed publish `y = ["mostro"]`
     // with no name at all, so reports have to cope with it.
     let nameless = load_all()
         .into_iter()

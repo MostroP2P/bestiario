@@ -59,9 +59,9 @@ Notes:
   `hodlhodl`, `Bitblik` and `Bitway` alongside `mostro`. bestiario measures the
   Mostro network, so ingestion filters on `y[0] == "mostro"` (§8.1); without it
   `accept_unknown_instances = true` would fold other platforms into the figures.
-- `expires_at` is published by **every** Mostro order in that sample (175/175);
-  the orders that omitted it all came from other platforms. Treat it as
-  mandatory for `y[0] == "mostro"`.
+- `expires_at` is published by **every** Mostro order in that sample
+  (172/172; 172 of the 200 orders overall); the 28 that omitted it all came
+  from other platforms. Treat it as mandatory for `y[0] == "mostro"`.
 - Real events carry tags this table does not list — `layer`, `expiration`
   (NIP-40), `source`, `name`, `bond`, `reserved_at`, `created_at`, `paid_at`,
   `category`, `taker_fees`. They are not parsed; `events.raw_json` keeps them
@@ -157,8 +157,9 @@ name comes from the second value of the `y` tag of any event (38383, 8383,
 [NIP-69](https://nips.nostr.com/69) `y` tag described in §2.1, where the first
 value is always the software (`mostro`) and the second the node name. Rules:
 
-- **A third of the network publishes no name.** 9 of the 22 Mostro instances
-  in the 2026-08-26 sample send `y = ["mostro"]` with nothing after it, so an
+- **A third of the network publishes no name.** Of the 22 Mostro instances in
+  the 2026-08-26 sample, 8 never send a second value — `y = ["mostro"]` with
+  nothing after it — and a ninth sends one on some kinds and not on others. An
   unnamed instance is the normal case, not an edge case: reports must render
   it and `--instance` must resolve it by pubkey alone.
 - The same instance may publish its name on one kind and omit it on another
@@ -540,8 +541,10 @@ that reaches for them does not compile.
 2. `event.verify()` (signature + id). On failure → discard and log.
 3. `pubkey ∈ configured instances` (or `accept_unknown_instances = true`) →
    otherwise discard.
-4. `y[0] == "mostro"` → otherwise discard: the Mostro relays also carry
-   NIP-69 orders from other platforms (§2.1).
+4. For the kinds that carry `y` (38383, 8383, 38386, 38385): `y[0] ==
+   "mostro"` → otherwise discard, because the Mostro relays also carry NIP-69
+   orders from other platforms (§2.1). 30078 and 10002 publish no `y` at all
+   and skip this step; they are already restricted by step 3.
 5. Filter `network` per config (`networks = ["mainnet"]`) for 38383/8383.
 6. Dedup: `INSERT OR IGNORE INTO events`. If it already existed → stop.
 7. Parse by kind → insert into the specific table + update the projection
