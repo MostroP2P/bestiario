@@ -305,15 +305,11 @@ pub(crate) fn optional_network(event: &Event) -> Result<Option<Network>, ParseEr
         return Ok(None);
     };
 
-    match value.as_str() {
-        "mainnet" => Ok(Some(Network::Mainnet)),
-        "testnet" => Ok(Some(Network::Testnet)),
-        "signet" => Ok(Some(Network::Signet)),
-        "regtest" => Ok(Some(Network::Regtest)),
-        _ => Err(ParseError::UnknownValue {
+    Network::from_wire(&value)
+        .map(Some)
+        .ok_or(ParseError::UnknownValue {
             tag: "network",
             value,
             expected: "`mainnet`, `testnet`, `signet` or `regtest`",
-        }),
-    }
+        })
 }

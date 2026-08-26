@@ -90,7 +90,7 @@ impl Direction {
         }
     }
 
-    fn parse(value: &str) -> Result<Self, ParseError> {
+    pub(crate) fn parse(value: &str) -> Result<Self, ParseError> {
         match value {
             "buy" => Ok(Self::Buy),
             "sell" => Ok(Self::Sell),
@@ -114,7 +114,7 @@ impl Status {
         }
     }
 
-    fn parse(value: &str) -> Result<Self, ParseError> {
+    pub(crate) fn parse(value: &str) -> Result<Self, ParseError> {
         match value {
             "pending" => Ok(Self::Pending),
             "in-progress" => Ok(Self::InProgress),
