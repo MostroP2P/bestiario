@@ -14,7 +14,7 @@
 
 use nostr_sdk::prelude::Event;
 
-use super::{ParseError, expect_kind, number, optional, required, tag_values};
+use super::{ParseError, expect_kind, number, optional_network, required, tag_values};
 use crate::network::Network;
 
 /// The kind this parser accepts.
@@ -146,10 +146,6 @@ impl FiatAmount {
 pub fn parse(event: &Event) -> Result<OrderVersion, ParseError> {
     expect_kind(event, KIND)?;
 
-    let network = optional(event, "network")?
-        .map(|value| parse_network(&value))
-        .transpose()?;
-
     Ok(OrderVersion {
         event_id: event.id.to_hex(),
         order_id: required(event, "d")?,
@@ -162,7 +158,7 @@ pub fn parse(event: &Event) -> Result<OrderVersion, ParseError> {
         fiat: parse_fiat_amount(event)?,
         payment_methods: parse_payment_methods(event)?,
         premium: number("premium", &required(event, "premium")?, "a percentage")?,
-        network,
+        network: optional_network(event)?,
         expires_at: number(
             "expires_at",
             &required(event, "expires_at")?,
@@ -199,24 +195,6 @@ fn parse_payment_methods(event: &Event) -> Result<Vec<String>, ParseError> {
         return Err(ParseError::EmptyTag { tag: "pm" });
     }
     Ok(values)
-}
-
-/// An unrecognised network is an error rather than a `None`: the network
-/// filter of `docs/SPEC.md` §8.1 decides what to count, and a value it has
-/// never heard of has to be seen by whoever runs the indexer instead of
-/// quietly joining the mainnet figures.
-fn parse_network(value: &str) -> Result<Network, ParseError> {
-    match value {
-        "mainnet" => Ok(Network::Mainnet),
-        "testnet" => Ok(Network::Testnet),
-        "signet" => Ok(Network::Signet),
-        "regtest" => Ok(Network::Regtest),
-        _ => Err(ParseError::UnknownValue {
-            tag: "network",
-            value: value.to_string(),
-            expected: "`mainnet`, `testnet`, `signet` or `regtest`",
-        }),
-    }
 }
 
 #[cfg(test)]
