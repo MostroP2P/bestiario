@@ -635,6 +635,7 @@ Default output is a table; `--json` emits `{ "generated_at", "range",
 | `mostro-core` | 0.14.5 | kind constants, order/dispute `Status` |
 | `sqlx` | 0.9.0 (`sqlite`, `runtime-tokio`, `migrate`) | persistence |
 | `tokio` | 1.53 | runtime |
+| `futures` | 0.3.34 | the `Stream` trait behind the live subscription |
 | `serde` / `serde_json` | 1.0.229 / 1.0.151 | (de)serialization |
 | `toml` | 1.1 | settings |
 | `config` | 0.15 | layered loading (file + env) |
