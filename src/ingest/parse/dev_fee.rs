@@ -17,11 +17,17 @@
 
 use nostr_sdk::prelude::Event;
 
-use super::{ParseError, expect_kind, number, optional, optional_network, required};
+use super::{
+    ParseError, expect_discriminator, expect_kind, non_negative, number, optional,
+    optional_network, required, uuid,
+};
 use crate::network::Network;
 
 /// The kind this parser accepts.
 pub const KIND: u16 = 8383;
+
+/// The value of the `z` tag a dev-fee payment carries.
+pub const DISCRIMINATOR: &str = "dev-fee-payment";
 
 /// One dev-fee payment — one 8383 event, parsed.
 ///
@@ -43,13 +49,18 @@ pub struct DevFee {
 /// Turn an 8383 event into a [`DevFee`].
 pub fn parse(event: &Event) -> Result<DevFee, ParseError> {
     expect_kind(event, KIND)?;
+    expect_discriminator(event, DISCRIMINATOR)?;
 
     Ok(DevFee {
         event_id: event.id.to_hex(),
         pubkey: event.pubkey.to_hex(),
-        order_id: required(event, "order-id")?,
+        order_id: uuid("order-id", &required(event, "order-id")?)?,
         created_at: event.created_at.as_secs() as i64,
-        amount_sats: number("amount", &required(event, "amount")?, "an amount in sats")?,
+        amount_sats: non_negative(
+            "amount",
+            number::<i64>("amount", &required(event, "amount")?, "an amount in sats")?,
+            "an amount in sats",
+        )?,
         payment_hash: required(event, "hash")?,
         destination: optional(event, "destination")?,
         network: optional_network(event)?,

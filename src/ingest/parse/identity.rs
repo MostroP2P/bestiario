@@ -23,13 +23,25 @@ use super::tag_values;
 /// The platform value bestiario indexes.
 pub const MOSTRO: &str = "mostro";
 
+/// The values of the single `y` tag, or `None` when the event carries no `y`
+/// or carries more than one.
+///
+/// A repeated `y` is an error to the tag readers of the parent module, and it
+/// is no more readable here: two `y` tags name two platforms, and picking
+/// either would be a guess. Reported as absence, the event simply falls out of
+/// the Mostro filter of `docs/SPEC.md` §8.1 instead of being indexed under a
+/// platform it may not belong to.
+fn y(event: &Event) -> Option<Vec<String>> {
+    tag_values(event, "y").ok().flatten()
+}
+
 /// The first value of `y` — the platform that published the event.
 ///
 /// `None` for the kinds that carry no `y` at all (30078 rates and 10002 relay
 /// lists), which is why the platform filter of `docs/SPEC.md` §8.1 is scoped
-/// to the kinds that do.
+/// to the kinds that do, and `None` too when the event repeats the tag.
 pub fn platform(event: &Event) -> Option<String> {
-    tag_values(event, "y")?.first().cloned()
+    y(event)?.first().cloned()
 }
 
 /// Whether the event was published by a Mostro node.
@@ -45,7 +57,7 @@ pub fn is_mostro(event: &Event) -> bool {
 /// be stored, win the most-recent-name-wins rule, and blank out a name the
 /// instance had published a minute earlier.
 pub fn instance_name(event: &Event) -> Option<String> {
-    let name = tag_values(event, "y")?.get(1)?.trim().to_string();
+    let name = y(event)?.get(1)?.trim().to_string();
 
     (!name.is_empty()).then_some(name)
 }

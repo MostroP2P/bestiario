@@ -48,6 +48,15 @@ it, `accept_unknown_instances = true` would silently fold four other
 platforms' activity into the Mostro figures. The
 `other_platform_*.json` fixtures exist to test that they are rejected.
 
+### Other platforms do not key their orders on a UUID
+
+`docs/SPEC.md` §2.1 calls `d` the order UUID, and it is — for Mostro. The
+hodlhodl order is keyed on `e6GfuXPbUjWdKUGt` and the telegram one on
+`6a8e0bf6489f241ca44c67fb`: each platform uses its own internal id. Since `d`
+is the natural key of an order and of the projection built from it, the parser
+validates it as a UUID, and these two fixtures are what that rejection is
+tested against.
+
 ### Telling platforms apart changes what looks optional
 
 Across the sample, `expires_at` appeared on 172 of 200 orders — which reads as

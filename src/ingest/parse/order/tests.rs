@@ -162,9 +162,68 @@ fn an_order_from_another_platform_is_rejected_for_its_missing_expires_at() {
     // Not the platform filter — that is the pipeline's (SPEC 8.1 step 4).
     // This pins the reason the parser can require `expires_at` at all: the
     // orders that omit it are exactly the ones that never reach it.
-    let error = parse(&load(KIND, "other_platform_hodlhodl")).expect_err("no expires_at");
+    let error = parse(&load(KIND, "other_platform_bitway")).expect_err("no expires_at");
 
     assert_eq!(error, ParseError::MissingTag { tag: "expires_at" });
+}
+
+#[test]
+fn an_order_whose_d_is_not_a_uuid_is_rejected() {
+    // hodlhodl and the telegram bots key their NIP-69 orders on their own
+    // internal ids. `d` is the natural key of an order here and of the
+    // projection built from it, so accepting a non-UUID would let unrelated
+    // events — two empty ids above all — merge into one order.
+    for fixture in ["other_platform_hodlhodl", "other_platform_telegram"] {
+        let error = parse(&load(KIND, fixture)).expect_err(fixture);
+
+        assert!(
+            matches!(error, ParseError::UnknownValue { tag: "d", .. }),
+            "{fixture}: {error}"
+        );
+    }
+
+    let error = parse(&order_but("d", &[""])).expect_err("empty d");
+    assert_eq!(
+        error,
+        ParseError::BlankValue {
+            tag: "d",
+            expected: "a value",
+        }
+    );
+}
+
+#[test]
+fn a_non_finite_number_is_rejected_rather_than_poisoning_every_sum() {
+    // `f64::from_str` accepts all three of these. One NaN premium would make
+    // every average computed with it NaN, and SQLite stores a non-finite
+    // float as NULL, so the value would not even survive to be noticed.
+    for value in ["NaN", "inf", "-inf"] {
+        let error = parse(&order_but("premium", &[value])).expect_err(value);
+        assert!(
+            matches!(error, ParseError::NotANumber { tag: "premium", .. }),
+            "{value}: {error}"
+        );
+
+        let error = parse(&order_but("fa", &[value])).expect_err(value);
+        assert!(
+            matches!(error, ParseError::NotANumber { tag: "fa", .. }),
+            "{value}: {error}"
+        );
+    }
+}
+
+#[test]
+fn an_event_without_the_order_discriminator_is_rejected() {
+    // The kind says which parser to use; `z` says what the publisher meant
+    // the event to be. Every captured order agrees on both.
+    let error = parse(&order_but("z", &[])).expect_err("no z");
+    assert_eq!(error, ParseError::MissingTag { tag: "z" });
+
+    let error = parse(&order_but("z", &["dispute"])).expect_err("wrong z");
+    assert!(
+        matches!(error, ParseError::UnknownValue { tag: "z", .. }),
+        "{error}"
+    );
 }
 
 #[test]
@@ -260,4 +319,78 @@ fn a_missing_network_parses_to_none_because_the_column_allows_it() {
     let order = parse(&order_but("network", &[])).expect("network is optional");
 
     assert_eq!(order.network, None);
+}
+
+#[test]
+fn a_negative_premium_is_kept_because_a_discount_is_a_real_offer() {
+    // 40 of the 200 captured orders publish one. Rejecting negatives here —
+    // as the amounts do — would silently drop every discounted order from the
+    // premium distribution and skew it upwards.
+    let order = parse(&order_but("premium", &["-5"])).expect("a discount is an offer");
+
+    assert_eq!(order.premium, -5.0);
+}
+
+#[test]
+fn a_negative_amount_is_rejected_because_it_would_subtract_from_the_volume() {
+    for (tag, value) in [("amt", "-1"), ("fa", "-1"), ("expires_at", "-1")] {
+        let error = parse(&order_but(tag, &[value])).expect_err(tag);
+
+        assert!(
+            matches!(error, ParseError::OutOfRange { .. }),
+            "{tag}: {error}"
+        );
+    }
+}
+
+#[test]
+fn an_inverted_range_is_rejected() {
+    // A range order is an invitation to pick a number between the two bounds.
+    // Inverted, it invites nothing, and every later "does this order cover
+    // 10 000 ARS?" silently answers no.
+    let error = parse(&order_but("fa", &["350", "5"])).expect_err("inverted range");
+
+    assert_eq!(
+        error,
+        ParseError::InvertedRange {
+            tag: "fa",
+            min: 350.0,
+            max: 5.0,
+        }
+    );
+}
+
+#[test]
+fn a_blank_payment_method_is_rejected() {
+    let error = parse(&order_but("pm", &["PIX", "  "])).expect_err("blank method");
+
+    assert_eq!(
+        error,
+        ParseError::BlankValue {
+            tag: "pm",
+            expected: "a payment method",
+        }
+    );
+}
+
+#[test]
+fn a_blank_fiat_code_is_rejected() {
+    let error = parse(&order_but("f", &[""])).expect_err("blank fiat code");
+
+    assert!(
+        matches!(error, ParseError::BlankValue { tag: "f", .. }),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_tag_published_twice_is_an_error_rather_than_a_first_one_wins() {
+    // An order that publishes `d` twice has no single natural key, and taking
+    // the first would let the second say anything at all.
+    let mut tags = valid_tags();
+    tags.push(("d", vec!["11111111-2222-3333-4444-555555555555"]));
+
+    let error = parse(&order_with(&tags)).expect_err("repeated d");
+
+    assert_eq!(error, ParseError::RepeatedTag { tag: "d", count: 2 });
 }

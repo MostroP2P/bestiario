@@ -1,10 +1,11 @@
 //! Parser for kind 38386 — disputes (`docs/SPEC.md` §2.3).
 //!
-//! A dispute event carries **no `order-id`**, so the dispute→order relation is
-//! not observable from the outside and nothing here tries to reconstruct it:
-//! disputes are counted by status, instance and initiator, and the dispute
-//! rate per order stays in the "cannot be measured" list of `docs/SPEC.md`
-//! §6.9.
+//! A dispute event carries **no `order-id`**, so the dispute→order linkage is
+//! not observable from the outside and nothing here tries to reconstruct it;
+//! that linkage is what `docs/SPEC.md` §6.9 lists as unmeasurable. The
+//! aggregate dispute rate of §6.7 — # disputes opened / # orders that left
+//! `pending`, per instance — is still measurable, because it divides two
+//! counts and never needs to pair a dispute with its order.
 //!
 //! Note the two timestamps. The event's own `created_at` is when *this
 //! version* was published; the `created_at` **tag** is when the dispute was
