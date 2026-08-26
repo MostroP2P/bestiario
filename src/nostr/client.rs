@@ -94,6 +94,12 @@ impl RelayClient {
 
         for url in relays {
             match Self::add(&client, url).await {
+                // Listing a relay twice — or under two spellings that
+                // normalise to one URL — is one relay, not two. Keeping both
+                // would subscribe to it twice and walk its history twice.
+                Ok(url) if connected.contains(&url) => {
+                    tracing::debug!(relay = %url, "configured more than once");
+                }
                 Ok(url) => connected.push(url),
                 Err(reason) => tracing::warn!(relay = %url, %reason, "skipping relay"),
             }
@@ -128,7 +134,8 @@ impl RelayClient {
     /// somebody restarted the process — and miss whatever only it carries.
     ///
     /// Rebuilds the list rather than appending to it, so the configured order
-    /// [`relays`](Self::relays) promises survives a relay rejoining late.
+    /// [`relays`](Self::relays) promises survives a relay rejoining late, and
+    /// a relay configured twice still appears once.
     pub async fn reattach(&mut self) {
         let configured = self.configured.clone();
         let mut attached = Vec::with_capacity(configured.len());
@@ -139,6 +146,10 @@ impl RelayClient {
             let Ok(parsed) = RelayUrl::from_str(url) else {
                 continue;
             };
+
+            if attached.contains(&parsed) {
+                continue;
+            }
 
             if self.relays.contains(&parsed) {
                 attached.push(parsed);

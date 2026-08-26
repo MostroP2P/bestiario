@@ -329,3 +329,21 @@ fn free_port() -> u16 {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
     listener.local_addr().expect("addr").port()
 }
+
+#[tokio::test]
+async fn a_relay_configured_twice_is_one_relay() {
+    // Two spellings of one relay are one subscription target and one history
+    // to walk. Keeping both would ask it for everything twice and count its
+    // events against two copies of the same cursor.
+    let live = relay().await;
+    let url = live.url().await;
+
+    let mut client = RelayClient::connect(&[url.to_string(), format!("{url}/")])
+        .await
+        .expect("connect");
+    assert_eq!(client.relays(), std::slice::from_ref(&url));
+
+    client.reattach().await;
+
+    assert_eq!(client.relays(), std::slice::from_ref(&url));
+}
