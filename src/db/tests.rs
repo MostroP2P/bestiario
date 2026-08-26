@@ -229,10 +229,86 @@ async fn an_unopenable_path_is_reported_rather_than_panicking() {
 }
 
 #[test]
-fn in_memory_urls_get_a_single_connection() {
+fn in_memory_urls_get_a_single_pinned_connection() {
     // Several connections would mean several different empty databases, and
     // migrations would appear to vanish between calls.
-    assert_eq!(max_connections_for("sqlite::memory:"), 1);
-    assert_eq!(max_connections_for("sqlite://file:x?mode=memory"), 1);
-    assert!(max_connections_for("sqlite://bestiario.db") > 1);
+    for url in ["sqlite::memory:", "sqlite://file:x?mode=memory"] {
+        let options = pool_options_for(url);
+        assert_eq!(options.get_max_connections(), 1, "{url}");
+
+        // And the one connection must never be reaped: it *is* the database.
+        assert_eq!(options.get_min_connections(), 1, "{url}");
+        assert_eq!(options.get_idle_timeout(), None, "{url}");
+        assert_eq!(options.get_max_lifetime(), None, "{url}");
+    }
+}
+
+#[test]
+fn file_urls_keep_the_ordinary_pool_defaults() {
+    // A file-backed database outlives its connections, so reaping an idle one
+    // costs nothing and expiry is worth keeping.
+    let options = pool_options_for("sqlite://bestiario.db");
+
+    assert!(options.get_max_connections() > 1);
+    assert!(options.get_idle_timeout().is_some());
+    assert!(options.get_max_lifetime().is_some());
+}
+
+#[tokio::test]
+async fn reaping_an_idle_connection_destroys_an_in_memory_database() {
+    // Demonstrates the failure that `pool_options_for` exists to prevent, by
+    // building the pool sqlx's defaults would have given us: one connection,
+    // none pinned, and an idle timeout. Shortened to milliseconds so the test
+    // does not have to wait out the real 600 seconds.
+    //
+    // If this ever starts passing without an error, the hazard has gone away
+    // and the pinning below can be reconsidered.
+    let reaping_pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .min_connections(0)
+        .idle_timeout(Duration::from_millis(50))
+        .connect_with(connect_options_for(MEMORY).expect("options"))
+        .await
+        .expect("connect");
+    migrate(&reaping_pool).await.expect("migrate");
+
+    tokio::time::sleep(Duration::from_millis(600)).await;
+
+    let result = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM relays")
+        .fetch_one(&reaping_pool)
+        .await;
+
+    // Asserted on the message, not merely on `is_err`, so the test cannot pass
+    // because the query failed for some unrelated reason.
+    let error = result.expect_err(
+        "the reaped connection should have taken the schema with it; \
+         if this now succeeds, sqlx changed and the pinning can be revisited",
+    );
+    assert!(
+        error.to_string().contains("no such table"),
+        "expected the schema to be gone, got: {error}"
+    );
+}
+
+#[tokio::test]
+async fn a_pinned_in_memory_database_outlives_an_idle_period() {
+    // The same wait, against the pool `connect` actually builds.
+    let pool = connect_and_migrate(MEMORY).await.expect("migrate");
+    sqlx::query("INSERT INTO relays (url, source, first_seen_at) VALUES (?, ?, ?)")
+        .bind("wss://relay.mostro.network")
+        .bind("config")
+        .bind(1_735_689_600_i64)
+        .execute(&pool)
+        .await
+        .expect("insert");
+
+    tokio::time::sleep(Duration::from_millis(600)).await;
+
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM relays")
+        .fetch_one(&pool)
+        .await
+        .expect("the schema should still exist");
+
+    assert_eq!(count, 1);
+    assert_eq!(table_names(&pool).await, EXPECTED_TABLES);
 }
