@@ -114,3 +114,18 @@ fn a_third_value_is_ignored_rather_than_read_as_a_name() {
 
     assert_eq!(instance_name(&event).as_deref(), Some("Mostro"));
 }
+
+#[test]
+fn a_repeated_y_tag_names_no_platform() {
+    // Two `y` tags name two platforms and neither can be preferred, so the
+    // event falls out of the filter rather than being indexed under a guess.
+    let event = EventBuilder::new(Kind::from_u16(38383), "")
+        .tag(Tag::parse(["y", MOSTRO, "Mostro Brasil"]).expect("well-formed tag"))
+        .tag(Tag::parse(["y", "hodlhodl"]).expect("well-formed tag"))
+        .finalize(&Keys::generate())
+        .expect("signing");
+
+    assert_eq!(platform(&event), None);
+    assert_eq!(instance_name(&event), None);
+    assert!(!is_mostro(&event));
+}
