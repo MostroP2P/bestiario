@@ -10,6 +10,7 @@ use sqlx::SqlitePool;
 
 pub mod backfill;
 pub mod range;
+pub mod sync;
 
 use crate::cli::{Cli, Command, StatsCommand};
 use crate::config::Settings;
@@ -49,7 +50,7 @@ pub async fn run(cli: &Cli) -> Result<()> {
 async fn dispatch(context: &Context<'_>) -> Result<()> {
     match &context.cli.command {
         Command::Backfill { kind } => backfill::run(context, *kind, Utc::now().timestamp()).await,
-        Command::Sync => not_yet("sync", 21),
+        Command::Sync => sync::run(context).await,
         Command::Summary => not_yet("summary", 28),
         Command::Instances => not_yet("instances", 27),
         Command::Instance { .. } => not_yet("instance", 27),

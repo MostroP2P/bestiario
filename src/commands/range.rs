@@ -49,6 +49,18 @@ impl Range {
         Ok(Self { from, until })
     }
 
+    /// From `from` onwards, with no end — what a live subscription asks for.
+    ///
+    /// Distinct from a window ending at "now": a subscription that closed at
+    /// the moment it was opened would drop every event published a second
+    /// later, which is the only kind it exists to receive.
+    pub fn onwards(from: i64) -> Self {
+        Self {
+            from,
+            until: i64::MAX,
+        }
+    }
+
     /// The whole of recorded time, for commands that are not windowed.
     pub fn unbounded() -> Self {
         Self {

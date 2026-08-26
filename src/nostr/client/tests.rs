@@ -10,6 +10,8 @@
 
 use std::time::Duration;
 
+use nostr_sdk::local_relay::LocalRelay;
+
 use super::*;
 
 /// Long enough that a busy CI machine does not fail the test, short enough
@@ -276,4 +278,72 @@ async fn the_same_event_on_two_relays_is_reported_once_per_relay() {
     let mut expected = vec![first_url, second_url];
     expected.sort();
     assert_eq!(seen_on, expected);
+}
+
+#[tokio::test]
+async fn a_relay_that_was_down_at_startup_is_picked_up_when_it_comes_back() {
+    // The case this exists for: one configured relay is down when the indexer
+    // starts, another is up, and the run continues on the one that answered.
+    // Without a retry the first is ignored for the lifetime of the process,
+    // and whatever only it carries is never indexed.
+    let port = free_port();
+    let down = format!("ws://127.0.0.1:{port}");
+    let live = relay().await;
+    let live_url = live.url().await;
+
+    let mut client = RelayClient::connect(&[down.clone(), live_url.to_string()])
+        .await
+        .expect("one reachable relay is enough");
+    assert_eq!(client.relays(), std::slice::from_ref(&live_url));
+
+    // Act: the relay comes back on the address it was configured under.
+    let recovered = LocalRelay::builder().port(port).build();
+    recovered.run().await.expect("start the recovered relay");
+    client.reattach().await;
+
+    // Assert: it is in play, and in the order it was configured in.
+    assert_eq!(client.relays(), &[recovered.url().await, live_url]);
+}
+
+#[tokio::test]
+async fn reattaching_when_nothing_has_changed_leaves_the_relay_list_alone() {
+    // Called before every resubscription, so it has to be free of side
+    // effects when there is nothing to recover: no duplicates, no reordering,
+    // no dropping a relay that is working.
+    let live = relay().await;
+    let live_url = live.url().await;
+    let mut client = RelayClient::connect(&[DEAD_RELAY.to_string(), live_url.to_string()])
+        .await
+        .expect("connect");
+
+    client.reattach().await;
+    client.reattach().await;
+
+    assert_eq!(client.relays(), &[live_url]);
+}
+
+/// A port with nothing on it *yet*: bound to find a free one, then released
+/// so the relay under test can take it. Racy in principle, reliable in a test
+/// process that binds it back a moment later.
+fn free_port() -> u16 {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    listener.local_addr().expect("addr").port()
+}
+
+#[tokio::test]
+async fn a_relay_configured_twice_is_one_relay() {
+    // Two spellings of one relay are one subscription target and one history
+    // to walk. Keeping both would ask it for everything twice and count its
+    // events against two copies of the same cursor.
+    let live = relay().await;
+    let url = live.url().await;
+
+    let mut client = RelayClient::connect(&[url.to_string(), format!("{url}/")])
+        .await
+        .expect("connect");
+    assert_eq!(client.relays(), std::slice::from_ref(&url));
+
+    client.reattach().await;
+
+    assert_eq!(client.relays(), std::slice::from_ref(&url));
 }
