@@ -56,14 +56,16 @@ pub enum ClientError {
     #[error("relay `{relay}` did not answer the request")]
     Fetch {
         relay: RelayUrl,
+        // Boxed: `nostr_sdk::error::Error` is large enough that carrying it
+        // inline makes every `Result` in this module the size of its error.
         #[source]
-        source: nostr_sdk::error::Error,
+        source: Box<nostr_sdk::error::Error>,
     },
 
     #[error("could not subscribe to any relay")]
     Subscribe {
         #[source]
-        source: nostr_sdk::error::Error,
+        source: Box<nostr_sdk::error::Error>,
     },
 }
 
@@ -158,7 +160,7 @@ impl RelayClient {
             .await
             .map_err(|source| ClientError::Fetch {
                 relay: relay.clone(),
-                source,
+                source: Box::new(source),
             })?;
 
         // `Events` is already ordered newest first; collecting into a `Vec`
@@ -182,11 +184,13 @@ impl RelayClient {
         // everything the relay sends between the REQ and this line.
         let notifications = self.client.notifications();
 
-        let output = self
-            .client
-            .subscribe(targets)
-            .await
-            .map_err(|source| ClientError::Subscribe { source })?;
+        let output =
+            self.client
+                .subscribe(targets)
+                .await
+                .map_err(|source| ClientError::Subscribe {
+                    source: Box::new(source),
+                })?;
 
         Ok(Subscription {
             id: output.id().clone(),
