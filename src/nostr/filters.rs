@@ -47,7 +47,12 @@ pub fn for_kind(
 
     if let Some(range) = range {
         let (since, until) = window(range);
-        filter = filter.since(since).until(until);
+        if let Some(since) = since {
+            filter = filter.since(since);
+        }
+        if let Some(until) = until {
+            filter = filter.until(until);
+        }
     }
 
     match limit {
@@ -69,14 +74,23 @@ pub fn per_kind(authors: &[PublicKey], range: Option<Range>, limit: Option<usize
         .collect()
 }
 
-/// The inclusive `(since, until)` pair covering the half-open `range`.
+/// The inclusive `(since, until)` pair covering the half-open `range`, with an
+/// open end reported as `None` rather than as a number.
 ///
 /// `until` is the last second *inside* the window, not the first one after it.
-fn window(range: Range) -> (Timestamp, Timestamp) {
-    (
-        Timestamp::from_secs(range.from().max(0) as u64),
-        Timestamp::from_secs((range.until() - 1).max(0) as u64),
-    )
+///
+/// [`Range::unbounded`] represents "all of recorded time" with the sentinels
+/// `0` and `i64::MAX`. Passed through arithmetically those would put
+/// `until = 9223372036854775806` on the wire — a timestamp no relay can mean
+/// anything by, and one that says the opposite of what it is trying to say.
+/// An open end is an *absent* field in a Nostr filter, so that is what it
+/// becomes here.
+fn window(range: Range) -> (Option<Timestamp>, Option<Timestamp>) {
+    let since = (range.from() > 0).then(|| Timestamp::from_secs(range.from() as u64));
+    let until =
+        (range.until() < i64::MAX).then(|| Timestamp::from_secs((range.until() - 1).max(0) as u64));
+
+    (since, until)
 }
 
 #[cfg(test)]

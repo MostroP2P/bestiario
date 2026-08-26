@@ -78,6 +78,20 @@ fn a_range_becomes_an_inclusive_window_one_second_shorter() {
 }
 
 #[test]
+fn an_unbounded_range_sends_no_bounds_rather_than_a_sentinel() {
+    // Range::unbounded is `[0, i64::MAX)`. Converted arithmetically that would
+    // put `until = 9223372036854775806` on the wire — a timestamp no relay can
+    // mean anything by, and the opposite of what "no upper bound" says. An
+    // open end is an absent field in a Nostr filter.
+    let filter = for_kind(order::KIND, &[], Some(Range::unbounded()), None);
+
+    let json = as_json(&filter);
+    assert_eq!(json.get("since"), None);
+    assert_eq!(json.get("until"), None);
+    assert_eq!(json, json!({ "kinds": [38383] }));
+}
+
+#[test]
 fn no_range_sends_no_bounds() {
     let filter = for_kind(order::KIND, &[], None, None);
 
