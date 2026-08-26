@@ -1,0 +1,68 @@
+{
+  "kind": 38383,
+  "id": "190af4deef7ba9d6885a0b5e0bf9ef562c3a2e2957f3c5b391d738eb30dbad24",
+  "pubkey": "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390",
+  "created_at": 1787740745,
+  "tags": [
+    [
+      "d",
+      "aac4b221-bcd0-47e2-bea8-b0251fc5bb89"
+    ],
+    [
+      "k",
+      "buy"
+    ],
+    [
+      "f",
+      "ARS"
+    ],
+    [
+      "s",
+      "in-progress"
+    ],
+    [
+      "amt",
+      "101446"
+    ],
+    [
+      "fa",
+      "75000"
+    ],
+    [
+      "pm",
+      "CVU",
+      "CBU"
+    ],
+    [
+      "premium",
+      "0"
+    ],
+    [
+      "network",
+      "mainnet"
+    ],
+    [
+      "layer",
+      "lightning"
+    ],
+    [
+      "expires_at",
+      "1787785761"
+    ],
+    [
+      "expiration",
+      "1790332745"
+    ],
+    [
+      "y",
+      "mostro",
+      "Mostro"
+    ],
+    [
+      "z",
+      "order"
+    ]
+  ],
+  "content": "",
+  "sig": "4a09da140302519ae1c10aa520a47f25007b5619f4306153f7b5c3a8bc198b8bacfaebbbaff63e02979ece2f4ec24ffb4cd732f9be6c1102dc9640f2cff26efb"
+}

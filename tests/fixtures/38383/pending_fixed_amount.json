@@ -1,0 +1,76 @@
+{
+  "kind": 38383,
+  "id": "45be3d0066a48953e7cfccdb62a9cde478305370808937cf7328a5ea07e116e6",
+  "pubkey": "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390",
+  "created_at": 1787723816,
+  "tags": [
+    [
+      "d",
+      "22dca22d-2fe8-42b3-aa0a-d55c86c3f844"
+    ],
+    [
+      "k",
+      "sell"
+    ],
+    [
+      "f",
+      "USD"
+    ],
+    [
+      "s",
+      "pending"
+    ],
+    [
+      "amt",
+      "6135"
+    ],
+    [
+      "fa",
+      "5",
+      "350"
+    ],
+    [
+      "pm",
+      "USDT - USDC TRC20 - ERC20 - Polygon - Arbitrum - Solana - BSC - Liquid - Todas las redes - Binance pay - Bybit pay"
+    ],
+    [
+      "premium",
+      "3"
+    ],
+    [
+      "rating",
+      "[\"rating\",{\"days\":239,\"total_rating\":4.815789473684211,\"total_reviews\":19}]"
+    ],
+    [
+      "source",
+      "mostro:22dca22d-2fe8-42b3-aa0a-d55c86c3f844?relays=wss://relay.mostro.network,wss://nos.lol,wss://mostro-p2p.tech&mostro=82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390"
+    ],
+    [
+      "network",
+      "mainnet"
+    ],
+    [
+      "layer",
+      "lightning"
+    ],
+    [
+      "expires_at",
+      "1787798074"
+    ],
+    [
+      "expiration",
+      "1787798074"
+    ],
+    [
+      "y",
+      "mostro",
+      "Mostro"
+    ],
+    [
+      "z",
+      "order"
+    ]
+  ],
+  "content": "",
+  "sig": "cead85083078c582b69725bf14a3f85a1b8774ba68c634d9322f4aa8c81feac0b42def31b3db0f4ddab34de56b53375dc8b791a3241b92c264df7b2749209ba6"
+}

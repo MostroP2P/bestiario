@@ -1,0 +1,43 @@
+{
+  "kind": 8383,
+  "id": "e287e0f489e9a4d59ee19eafb77431534898f2678de720b6f7b4ddcc963a5c5b",
+  "pubkey": "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390",
+  "created_at": 1787721916,
+  "tags": [
+    [
+      "order-id",
+      "048b9483-15a3-4938-aec7-f60da7f14c8e"
+    ],
+    [
+      "amount",
+      "116"
+    ],
+    [
+      "hash",
+      "3d3695517badfa7809525b8ea96718bd697b59ba85209669b8063657d1ca9eb5"
+    ],
+    [
+      "destination",
+      "pivotaldeborah52@walletofsatoshi.com"
+    ],
+    [
+      "network",
+      "mainnet"
+    ],
+    [
+      "y",
+      "mostro",
+      "Mostro"
+    ],
+    [
+      "z",
+      "dev-fee-payment"
+    ],
+    [
+      "expiration",
+      "1819257916"
+    ]
+  ],
+  "content": "",
+  "sig": "95213bd818e4912692a052488dcee18a2318c972499934f31f1389f9cbc94c01afe0a5600320723fa60941384f4f237aa83be4d20f18819e7aeab6be7d4383f3"
+}

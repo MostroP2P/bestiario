@@ -1,0 +1,110 @@
+{
+  "kind": 38385,
+  "id": "b5edcae1c1417ff39fcbc042fc737b613c8ca61c94f57d02d334f9a93dc10de7",
+  "pubkey": "c945e46329e8271d6c3ed9546685fc2632a609be9059cd9cfb6fac0bcc2478a9",
+  "created_at": 1787740722,
+  "tags": [
+    [
+      "d",
+      "c945e46329e8271d6c3ed9546685fc2632a609be9059cd9cfb6fac0bcc2478a9"
+    ],
+    [
+      "mostro_version",
+      "0.18.0"
+    ],
+    [
+      "mostro_commit_hash",
+      "26e8207315d4ba8213996711ebaadc9b8dafb840"
+    ],
+    [
+      "max_order_amount",
+      "1000000"
+    ],
+    [
+      "min_order_amount",
+      "100"
+    ],
+    [
+      "expiration_hours",
+      "24"
+    ],
+    [
+      "expiration_seconds",
+      "900"
+    ],
+    [
+      "fiat_currencies_accepted",
+      "USD,EUR,ARS,CUP"
+    ],
+    [
+      "max_orders_per_response",
+      "10"
+    ],
+    [
+      "fee",
+      "0"
+    ],
+    [
+      "pow",
+      "0"
+    ],
+    [
+      "protocol_version",
+      "1"
+    ],
+    [
+      "hold_invoice_expiration_window",
+      "300"
+    ],
+    [
+      "hold_invoice_cltv_delta",
+      "144"
+    ],
+    [
+      "invoice_expiration_window",
+      "300"
+    ],
+    [
+      "lnd_version",
+      "0.21.1-beta commit=v0.21.1-beta"
+    ],
+    [
+      "lnd_node_pubkey",
+      "03f3e351ec8d27e0747fe7ce87a4bb144a0429b2a62c3168f0a6b68e92f53b48a3"
+    ],
+    [
+      "lnd_commit_hash",
+      "2b87887fd9ef6b3e1391dc25e4c658ee73a06fa0"
+    ],
+    [
+      "lnd_node_alias",
+      "03f3e351ec8d27e0747f"
+    ],
+    [
+      "lnd_chains",
+      "bitcoin"
+    ],
+    [
+      "lnd_networks",
+      "mainnet"
+    ],
+    [
+      "lnd_uris",
+      ""
+    ],
+    [
+      "y",
+      "mostro"
+    ],
+    [
+      "z",
+      "info"
+    ],
+    [
+      "bond_enabled",
+      "false"
+    ]
+  ],
+  "content": "",
+  "sig": "3bf7d140ffa2b332f36d06c71fa0ffd7863d1768ea5d7cfcc12b88698ec995435fb250905eed455d6c877423a65596d525c14fb7e7cf08d1ff01d3838bc1088c"
+}

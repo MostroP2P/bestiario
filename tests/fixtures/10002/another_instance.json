@@ -1,0 +1,22 @@
+{
+  "kind": 10002,
+  "id": "327f2cc186fc7defdc1a661199ee7f900a0e7bfc840eafbfd5215ac79b2786f5",
+  "pubkey": "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390",
+  "created_at": 1787740196,
+  "tags": [
+    [
+      "r",
+      "wss://relay.mostro.network"
+    ],
+    [
+      "r",
+      "wss://nos.lol"
+    ],
+    [
+      "r",
+      "wss://mostro-p2p.tech"
+    ]
+  ],
+  "content": "",
+  "sig": "d8f411689c4e82ccbe3e42db00b16213bfd08059a984d2e4d2028dc740f1561e4dd00f0c35b8dac095ff3533971f7a18793e0454ac3ee931a5abf2d0e00c9766"
+}

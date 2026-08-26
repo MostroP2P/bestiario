@@ -1,0 +1,78 @@
+{
+  "kind": 38383,
+  "id": "0c099c82660b90394d40f60c55614e6d8ed0b8eb70da56b52e7213890d4e8528",
+  "pubkey": "0000cc02101ec29eea9ce623258752b9d7da66c27845ed26846dd0b0fc736b40",
+  "created_at": 1787737743,
+  "tags": [
+    [
+      "d",
+      "54ab69d1-2062-4b62-b177-e94feabd96bb"
+    ],
+    [
+      "k",
+      "sell"
+    ],
+    [
+      "f",
+      "EUR"
+    ],
+    [
+      "s",
+      "pending"
+    ],
+    [
+      "amt",
+      "0"
+    ],
+    [
+      "fa",
+      "100",
+      "300"
+    ],
+    [
+      "pm",
+      "QR Santander",
+      "BBVA Efectivo Móvil",
+      "Sabadell Instant Money. Códigos al teléfono del comprador."
+    ],
+    [
+      "premium",
+      "0"
+    ],
+    [
+      "rating",
+      "[\"rating\",{\"days\":2,\"total_rating\":0.0,\"total_reviews\":0}]"
+    ],
+    [
+      "source",
+      "mostro:54ab69d1-2062-4b62-b177-e94feabd96bb?relays=wss://relay.mostro.network,wss://relay.kilombino.com,wss://mostro-p2p.tech&mostro=0000cc02101ec29eea9ce623258752b9d7da66c27845ed26846dd0b0fc736b40"
+    ],
+    [
+      "network",
+      "mainnet"
+    ],
+    [
+      "layer",
+      "lightning"
+    ],
+    [
+      "expires_at",
+      "1787824116"
+    ],
+    [
+      "expiration",
+      "1787824116"
+    ],
+    [
+      "y",
+      "mostro",
+      "NostroMostro 🇪🇸"
+    ],
+    [
+      "z",
+      "order"
+    ]
+  ],
+  "content": "",
+  "sig": "0e1af0827b0fe309c7c689b109fdfcabdd0c01009b6cd40d10b6c20ef695f0daf714e76773d75d5061ff058d5aa55fb8a47adb906268c5b5429bb63bd3c17799"
+}

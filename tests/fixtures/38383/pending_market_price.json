@@ -1,0 +1,75 @@
+{
+  "kind": 38383,
+  "id": "56bc6a95a4d9df61213124e7771a21e30fa694aeb71f576d7e6cc87e12ce2424",
+  "pubkey": "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390",
+  "created_at": 1787738870,
+  "tags": [
+    [
+      "d",
+      "0f3e7da8-0e37-46f3-88ed-9d45f21fc82c"
+    ],
+    [
+      "k",
+      "buy"
+    ],
+    [
+      "f",
+      "EUR"
+    ],
+    [
+      "s",
+      "pending"
+    ],
+    [
+      "amt",
+      "0"
+    ],
+    [
+      "fa",
+      "100"
+    ],
+    [
+      "pm",
+      "SEPA instant"
+    ],
+    [
+      "premium",
+      "3"
+    ],
+    [
+      "rating",
+      "[\"rating\",{\"days\":11,\"total_rating\":3.75,\"total_reviews\":2}]"
+    ],
+    [
+      "source",
+      "mostro:0f3e7da8-0e37-46f3-88ed-9d45f21fc82c?relays=wss://relay.mostro.network,wss://nos.lol,wss://mostro-p2p.tech&mostro=82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390"
+    ],
+    [
+      "network",
+      "mainnet"
+    ],
+    [
+      "layer",
+      "lightning"
+    ],
+    [
+      "expires_at",
+      "1787824986"
+    ],
+    [
+      "expiration",
+      "1787824986"
+    ],
+    [
+      "y",
+      "mostro",
+      "Mostro"
+    ],
+    [
+      "z",
+      "order"
+    ]
+  ],
+  "content": "",
+  "sig": "bf8789b8bb4e5d0fa7963c160b2ce855a14011238bd9cd1dfbd9ad620f37ca9e71b9184b49ea282ccf286f6ddebbcb18e38ed334a31c7e22c491d46764d1a99d"
+}

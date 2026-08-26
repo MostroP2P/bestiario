@@ -1,0 +1,39 @@
+{
+  "kind": 38386,
+  "id": "f7fd34fe12b851367d5300d2d9694e92cdc7ebe29764d163b74df4a1b8a76f17",
+  "pubkey": "00000978acc594c506976c655b6decbf2d4af25ffdaa6680f2a9568b0a88441b",
+  "created_at": 1787712948,
+  "tags": [
+    [
+      "d",
+      "08e39bd1-a42b-46af-86ba-0f9718c9e61c"
+    ],
+    [
+      "expiration",
+      "1795488948"
+    ],
+    [
+      "s",
+      "seller-refunded"
+    ],
+    [
+      "initiator",
+      "buyer"
+    ],
+    [
+      "created_at",
+      "1787712663"
+    ],
+    [
+      "y",
+      "mostro",
+      "MostroColomBia🇨🇴"
+    ],
+    [
+      "z",
+      "dispute"
+    ]
+  ],
+  "content": "",
+  "sig": "6da22503e34af0a3ef442a677408f0c3f223c8e0d7666c7fda053f42572e214c4a5e1fb0733ea408a09a7c4103dfdb0021927f076724474b513f4781d081aef1"
+}

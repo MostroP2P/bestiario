@@ -1,0 +1,76 @@
+{
+  "kind": 38383,
+  "id": "283cf66fede69d8b8eeb4861b77342c210b8df359a9fb87bfc9c7251781b5821",
+  "pubkey": "00037abd44e7a846689e230d5446abcd0d56a344fa81fff85c09d1929feda486",
+  "created_at": 1787738626,
+  "tags": [
+    [
+      "d",
+      "e442b92a-127f-4535-8254-4d8ba57efe71"
+    ],
+    [
+      "k",
+      "buy"
+    ],
+    [
+      "f",
+      "BRL"
+    ],
+    [
+      "s",
+      "pending"
+    ],
+    [
+      "amt",
+      "0"
+    ],
+    [
+      "fa",
+      "10",
+      "1500"
+    ],
+    [
+      "pm",
+      "DePix"
+    ],
+    [
+      "premium",
+      "0"
+    ],
+    [
+      "rating",
+      "[\"rating\",{\"days\":12,\"total_rating\":2.5,\"total_reviews\":1}]"
+    ],
+    [
+      "source",
+      "mostro:e442b92a-127f-4535-8254-4d8ba57efe71?relays=wss://relay.mostro.network,wss://nos.lol,wss://relay.nostr.band&mostro=00037abd44e7a846689e230d5446abcd0d56a344fa81fff85c09d1929feda486"
+    ],
+    [
+      "network",
+      "mainnet"
+    ],
+    [
+      "layer",
+      "lightning"
+    ],
+    [
+      "expires_at",
+      "1787824523"
+    ],
+    [
+      "expiration",
+      "1787824523"
+    ],
+    [
+      "y",
+      "mostro",
+      "Mostro Brasil"
+    ],
+    [
+      "z",
+      "order"
+    ]
+  ],
+  "content": "",
+  "sig": "5884fdb51646ce02834827a2ad6f262c9e60ad982005e4cd64d68784e841a6dde1c1b0ddf08cd975fa7bbc3008c5d92aad729609f338c5d4f2276d3ddbe315fa"
+}
