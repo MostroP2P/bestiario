@@ -1,0 +1,68 @@
+{
+  "kind": 38383,
+  "id": "79f173d88ebdd7d7f33642fc8b44b2765ffede0c00b2bd62018208b72df73db8",
+  "pubkey": "17b520bdbb2bb2d4f3457a39fc26af0ab5539fb77762731cc70c509aff3de6ca",
+  "created_at": 1787725716,
+  "tags": [
+    [
+      "d",
+      "fad7fcf1-738e-438d-8ad7-df60637ce345"
+    ],
+    [
+      "k",
+      "sell"
+    ],
+    [
+      "f",
+      "CUP"
+    ],
+    [
+      "s",
+      "success"
+    ],
+    [
+      "amt",
+      "1361"
+    ],
+    [
+      "fa",
+      "800"
+    ],
+    [
+      "pm",
+      "EnZona",
+      "Efectivo"
+    ],
+    [
+      "premium",
+      "10"
+    ],
+    [
+      "network",
+      "regtest"
+    ],
+    [
+      "layer",
+      "lightning"
+    ],
+    [
+      "expires_at",
+      "1787811890"
+    ],
+    [
+      "expiration",
+      "1789021716"
+    ],
+    [
+      "y",
+      "mostro",
+      "Fostro testing"
+    ],
+    [
+      "z",
+      "order"
+    ]
+  ],
+  "content": "",
+  "sig": "fcb9554f3725e6d0b93b2dac59020f8cf33313d3e91e1e03d3f3ad064b5e083adf85e7aed0f462010460c63b782406c6d7a772d97fd17885318a81774009a95a"
+}

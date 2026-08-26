@@ -1,0 +1,38 @@
+{
+  "kind": 38386,
+  "id": "748720a1edb6b40e14e85e1deb59860674c1ddd631066a705bc1e7ddb59068a6",
+  "pubkey": "b3626fe91b602bdbca3673bec0855221f41dc8f6d0e4027e51eaa525d68d87f2",
+  "created_at": 1787517755,
+  "tags": [
+    [
+      "d",
+      "6c66084b-88bf-4934-80ca-0e63a0170807"
+    ],
+    [
+      "expiration",
+      "1795293755"
+    ],
+    [
+      "s",
+      "seller-refunded"
+    ],
+    [
+      "initiator",
+      "seller"
+    ],
+    [
+      "created_at",
+      "1787512868"
+    ],
+    [
+      "y",
+      "mostro"
+    ],
+    [
+      "z",
+      "dispute"
+    ]
+  ],
+  "content": "",
+  "sig": "ad143886676eb1a55d1d1874538d7624ef895138cc871df46ed03d601f291c9be2d5da7ddfa3a74e3a8439269e4bd6615077bfbbf7fe09f11a0b0bc9b85bab2d"
+}

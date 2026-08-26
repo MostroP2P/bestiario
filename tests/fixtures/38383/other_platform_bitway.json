@@ -1,0 +1,90 @@
+{
+  "kind": 38383,
+  "id": "981dffa3be76db01738bcf2696eecdb2259794ee73432cd601296391042ce7f8",
+  "pubkey": "1d6b052521c00606f509ec0489486c2da4755012dbf8cafecb0588ae0fcba631",
+  "created_at": 1787734938,
+  "tags": [
+    [
+      "d",
+      "d994fea5-cd33-45a5-8855-c13b5d7908dd"
+    ],
+    [
+      "k",
+      "sell"
+    ],
+    [
+      "f",
+      "EUR"
+    ],
+    [
+      "s",
+      "canceled"
+    ],
+    [
+      "amt",
+      "295382"
+    ],
+    [
+      "fa",
+      "200.0"
+    ],
+    [
+      "pm",
+      "MBway"
+    ],
+    [
+      "premium",
+      "0.0"
+    ],
+    [
+      "source",
+      "https://bitway.me/offers/d994fea5-cd33-45a5-8855-c13b5d7908dd"
+    ],
+    [
+      "network",
+      "mainnet"
+    ],
+    [
+      "layer",
+      "lightning"
+    ],
+    [
+      "name",
+      ""
+    ],
+    [
+      "bond",
+      "0"
+    ],
+    [
+      "y",
+      "Bitway"
+    ],
+    [
+      "z",
+      "order"
+    ],
+    [
+      "reserved_at",
+      ""
+    ],
+    [
+      "created_at",
+      "1787730255"
+    ],
+    [
+      "paid_at",
+      ""
+    ],
+    [
+      "category",
+      "atm"
+    ],
+    [
+      "taker_fees",
+      "4992"
+    ]
+  ],
+  "content": "",
+  "sig": "64ca609df961177042952c3b8719a00f4d5f8b659bacba7db6a087cc206feb2264641e8517e1eef7ca61ca1f38e7bacc1d7c70ecff3a10c8ca9045019e804f1c"
+}

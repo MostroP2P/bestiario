@@ -1,0 +1,73 @@
+{
+  "kind": 38383,
+  "id": "dd04e727425cadbd5a88394888ee72ccbe5cc06a4139a42c8f44e6dc334017d4",
+  "pubkey": "a852e1c607d62bac867491f88b4ccec5ed751d965c45715c8762256674b57308",
+  "created_at": 1787737406,
+  "tags": [
+    [
+      "d",
+      "6a8e0bf6489f241ca44c67fb"
+    ],
+    [
+      "k",
+      "sell"
+    ],
+    [
+      "f",
+      "BRL"
+    ],
+    [
+      "s",
+      "canceled"
+    ],
+    [
+      "amt",
+      "0"
+    ],
+    [
+      "fa",
+      "10"
+    ],
+    [
+      "pm",
+      "pix"
+    ],
+    [
+      "premium",
+      "5"
+    ],
+    [
+      "rating",
+      "0",
+      "0",
+      "0"
+    ],
+    [
+      "source",
+      "https://t.me/novaruzchannel/139"
+    ],
+    [
+      "network",
+      "mainnet"
+    ],
+    [
+      "layer",
+      "lightning"
+    ],
+    [
+      "expiration",
+      "1787820206"
+    ],
+    [
+      "y",
+      "telegram",
+      "NOVARUZBOT🦫"
+    ],
+    [
+      "z",
+      "order"
+    ]
+  ],
+  "content": "",
+  "sig": "9d0ef61e47bf6bbd72ac9bba5eefd9660bfca30b410932db0501e8b9b108fc438f172de1b1a932fd6e77616dc137672148fd74821717efeb51a71af7243008bb"
+}

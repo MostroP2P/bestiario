@@ -1,0 +1,67 @@
+{
+  "kind": 38383,
+  "id": "1246557d548a9c8bbc4f00d4e22964402da1c3d9d1a466a2925945ba91fdc9bf",
+  "pubkey": "00037abd44e7a846689e230d5446abcd0d56a344fa81fff85c09d1929feda486",
+  "created_at": 1787740613,
+  "tags": [
+    [
+      "d",
+      "2b3ecc10-20dd-4883-959f-4e84c3c6ed2b"
+    ],
+    [
+      "k",
+      "buy"
+    ],
+    [
+      "f",
+      "BRL"
+    ],
+    [
+      "s",
+      "canceled"
+    ],
+    [
+      "amt",
+      "283733"
+    ],
+    [
+      "fa",
+      "1000"
+    ],
+    [
+      "pm",
+      "PIX"
+    ],
+    [
+      "premium",
+      "0"
+    ],
+    [
+      "network",
+      "mainnet"
+    ],
+    [
+      "layer",
+      "lightning"
+    ],
+    [
+      "expires_at",
+      "1787740111"
+    ],
+    [
+      "expiration",
+      "1790332613"
+    ],
+    [
+      "y",
+      "mostro",
+      "Mostro Brasil"
+    ],
+    [
+      "z",
+      "order"
+    ]
+  ],
+  "content": "",
+  "sig": "5827a637a0476523f471d25e6752fe424e6e8e94cca51318d06cb43675bf442217d0b864e5d17ce3d60593f14cda5641296de33b431f70e444d5a7a654aef6a8"
+}

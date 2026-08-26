@@ -1,0 +1,18 @@
+{
+  "kind": 10002,
+  "id": "d81afc27c25a796b20b72fa9aa55d4cabf1a30ca4b8b39c9a483f60469961230",
+  "pubkey": "00037abd44e7a846689e230d5446abcd0d56a344fa81fff85c09d1929feda486",
+  "created_at": 1787740760,
+  "tags": [
+    [
+      "r",
+      "wss://nos.lol"
+    ],
+    [
+      "r",
+      "wss://relay.mostro.network"
+    ]
+  ],
+  "content": "",
+  "sig": "bcb28535ceae8a613408d2083a14db30db7420839c1c8d53e1d8dc59921abe1b3e033b1be4e0b79383aa1426fa9ecdb8e924c91584acd99f097e89db29392ee2"
+}

@@ -1,0 +1,39 @@
+{
+  "kind": 38386,
+  "id": "368058f208bab03a139ec40cbc843c4d3cdb9e6f417c97de400c6c3635e9ce75",
+  "pubkey": "00000235a3e904cfe1213a8a54d6f1ec1bef7cc6bfaabd6193e82931ccf1366a",
+  "created_at": 1787533512,
+  "tags": [
+    [
+      "d",
+      "c6ebce7e-e521-4df3-a8c5-24301145eb66"
+    ],
+    [
+      "expiration",
+      "1788829512"
+    ],
+    [
+      "s",
+      "initiated"
+    ],
+    [
+      "initiator",
+      "seller"
+    ],
+    [
+      "created_at",
+      "1787533512"
+    ],
+    [
+      "y",
+      "mostro",
+      "Kmbalache 🇨🇺"
+    ],
+    [
+      "z",
+      "dispute"
+    ]
+  ],
+  "content": "",
+  "sig": "15d11ff52ff323ab6985c94f6a5173463f3d623bea553ba3820f45103e95cb0f895bf2978d87449984669a9bd1306b785f003e451c91e3129c97669ef6714899"
+}

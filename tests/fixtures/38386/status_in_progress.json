@@ -1,0 +1,39 @@
+{
+  "kind": 38386,
+  "id": "aab539946577a00eb592a7ab83263c0be1b88716a694e5331c5e0074ba8d9a1c",
+  "pubkey": "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390",
+  "created_at": 1787621078,
+  "tags": [
+    [
+      "d",
+      "c402fff7-5255-4894-8105-dfb98a5981d0"
+    ],
+    [
+      "expiration",
+      "1795397078"
+    ],
+    [
+      "s",
+      "in-progress"
+    ],
+    [
+      "initiator",
+      "buyer"
+    ],
+    [
+      "created_at",
+      "1787618375"
+    ],
+    [
+      "y",
+      "mostro",
+      "Mostro"
+    ],
+    [
+      "z",
+      "dispute"
+    ]
+  ],
+  "content": "",
+  "sig": "8bbc7e145a5876f882a13ec822646d07695ebce368263b16c064a57e4116c333dd13f5fc5f4ca068533d82462ef2e11157c1006b90b756a1b5bec44930b9dae3"
+}

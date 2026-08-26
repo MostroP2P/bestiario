@@ -1,0 +1,75 @@
+{
+  "kind": 38383,
+  "id": "180792ec9c9066811b9ce3d2f79669b83884cad2d79b338627bd874f257fe3ee",
+  "pubkey": "273e7880d38d39a7fb238efcf8957a1b5b27e819127a8483e975416a0a90f8d2",
+  "created_at": 1787738113,
+  "tags": [
+    [
+      "d",
+      "e6GfuXPbUjWdKUGt"
+    ],
+    [
+      "k",
+      "sell"
+    ],
+    [
+      "f",
+      "USD"
+    ],
+    [
+      "s",
+      "pending"
+    ],
+    [
+      "amt",
+      "127664"
+    ],
+    [
+      "fa",
+      "100.0",
+      "100.0"
+    ],
+    [
+      "pm",
+      "Cardless Cash"
+    ],
+    [
+      "premium",
+      "0.00"
+    ],
+    [
+      "source",
+      "https://hodlhodl.com/offers/e6GfuXPbUjWdKUGt?utm_campaign=nostr_offer&utm_source=nostr"
+    ],
+    [
+      "rating",
+      "{\"trades_count\":0,\"rating\":null}"
+    ],
+    [
+      "network",
+      "mainnet"
+    ],
+    [
+      "layer",
+      "onchain"
+    ],
+    [
+      "name",
+      "ppedroo"
+    ],
+    [
+      "expiration",
+      "1788342913"
+    ],
+    [
+      "y",
+      "hodlhodl"
+    ],
+    [
+      "z",
+      "order"
+    ]
+  ],
+  "content": "",
+  "sig": "58199337f0e858b2009b616dd15012d787003bf98d759b3b44d6d06f05124fd716d76e3de0992b3efdda533a50a2eaa04e4d494d698c78afbbc01c439641f895"
+}

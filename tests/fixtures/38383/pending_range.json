@@ -1,0 +1,81 @@
+{
+  "kind": 38383,
+  "id": "679d314779dd842998cb685dee6a590572af02d345636f88fcb6f6326567cbc9",
+  "pubkey": "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390",
+  "created_at": 1787740678,
+  "tags": [
+    [
+      "d",
+      "3c2548e4-d4f6-43dd-9d49-cffe71db806b"
+    ],
+    [
+      "k",
+      "sell"
+    ],
+    [
+      "f",
+      "ARS"
+    ],
+    [
+      "s",
+      "pending"
+    ],
+    [
+      "amt",
+      "0"
+    ],
+    [
+      "fa",
+      "25000",
+      "75000"
+    ],
+    [
+      "pm",
+      "Mercado Pago",
+      "MODO",
+      "CVU",
+      "Belo",
+      "Lemon",
+      "CBU"
+    ],
+    [
+      "premium",
+      "2"
+    ],
+    [
+      "rating",
+      "[\"rating\",{\"days\":1,\"total_rating\":2.5,\"total_reviews\":1}]"
+    ],
+    [
+      "source",
+      "mostro:3c2548e4-d4f6-43dd-9d49-cffe71db806b?relays=wss://relay.mostro.network,wss://nos.lol,wss://mostro-p2p.tech&mostro=82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390"
+    ],
+    [
+      "network",
+      "mainnet"
+    ],
+    [
+      "layer",
+      "lightning"
+    ],
+    [
+      "expires_at",
+      "1787827049"
+    ],
+    [
+      "expiration",
+      "1787827049"
+    ],
+    [
+      "y",
+      "mostro",
+      "Mostro"
+    ],
+    [
+      "z",
+      "order"
+    ]
+  ],
+  "content": "",
+  "sig": "08ba2539d64ed37c1ad19c62090755f48f5502e0ad553549307d6fd48d21a69b58535f27665d20c6a8750103b4d67fdeb5c3b327b37bde0870dcb90930f6b0a6"
+}
