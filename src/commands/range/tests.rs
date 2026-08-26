@@ -203,6 +203,88 @@ fn an_ambiguous_prefix_is_an_error_naming_the_candidates() {
 }
 
 #[test]
+fn two_instances_sharing_a_name_are_ambiguous() {
+    // `instances.name` has no uniqueness constraint: the name comes from a
+    // free-text `y` tag, and nothing stops two operators picking the same one.
+    // Resolving to whichever row came back first would silently report on the
+    // wrong instance.
+    let known = vec![
+        ("a".repeat(64), Some("mostro".to_string())),
+        ("b".repeat(64), Some("MOSTRO".to_string())),
+    ];
+
+    let error = InstanceFilter::resolve(Some("mostro"), &known).expect_err("duplicate name");
+
+    match error {
+        InstanceError::Ambiguous { needle, pubkeys } => {
+            assert_eq!(needle, "mostro");
+            assert_eq!(pubkeys.len(), 2);
+        }
+        other => panic!("expected an ambiguity error, got {other:?}"),
+    }
+    assert!(
+        error_message(&known, "mostro").contains("pubkey"),
+        "the error should say how to disambiguate"
+    );
+}
+
+#[test]
+fn an_exact_pubkey_wins_over_a_name_belonging_to_another_instance() {
+    // A pubkey is the primary key, so it is unique by construction and can
+    // never be the ambiguous one.
+    let pubkey = "a".repeat(64);
+    let known = vec![
+        (pubkey.clone(), Some("second".to_string())),
+        ("b".repeat(64), Some(pubkey.clone())),
+    ];
+
+    let filter = InstanceFilter::resolve(Some(&pubkey), &known).expect("resolves");
+
+    assert_eq!(filter, InstanceFilter::One { pubkey });
+}
+
+#[test]
+fn a_non_ascii_name_is_matched_case_insensitively() {
+    // `eq_ignore_ascii_case` folds only ASCII, so it would leave `Möstro` and
+    // `MÖSTRO` as different names while the resolver promises otherwise.
+    let known = vec![("a".repeat(64), Some("Möstro".to_string()))];
+
+    let filter = InstanceFilter::resolve(Some("MÖSTRO"), &known).expect("resolves");
+
+    assert_eq!(
+        filter,
+        InstanceFilter::One {
+            pubkey: "a".repeat(64)
+        }
+    );
+}
+
+#[test]
+fn an_exact_name_wins_over_a_pubkey_prefix() {
+    // `ab` is both a name and a prefix of two pubkeys. The name is the more
+    // specific match, so it resolves rather than reporting ambiguity.
+    let known = vec![
+        ("ab00".to_string(), Some("ab".to_string())),
+        ("ab11".to_string(), None),
+    ];
+
+    let filter = InstanceFilter::resolve(Some("ab"), &known).expect("resolves");
+
+    assert_eq!(
+        filter,
+        InstanceFilter::One {
+            pubkey: "ab00".to_string()
+        }
+    );
+}
+
+fn error_message(known: &[KnownInstance], needle: &str) -> String {
+    InstanceFilter::resolve(Some(needle), known)
+        .expect_err("expected an error")
+        .to_string()
+}
+
+#[test]
 fn an_exact_pubkey_wins_over_being_a_prefix_of_another() {
     // A pubkey that happens to be a prefix of nothing else is trivial; this
     // covers the case where an exact match co-exists with prefix matches.

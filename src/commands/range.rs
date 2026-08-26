@@ -126,61 +126,75 @@ pub enum InstanceError {
 pub type KnownInstance = (String, Option<String>);
 
 impl InstanceFilter {
-    /// Resolves `--instance` against the instances the database knows about.
+    /// Resolves `--instance` against the instances the database knows about,
+    /// in a fixed order of precedence:
     ///
-    /// Accepts a full pubkey, a unique pubkey prefix, or a name. Names are
-    /// matched case-insensitively, because they come from a free-text tag and
-    /// nobody types `LNP2PBot`.
+    /// 1. **An exact pubkey.** Unique by construction — it is the primary key
+    ///    — so it is never ambiguous and wins outright.
+    /// 2. **An exact name.** Names come from the free-text `y` tag and the
+    ///    `instances.name` column carries no uniqueness constraint, so two
+    ///    instances may well advertise the same one. Several exact name
+    ///    matches are therefore ambiguous, not a race to be first.
+    /// 3. **A pubkey prefix**, if it identifies exactly one instance.
     ///
-    /// A prefix matching several instances is an error rather than a silent
-    /// pick: reporting on the wrong instance is worse than being asked for
-    /// another character.
+    /// Ambiguity at any level is an error naming the candidates rather than a
+    /// silent pick: reporting on the wrong instance is worse than being asked
+    /// for another character.
     pub fn resolve(needle: Option<&str>, known: &[KnownInstance]) -> Result<Self, InstanceError> {
         let Some(needle) = needle else {
             return Ok(Self::All);
         };
         let needle = needle.trim();
 
-        let folded = needle.to_lowercase();
-        let matches: Vec<&str> = known
-            .iter()
-            .filter(|(pubkey, name)| {
-                pubkey.eq_ignore_ascii_case(needle)
-                    || pubkey.to_lowercase().starts_with(&folded)
-                    || name
-                        .as_deref()
-                        .is_some_and(|n| n.eq_ignore_ascii_case(needle))
-            })
-            .map(|(pubkey, _)| pubkey.as_str())
-            .collect();
-
-        match matches.as_slice() {
-            [] => Err(InstanceError::NotFound {
-                needle: needle.to_string(),
-            }),
-            [pubkey] => Ok(Self::One {
-                pubkey: (*pubkey).to_string(),
-            }),
-            several => {
-                // An exact pubkey or exact name is not ambiguous even when it
-                // is also a prefix of something else.
-                if let Some(exact) = known.iter().find(|(pubkey, name)| {
-                    pubkey.eq_ignore_ascii_case(needle)
-                        || name
-                            .as_deref()
-                            .is_some_and(|n| n.eq_ignore_ascii_case(needle))
-                }) {
-                    return Ok(Self::One {
-                        pubkey: exact.0.clone(),
-                    });
-                }
-
-                Err(InstanceError::Ambiguous {
-                    needle: needle.to_string(),
-                    pubkeys: several.iter().map(|p| (*p).to_string()).collect(),
-                })
-            }
+        // Pubkeys are lowercase hex, so ASCII folding is both correct and
+        // exact for them.
+        if let Some((pubkey, _)) = known.iter().find(|(p, _)| p.eq_ignore_ascii_case(needle)) {
+            return Ok(Self::One {
+                pubkey: pubkey.clone(),
+            });
         }
+
+        // Names are arbitrary text, so folding has to be Unicode-aware:
+        // `eq_ignore_ascii_case` would leave `Möstro` and `MÖSTRO` as
+        // different names while promising case-insensitive matching.
+        let folded = needle.to_lowercase();
+
+        let by_name = matching(known, |(_, name)| {
+            name.as_deref().is_some_and(|n| n.to_lowercase() == folded)
+        });
+        if let Some(resolved) = one_of(needle, &by_name)? {
+            return Ok(resolved);
+        }
+
+        let by_prefix = matching(known, |(pubkey, _)| {
+            pubkey.to_lowercase().starts_with(&folded)
+        });
+        one_of(needle, &by_prefix)?.ok_or(InstanceError::NotFound {
+            needle: needle.to_string(),
+        })
+    }
+}
+
+fn matching(known: &[KnownInstance], predicate: impl Fn(&KnownInstance) -> bool) -> Vec<String> {
+    known
+        .iter()
+        .filter(|instance| predicate(instance))
+        .map(|(pubkey, _)| pubkey.clone())
+        .collect()
+}
+
+/// Collapses a set of candidates into at most one instance: none is "keep
+/// looking", one resolves, and more than one is an error rather than a choice.
+fn one_of(needle: &str, candidates: &[String]) -> Result<Option<InstanceFilter>, InstanceError> {
+    match candidates {
+        [] => Ok(None),
+        [pubkey] => Ok(Some(InstanceFilter::One {
+            pubkey: pubkey.clone(),
+        })),
+        several => Err(InstanceError::Ambiguous {
+            needle: needle.to_string(),
+            pubkeys: several.to_vec(),
+        }),
     }
 }
 
