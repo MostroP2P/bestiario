@@ -108,6 +108,25 @@ async fn a_backwards_advance_still_records_that_the_relay_was_reached() {
 }
 
 #[tokio::test]
+async fn an_advance_that_captured_an_earlier_now_does_not_rewind_the_sighting() {
+    // Backfill and sync can write at once, so a call holding an earlier `now`
+    // may commit after a later one. `updated_at` means "when this relay was
+    // last reached", and rewinding it would report stale liveness.
+    let pool = migrated().await;
+
+    advance(&pool, RELAY, ORDERS, EARLIER, RUN_TWO)
+        .await
+        .expect("advance");
+    advance(&pool, RELAY, ORDERS, LATER, RUN_ONE)
+        .await
+        .expect("advance");
+
+    let stored = cursor(&pool, RELAY, ORDERS).await.expect("stored");
+    assert_eq!(stored.updated_at, RUN_TWO);
+    assert_eq!(stored.last_created_at, LATER);
+}
+
+#[tokio::test]
 async fn advancing_to_the_same_timestamp_is_idempotent() {
     let pool = migrated().await;
 
