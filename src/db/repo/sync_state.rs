@@ -27,10 +27,16 @@ pub struct Cursor {
 
 /// Moves the cursor to `created_at`, if that is further along than where it is.
 ///
-/// Never backwards. Backfill walks into the past and would otherwise reset a
-/// cursor that live sync had already carried forward, making the next `sync`
-/// re-read everything in between; and a relay replaying an old event must not
-/// undo progress either.
+/// Never backwards, in either clock. Backfill walks into the past and would
+/// otherwise reset a cursor that live sync had already carried forward, making
+/// the next `sync` re-read everything in between; and a relay replaying an old
+/// event must not undo progress either.
+///
+/// `updated_at` takes the later of the two for the same reason. Backfill and
+/// sync can be writing at once — the pool is configured for exactly that — so
+/// a call that captured an earlier `now` may commit after a later one, and an
+/// unconditional assignment would report a relay as last reached before it
+/// actually was.
 pub async fn advance<'e, E>(
     executor: E,
     relay_url: &str,
@@ -46,7 +52,7 @@ where
          VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT(relay_url, kind) DO UPDATE SET
            last_created_at = MAX(sync_state.last_created_at, excluded.last_created_at),
-           updated_at = excluded.updated_at",
+           updated_at = MAX(sync_state.updated_at, excluded.updated_at)",
     )
     .bind(relay_url)
     .bind(i64::from(kind))
