@@ -16,6 +16,11 @@ source of truth for formats, schema and metrics. This document only answers
   literal PR title.
 - **Size** is a rough budget, not a rule: `S` ≤ ~150 lines of diff, `M` ≤ ~400,
   `L` > 400. Anything trending past `L` should be split before opening it.
+- **PR numbers are identifiers, not an order.** Merge order is given by the
+  `Depends` column alone, and every row's dependencies are listed in full —
+  including the ones a reader might assume from adjacency. The numbering is
+  kept monotonic with dependencies wherever possible so the two rarely
+  disagree.
 - `Depends` lists PRs that must be merged first. PRs with no shared dependency
   can be developed in parallel branches.
 - Deliberate bundling: some rows group several trivial tasks (e.g. all four
@@ -28,11 +33,11 @@ source of truth for formats, schema and metrics. This document only answers
 | Phase | Goal | PRs | Exit criterion |
 |---|---|---|---|
 | 0 | Skeleton that builds, configures and stores | 01–06 | `bestiario --help` runs; migrations apply to an empty DB |
-| 1 | Ingestion: relays → SQLite | 07–19 | `backfill` + `sync` populate every table from a real relay |
-| 2 | Observed statistics and reporting | 20–29 | `summary`, `instances`, `compare` and `stats orders\|dev-fees\|disputes` in table and JSON |
-| 3 | Valuation and inference | 30–37 | `stats volume --in USD`, inferred vs. observed volume with error margins |
+| 1 | Ingestion: relays → SQLite | 07–22 | `backfill` and `sync` populate the order, dev-fee, dispute and instance tables from a real relay; `rebuild` reproduces the projections |
+| 2 | Observed statistics and reporting | 23–30 | `summary`, `instances`, `compare` and `stats orders\|dev-fees\|disputes` in table and JSON, covered end to end |
+| 3 | Valuation and inference | 31–37 | `stats volume --in USD`, inferred vs. observed volume with error margins |
 | 4 | Discovery, series and market views | 38–43 | `series`, `market <FIAT>`, relay/instance discovery |
-| 5 | Exposure (HTTP API) | 44–47 | `stats/` served over HTTP without touching the aggregation layer |
+| 5 | Exposure (HTTP API) | 44–47 | `bestiario-stats` served over HTTP without touching the aggregation layer |
 
 Phases 0–2 produce the first genuinely useful release (`v0.1.0`): counts,
 dev fees and disputes, all observed, no inference. Phase 3 is what makes the
@@ -48,11 +53,11 @@ paying the setup cost once.
 
 | # | Title | Size | Depends | Scope |
 |---|---|---|---|---|
-| 01 | `chore: add dependencies and module skeleton` | S | — | Add every crate from SPEC §11 to `Cargo.toml` at the pinned versions. Create the empty module tree of SPEC §8 (`config`, `nostr`, `ingest`, `db`, `stats`, `report`, `commands`), each with a `mod.rs` and a doc comment stating its responsibility. `stats/` gets a `#![deny]`-style note that it must not import `sqlx` or `nostr_sdk`. |
-| 02 | `ci: build, lint, test and coverage workflow` | S | 01 | GitHub Actions: `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`, `cargo llvm-cov` with a reported (not yet enforced) threshold. Cache the cargo registry. |
+| 01 | `chore: add dependencies and module skeleton` | S | — | Add every crate from SPEC §11 to `Cargo.toml` at the pinned versions. Create the empty module tree of SPEC §8 (`config`, `nostr`, `ingest`, `db`, `report`, `commands`), each with a `mod.rs` and a doc comment stating its responsibility. Split the crate into a library plus a thin binary so integration tests can drive the CLI's own code paths. Put the aggregation layer in its own workspace crate, `bestiario-stats`, re-exported as `bestiario::stats`: its short dependency list is what makes the no-I/O rule of §8 a compile error rather than a convention. |
+| 02 | `ci: build, lint, test and coverage workflow` | S | 01 | GitHub Actions: `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`, `cargo llvm-cov` with a reported (not yet enforced) threshold. Cache the cargo registry. Add `scripts/check-stats-deps.sh`, which checks the dependency tables of `crates/stats` against an allowlist of computation-only crates — the one hole cargo cannot close by itself. |
 | 03 | `feat(config): load and validate settings.toml` | M | 01 | <ul><li>`Settings` struct mirroring SPEC §9 with `serde`.</li><li>Layered load (file + `BESTIARIO_*` env) via `config`.</li><li>Validation at startup: relays are valid `wss://` URLs, instance pubkeys are 64 hex chars, `dev_fee_percentage` ∈ (0,1], `networks` non-empty, `reference_currency` is a 3-letter code.</li><li>`settings.toml.example` at the repo root, `settings.toml` in `.gitignore`.</li><li>Tests: a valid file parses; each validation rule has one failing-case test asserting the error message.</li></ul> |
-| 04 | `feat(db): connection pool and migrations` | M | 01 | <ul><li>`migrations/0001_initial.sql` with the full schema of SPEC §4, verbatim, indexes included.</li><li>`db::connect(&Settings)` → `SqlitePool`, `WAL` mode, `foreign_keys = ON`, `busy_timeout`.</li><li>`db::migrate(&pool)` running `sqlx::migrate!`.</li><li>Test: migrating an in-memory DB creates every expected table; migrating twice is a no-op.</li></ul> |
-| 05 | `feat(cli): command skeleton and logging` | M | 03 | <ul><li>`clap` derive tree for every command in SPEC §10; subcommands return `unimplemented` with a clear message.</li><li>Global flags: `--config`, `--json`, `--from`, `--until`, `--instance`, `--network`, `-v/--verbose`.</li><li>`tracing-subscriber` wired to `-v` and `RUST_LOG`.</li><li>`main` becomes `#[tokio::main]`, loads settings, opens the pool, runs migrations, dispatches.</li><li>Test: `--help` for every subcommand; `--from`/`--until` parse both unix ts and `YYYY-MM-DD`.</li></ul> |
+| 04 | `feat(db): connection pool and migrations` | M | 01, 03 | <ul><li>`migrations/0001_initial.sql` with the full schema of SPEC §4, verbatim, indexes included.</li><li>`db::connect(&Settings)` → `SqlitePool`, `WAL` mode, `foreign_keys = ON`, `busy_timeout`.</li><li>`db::migrate(&pool)` running `sqlx::migrate!`.</li><li>Test: migrating an in-memory DB creates every expected table; migrating twice is a no-op.</li></ul> |
+| 05 | `feat(cli): command skeleton and logging` | M | 03, 04 | <ul><li>`clap` derive tree for every command in SPEC §10; subcommands return `unimplemented` with a clear message.</li><li>Global flags: `--config`, `--json`, `--from`, `--until`, `--instance`, `--network`, `-v/--verbose`.</li><li>`tracing-subscriber` wired to `-v` and `RUST_LOG`.</li><li>`main` becomes `#[tokio::main]`, loads settings, opens the pool, runs migrations, dispatches.</li><li>Test: `--help` for every subcommand; `--from`/`--until` parse both unix ts and `YYYY-MM-DD`.</li></ul> |
 | 06 | `feat(cli): time range and filter resolution` | S | 05 | A `Range { from, until }` resolved once from the global flags (default: last 30 days) plus an `InstanceFilter` resolving `--instance` against pubkey *or* name. Every later stats PR consumes these instead of re-parsing. Tests for the defaulting and the name→pubkey resolution. |
 
 ---
@@ -70,7 +75,7 @@ PR can be tested with nothing but fixtures.
 | 08 | `feat(ingest): parse kind 38383 orders` | M | 07 | `parse::order::parse(&Event) -> Result<OrderVersion, ParseError>` per SPEC §2.1. Handles range vs. fixed `fa`, csv `pm`, missing optional tags, unknown `s` values (hard error, not silent default). Tests: one per fixture plus malformed-tag cases. |
 | 09 | `feat(ingest): parse kind 8383 dev fees` | S | 07 | `parse::dev_fee::parse` per SPEC §2.2. `order-id`, `amount`, `hash`, `destination`, `network`. Tests including an event missing `destination`. |
 | 10 | `feat(ingest): parse kinds 38386 and 38385` | M | 07 | Two parsers, bundled because each is small and they share no logic with anything else: `parse::dispute` (SPEC §2.3, note `created_at` tag ≠ event `created_at`) and `parse::info` (SPEC §2.4, csv `fiat_currencies_accepted`, `fee` as fraction, bond fields). Tests per fixture. |
-| 11 | `feat(ingest): extract instance identity from the y tag` | S | 08 | Shared helper `parse::instance_name(&Event) -> Option<String>` reading the second value of `y`, used by all four parsers. Test: `y=["mostro"]` → `None`; `y=["mostro","lnp2pbot"]` → `Some`. |
+| 11 | `feat(ingest): extract instance identity from the y tag` | S | 08, 09, 10 | Shared helper `parse::instance_name(&Event) -> Option<String>` reading the second value of `y`, used by all four parsers. Test: `y=["mostro"]` → `None`; `y=["mostro","lnp2pbot"]` → `Some`. |
 
 ### 1b. Repositories
 
@@ -88,20 +93,21 @@ against an in-memory SQLite created by the phase-0 migrations.
 
 | # | Title | Size | Depends | Scope |
 |---|---|---|---|---|
-| 16 | `feat(nostr): filter builders` | S | 01 | `nostr::filters` producing a `Filter` per kind with `authors`, `since`, `until`, `limit`. Pure functions, unit-tested against expected filter JSON — no network. |
-| 17 | `feat(nostr): relay client with paginated fetch` | M | 16, 03 | Connect to configured relays, `subscribe`, and `fetch_window(filter)` for the backwards-walking backfill of SPEC §8.2. Handles per-relay failure without aborting the run (log and continue). Tested against the `nostr-sdk` local relay feature. |
-| 18 | `feat(ingest): event pipeline` | L | 12–15, 17 | The seven steps of SPEC §8.1 in one place: verify signature → instance allow-list → `network` filter → dedup → parse by kind → persist version + refresh projection **in one transaction** → advance cursor. Returns an `IngestOutcome` enum (`Stored`, `Duplicate`, `Rejected(reason)`) so callers can report counts. Tests: an event with a tampered signature is rejected and stored nowhere; an unknown pubkey is rejected when `accept_unknown_instances = false`; a testnet order is skipped; a valid order lands in `events` + `order_versions` + `orders` + `instances`. |
-| 19 | `feat(db): sync state cursor` | S | 04 | `repo::sync_state` get/advance per `(relay, kind)`. Test: advancing never moves the cursor backwards. |
-| 20 | `feat(cmd): backfill` | M | 18, 19 | Backwards windowed walk per relay and kind until `backfill_from` or an empty response; progress logged per window; final summary of stored/duplicate/rejected counts. `--from`, `--until`, `--kind`. Integration test against the local relay seeded with fixtures. |
-| 21 | `feat(cmd): sync` | M | 18, 19 | Live subscription with `since = cursor − resume_overlap_secs`, reconnect with backoff, graceful shutdown on SIGINT flushing the cursor. Integration test: publish to the local relay while `sync` runs, assert the row appears. |
+| 16 | `feat(db): sync state cursor` | S | 04 | `repo::sync_state` get/advance per `(relay, kind)`. Test: advancing never moves the cursor backwards. |
+| 17 | `feat(nostr): filter builders` | S | 01 | `nostr::filters` producing a `Filter` per kind with `authors`, `since`, `until`, `limit`. Pure functions, unit-tested against expected filter JSON — no network. |
+| 18 | `feat(nostr): relay client with paginated fetch` | M | 03, 17 | Connect to configured relays, `subscribe`, and `fetch_window(filter)` for the backwards-walking backfill of SPEC §8.2. Handles per-relay failure without aborting the run (log and continue). Tested against the `nostr-sdk` local relay feature. |
+| 19 | `feat(ingest): event pipeline` | L | 12–16, 18 | The seven steps of SPEC §8.1 in one place: verify signature → instance allow-list → `network` filter → dedup → parse by kind → persist version + refresh projection **in one transaction** → advance cursor. Returns an `IngestOutcome` enum (`Stored`, `Duplicate`, `Rejected(reason)`) so callers can report counts. Tests: an event with a tampered signature is rejected and stored nowhere; an unknown pubkey is rejected when `accept_unknown_instances = false`; a testnet order is skipped; a valid order lands in `events` + `order_versions` + `orders` + `instances`. |
+| 20 | `feat(cmd): backfill` | M | 19 | Backwards windowed walk per relay and kind until `backfill_from` or an empty response; progress logged per window; final summary of stored/duplicate/rejected counts. `--from`, `--until`, `--kind`. Integration test against the local relay seeded with fixtures. |
+| 21 | `feat(cmd): sync` | M | 19 | Live subscription with `since = cursor − resume_overlap_secs`, reconnect with backoff, graceful shutdown on SIGINT flushing the cursor. Integration test: publish to the local relay while `sync` runs, assert the row appears. |
 | 22 | `feat(cmd): rebuild` | M | 13, 15 | Regenerate `orders` and `disputes` projections from `*_versions`, and optionally (`--from-raw`) regenerate the version tables from `events.raw_json`. Test: wipe both projections, rebuild, assert byte-identical to pre-wipe. |
 
 ---
 
 ## Phase 2 — Observed statistics
 
-`stats/` stays I/O-free (SPEC §8): each PR adds a loader in `db/` returning
-plain structs, a pure aggregation in `stats/`, and a renderer in `report/`.
+The `bestiario-stats` crate stays I/O-free (SPEC §8): each PR adds a loader in
+`db/` returning plain structs, a pure aggregation in `crates/stats`, and a
+renderer in `report/`.
 
 | # | Title | Size | Depends | Scope |
 |---|---|---|---|---|
@@ -122,7 +128,7 @@ Where the observed/inferred distinction of SPEC §5 starts earning its keep.
 
 | # | Title | Size | Depends | Scope |
 |---|---|---|---|---|
-| 31 | `feat(ingest): parse and store kind 30078 rates` | M | 18 | Parser per SPEC §2.5, `repo::rates`, wired into the pipeline and into the backfill/sync kind lists. Tests per fixture including a malformed `content`. |
+| 31 | `feat(ingest): parse and store kind 30078 rates` | M | 19, 20, 21 | Parser per SPEC §2.5, `repo::rates`, wired into the pipeline and into the backfill/sync kind lists. Tests per fixture including a malformed `content`. |
 | 32 | `feat(stats): rate lookup with age reporting` | M | 31 | `rate_at(pubkey, fiat, at_ts) -> Option<(rate, age_secs)>` picking the newest snapshot at or before `at_ts`, falling back across instances when the instance has no feed (flagged in the result). This is the single dependency of every converted figure. Tests: exact hit, stale hit with correct age, no rate at all. |
 | 33 | `feat(stats): observed volume metrics` | L | 24, 32 | SPEC §6.2 observed rows: sats volume, fiat volume per currency, average/p50/p90 ticket, size-distribution buckets, largest order, volume by kind. `stats volume --by ...`. |
 | 34 | `feat(stats): volume in a reference currency` | M | 33 | The inferred conversion row: `amount_sats × rate(fiat, ≤ success_at)`, reported with `rate_age_secs` in the `error` field. `stats volume --in USD`. Tests asserting the error column is populated and the metric is marked `inferred`. |
@@ -153,7 +159,7 @@ the metric set has stopped moving.
 | # | Title | Size | Depends | Scope |
 |---|---|---|---|---|
 | 44 | `feat(api): HTTP server skeleton` | M | 43 | `axum`, `/health`, config section `[api]`, graceful shutdown, behind a `api` cargo feature so the CLI-only build stays lean. |
-| 45 | `feat(api): metric endpoints over stats/` | L | 44 | One endpoint per view of §6.10 plus the `stats` families, reusing the phase-2/3 aggregations unchanged. If any endpoint needs a change inside `stats/`, that is a signal the layer boundary was wrong — fix it there, not in the handler. |
+| 45 | `feat(api): metric endpoints over the stats crate` | L | 44 | One endpoint per view of §6.10 plus the `stats` families, reusing the phase-2/3 aggregations unchanged. If any endpoint needs a change inside `crates/stats`, that is a signal the layer boundary was wrong — fix it there, not in the handler. |
 | 46 | `feat(api): caching and rate limiting` | M | 45 | Short-TTL response cache keyed by range + filters; per-IP rate limit. Aggregations over a full backfill are not cheap enough to run per request. |
 | 47 | `feat(api): OpenAPI schema and JSON contract tests` | M | 45 | Generated schema plus tests asserting the HTTP JSON matches the CLI `--json` envelope exactly — one contract, two transports. |
 
@@ -165,7 +171,8 @@ the metric set has stopped moving.
   independent of 12–15 (repositories) once 07 lands. Within phase 2, PRs
   24/25/26 are independent of each other once 23 lands. Within phase 3, PRs 36
   and 37 do not depend on each other.
-- **The critical path** is 01 → 03 → 04 → 12 → 18 → 20 → 23 → 24 → 28. Anything
+- **The critical path** is 01 → 03 → 04 → 05 → 06 → 12 → 16 → 19 → 20 → 23 →
+  24 → 28. Anything
   blocking one of those blocks the first useful release.
 - **Do not start phase 3 before PR 30.** The E2E test is what makes it safe to
   add inference on top: without it, an inferred number that is wrong for the

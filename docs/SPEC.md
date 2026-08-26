@@ -483,16 +483,21 @@ src/
   db/
     mod.rs           pool, migrations
     repo/            one repository per table (idempotent insert, queries)
-  stats/             pure aggregations over structs (no I/O) — testable with fixtures
   report/            table rendering (comfy-table) and JSON
   commands/          sync, backfill, stats, instances, rebuild
+crates/stats/        pure aggregations over structs (no I/O) — testable with fixtures
 migrations/          sqlx migrate
 tests/fixtures/      real event JSON per kind
 ```
 
-The `stats/` layer receives data already loaded from `db/` and returns
+The aggregation layer receives data already loaded from `db/` and returns
 serializable structs; it knows nothing about SQLite or Nostr. It is what an
 HTTP API or dashboard reuses later.
+
+It is a **separate workspace crate**, `bestiario-stats`, re-exported as
+`bestiario::stats`. A module could keep the no-I/O rule only by convention;
+as its own crate, `sqlx`, `nostr-sdk` and `tokio` are not in scope, so code
+that reaches for them does not compile.
 
 ### 8.1 Ingestion pipeline
 
