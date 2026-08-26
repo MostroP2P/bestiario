@@ -9,6 +9,7 @@
 //! transaction when the pipeline needs several tables to move together
 //! (`docs/SPEC.md` §8.1 step 7).
 
+pub mod dev_fees;
 pub mod events;
 pub mod instances;
 pub mod orders;
