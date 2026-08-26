@@ -46,6 +46,13 @@ about enters the system through a 38383.
 Notes:
 
 - The event `pubkey` is the Mostro instance. Each instance is a "beast".
+- [NIP-69](https://nips.nostr.com/69) defines `y` as the name of the platform
+  publishing the order. Mostro adds a **second value with the name of the
+  specific node**, because Mostro is not a single node but a network of many
+  nodes running the same software: the first value (`mostro`) identifies the
+  software — the quickest way to tell that a node is a Mostro node — and the
+  second identifies the instance. The second value is optional: an instance
+  with no configured name publishes just `["mostro"]`. See §3.
 - Addressable: the relay keeps only the latest version per
   `(pubkey, kind, d)`. bestiario persists **every version** it sees
   (`order_versions`) to reconstruct the lifecycle.
@@ -127,7 +134,9 @@ additional relays (opt-in, see config `discover_relays`).
 
 Each instance is identified by its **hex pubkey** (primary key). The human
 name comes from the second value of the `y` tag of any event (38383, 8383,
-38386, 38385). Rules:
+38386, 38385) — the Mostro-specific extension to the
+[NIP-69](https://nips.nostr.com/69) `y` tag described in §2.1, where the first
+value is always the software (`mostro`) and the second the node name. Rules:
 
 - The most recently observed name wins (`instances.name`, `name_seen_at`).
 - The name history is also kept in `instance_names` in case an instance is
