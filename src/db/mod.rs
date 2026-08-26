@@ -31,21 +31,21 @@ pub enum DbError {
     #[error("`{url}` is not a SQLite URL: expected it to start with `sqlite:`")]
     NotSqlite { url: String },
 
-    #[error("`{url}` is not a usable SQLite URL: {source}")]
+    #[error("`{url}` is not a usable SQLite URL")]
     Url {
         url: String,
         #[source]
         source: sqlx::Error,
     },
 
-    #[error("could not open the database at `{url}`: {source}")]
+    #[error("could not open the database at `{url}`")]
     Connect {
         url: String,
         #[source]
         source: sqlx::Error,
     },
 
-    #[error("could not apply migrations: {0}")]
+    #[error("could not apply migrations")]
     Migrate(#[from] sqlx::migrate::MigrateError),
 }
 

@@ -13,6 +13,8 @@ use std::path::PathBuf;
 
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 
+use crate::network::Network;
+
 /// Statistics for the Mostro network, indexed from public Nostr events.
 #[derive(Debug, Parser)]
 #[command(name = "bestiario", version, about, long_about = None)]
@@ -38,8 +40,8 @@ pub struct Cli {
     pub instance: Option<String>,
 
     /// Restrict to one network, overriding the configured list.
-    #[arg(long, global = true, value_name = "NETWORK")]
-    pub network: Option<String>,
+    #[arg(long, global = true, value_enum, value_name = "NETWORK")]
+    pub network: Option<Network>,
 
     /// Increase log verbosity; repeat for more. Overridden by RUST_LOG.
     #[arg(long, short = 'v', global = true, action = ArgAction::Count)]

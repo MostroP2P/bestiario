@@ -7,6 +7,8 @@
 use anyhow::{Context as _, Result};
 use sqlx::SqlitePool;
 
+pub mod range;
+
 use crate::cli::{Cli, Command, StatsCommand};
 use crate::config::Settings;
 

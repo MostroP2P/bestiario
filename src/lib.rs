@@ -28,6 +28,7 @@ pub mod config;
 pub mod db;
 pub mod ingest;
 pub mod logging;
+pub mod network;
 pub mod nostr;
 pub mod report;
 
