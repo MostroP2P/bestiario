@@ -10,8 +10,6 @@
 
 use std::time::Duration;
 
-use nostr_sdk::prelude::*;
-
 use super::*;
 
 /// Long enough that a busy CI machine does not fail the test, short enough
