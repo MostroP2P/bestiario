@@ -27,8 +27,13 @@ jobs:
         run: cargo fmt --all --check
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-      - name: stats layer performs no I/O
+      - name: stats layer declares no I/O dependencies
         run: ./scripts/check-stats-deps.sh
+      - name: stats layer does not reach std I/O
+        # CLIPPY_CONF_DIR points at crates/stats/clippy.toml, which disallows
+        # std::fs, std::net and std::process by resolved path. Scoped to that
+        # crate: the rest of the workspace is allowed to do I/O, that is its job.
+        run: CLIPPY_CONF_DIR=crates/stats cargo clippy -p bestiario-stats --all-targets -- -D warnings
 
   test:
     name: Test
