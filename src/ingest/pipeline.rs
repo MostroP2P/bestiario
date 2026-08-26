@@ -292,6 +292,37 @@ impl Pipeline {
         .await
     }
 
+    /// Re-derives everything a stored event feeds, skipping steps 2 to 6.
+    ///
+    /// `rebuild` replays the archive. Those events were admitted once and are
+    /// in `events` *because* they were, so re-applying the admission rules
+    /// would re-litigate a settled decision against today's configuration —
+    /// a narrowed `networks` list would quietly delete history rather than
+    /// rebuild it. Dedup is skipped for the same reason: every insert below
+    /// is idempotent, so a replay of a version already stored is a no-op.
+    ///
+    /// A parse failure is reported rather than returned as an error: a corpus
+    /// with one unreadable event in it still has a projection worth rebuilding.
+    pub async fn replay(&self, event: &Event) -> Result<IngestOutcome, sqlx::Error> {
+        let parsed = match Self::parse(event) {
+            Ok(parsed) => parsed,
+            Err(rejection) => {
+                tracing::debug!(id = %event.id, %rejection, "archived event not replayed");
+                return Ok(IngestOutcome::Rejected(rejection));
+            }
+        };
+
+        // One transaction, for the reason `ingest` opens one: a version whose
+        // projection was never refreshed answers queries with the state before
+        // it, and a rebuild that left one behind would be a rebuild nobody
+        // could tell had failed.
+        let mut tx = self.pool.begin().await?;
+        Self::persist(&mut tx, event, &parsed).await?;
+        tx.commit().await?;
+
+        Ok(IngestOutcome::Stored)
+    }
+
     /// Steps 2 to 5: everything that can be decided from the event alone.
     ///
     /// `None` means the event is wanted. The order is the spec's: the

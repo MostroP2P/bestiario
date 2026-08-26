@@ -11,7 +11,7 @@
 //! comparison here is therefore against the event's own `created_at`, which is
 //! the same order in either direction.
 
-use sqlx::{Executor, Sqlite};
+use sqlx::{Acquire, Executor, Sqlite};
 
 /// One row of `instances`.
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
@@ -136,6 +136,27 @@ where
     .bind(pubkey)
     .fetch_all(executor)
     .await
+}
+
+/// Empties both the bestiary and the name history.
+///
+/// The two go together: a name history without its instance is a set of rows
+/// nothing points at, and the rebuild that refills them reads both from the
+/// same pass over `events`.
+pub async fn clear<'a, A>(acquirer: A) -> Result<(), sqlx::Error>
+where
+    A: Acquire<'a, Database = Sqlite>,
+{
+    let mut connection = acquirer.acquire().await?;
+
+    sqlx::query("DELETE FROM instance_names")
+        .execute(&mut *connection)
+        .await?;
+    sqlx::query("DELETE FROM instances")
+        .execute(&mut *connection)
+        .await?;
+
+    Ok(())
 }
 
 #[cfg(test)]

@@ -148,5 +148,16 @@ impl InfoRow {
     }
 }
 
+/// Empties the table; see [`super::orders::clear_versions`].
+pub async fn clear<'e, E>(executor: E) -> Result<(), sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    sqlx::query("DELETE FROM instance_info")
+        .execute(executor)
+        .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests;
