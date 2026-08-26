@@ -61,7 +61,7 @@ impl Initiator {
         }
     }
 
-    fn parse(value: &str) -> Result<Self, ParseError> {
+    pub(crate) fn parse(value: &str) -> Result<Self, ParseError> {
         match value {
             "buyer" => Ok(Self::Buyer),
             "seller" => Ok(Self::Seller),
@@ -86,7 +86,7 @@ impl Status {
         }
     }
 
-    fn parse(value: &str) -> Result<Self, ParseError> {
+    pub(crate) fn parse(value: &str) -> Result<Self, ParseError> {
         match value {
             "initiated" => Ok(Self::Initiated),
             "in-progress" => Ok(Self::InProgress),
