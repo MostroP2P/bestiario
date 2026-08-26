@@ -11,3 +11,20 @@
 
 pub mod events;
 pub mod instances;
+pub mod orders;
+
+/// Reports a column SQLite holds but this crate cannot read back.
+///
+/// Every enum stored as text is written through an `as_str` and read back
+/// through its inverse, so a value that fails to convert means the file was
+/// written by something other than this crate. That is a decode error, not a
+/// panic: it names the column and lets the caller decide.
+pub(crate) fn decode<T, E>(column: &'static str, value: Result<T, E>) -> Result<T, sqlx::Error>
+where
+    E: std::fmt::Display,
+{
+    value.map_err(|error| sqlx::Error::ColumnDecode {
+        index: column.to_string(),
+        source: error.to_string().into(),
+    })
+}

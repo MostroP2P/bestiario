@@ -30,6 +30,21 @@ impl Network {
             Self::Regtest => "regtest",
         }
     }
+
+    /// The variant `wire` names, or `None` if it names none.
+    ///
+    /// The inverse of [`as_str`](Self::as_str), so the vocabulary is written
+    /// out once: the parser reads a `network` tag with it and the repositories
+    /// read the column they wrote with it.
+    pub fn from_wire(wire: &str) -> Option<Self> {
+        match wire {
+            "mainnet" => Some(Self::Mainnet),
+            "testnet" => Some(Self::Testnet),
+            "signet" => Some(Self::Signet),
+            "regtest" => Some(Self::Regtest),
+            _ => None,
+        }
+    }
 }
 
 impl std::fmt::Display for Network {
@@ -53,6 +68,7 @@ mod tests {
             let wire = network.as_str();
             let parsed = Network::from_str(wire, true).expect("wire form should parse");
             assert_eq!(parsed, network, "{wire}");
+            assert_eq!(Network::from_wire(wire), Some(network), "{wire}");
             assert_eq!(network.to_string(), wire);
         }
     }
