@@ -20,6 +20,11 @@
 //! Cursors are re-read at that point, so a reconnection resumes from what was
 //! actually stored rather than from where the process started.
 //!
+//! Every subscription is preceded by [`RelayClient::reattach`], so a relay
+//! that was down when the indexer started rejoins the run once it answers.
+//! `connect` drops what does not answer, and a `sync` meant to run for months
+//! cannot be the reason a relay stays ignored until somebody restarts it.
+//!
 //! # Shutting down
 //!
 //! There is nothing to flush. The pipeline advances the cursor inside the
@@ -52,7 +57,7 @@ const BACKOFF_MAX: Duration = Duration::from_secs(60);
 /// The live follower: a connected client, a pipeline to feed, and the
 /// database the cursors live in.
 pub struct Sync<'a> {
-    client: &'a RelayClient,
+    client: &'a mut RelayClient,
     pipeline: &'a Pipeline,
     pool: &'a SqlitePool,
     /// Empty means *any* author; see [`filters::for_kind`].
@@ -61,7 +66,7 @@ pub struct Sync<'a> {
 }
 
 impl<'a> Sync<'a> {
-    pub fn new(client: &'a RelayClient, pipeline: &'a Pipeline, pool: &'a SqlitePool) -> Self {
+    pub fn new(client: &'a mut RelayClient, pipeline: &'a Pipeline, pool: &'a SqlitePool) -> Self {
         Self {
             client,
             pipeline,
@@ -86,14 +91,23 @@ impl<'a> Sync<'a> {
     ///
     /// Returns what the run stored. The `Err` case is the database being
     /// unusable: a relay that fails is reconnected to, not returned.
-    pub async fn follow(&self, shutdown: impl Future<Output = ()>) -> Result<Counts> {
+    pub async fn follow(&mut self, shutdown: impl Future<Output = ()>) -> Result<Counts> {
         let mut counts = Counts::default();
         let mut attempt = 0u32;
 
         let mut shutdown = std::pin::pin!(shutdown);
 
         loop {
-            match self.open().await {
+            self.client.reattach().await;
+
+            // The cursors are read before the subscription is attempted, and
+            // separately from it, because the two failures are not the same
+            // failure. A relay that will not take a REQ is worth retrying; a
+            // database that will not answer is not, and retrying it forever
+            // would leave a `sync` spinning in the dark reporting nothing.
+            let targets = self.targets().await?;
+
+            match self.client.subscribe(targets).await {
                 Ok(mut subscription) => {
                     attempt = 0;
                     loop {
@@ -105,12 +119,14 @@ impl<'a> Sync<'a> {
                             next = subscription.next_event() => match next {
                                 Some((relay, event)) => {
                                     let now = chrono::Utc::now().timestamp();
-                                    match self.pipeline.ingest(&event, &relay.to_string(), now).await {
-                                        Ok(outcome) => counts.record(&outcome),
-                                        Err(error) => {
-                                            tracing::error!(id = %event.id, %error, "could not store event");
-                                        }
-                                    }
+                                    let outcome = self
+                                        .pipeline
+                                        .ingest(&event, &relay.to_string(), now)
+                                        .await
+                                        .with_context(|| {
+                                            format!("storing event {} from {relay}", event.id)
+                                        })?;
+                                    counts.record(&outcome);
                                 }
                                 None => {
                                     tracing::warn!("the relay stream ended");
@@ -134,20 +150,19 @@ impl<'a> Sync<'a> {
         }
     }
 
-    /// Opens one subscription covering every relay and kind, each from its own
-    /// cursor.
-    async fn open(&self) -> Result<crate::nostr::client::Subscription> {
+    /// One filter set per relay, each kind resumed from its own cursor.
+    async fn targets(&self) -> Result<Vec<(RelayUrl, Vec<Filter>)>> {
         let mut targets = Vec::new();
 
-        for relay in self.client.relays() {
+        for relay in self.client.relays().to_vec() {
             let mut per_relay = Vec::new();
             for &kind in &filters::INDEXED_KINDS {
-                per_relay.push(self.filter(relay, kind).await?);
+                per_relay.push(self.filter(&relay, kind).await?);
             }
-            targets.push((relay.clone(), per_relay));
+            targets.push((relay, per_relay));
         }
 
-        Ok(self.client.subscribe(targets).await?)
+        Ok(targets)
     }
 
     /// The filter for one `(relay, kind)`, resumed from its cursor.
@@ -189,14 +204,16 @@ fn backoff(attempt: u32) -> Duration {
 pub async fn run(context: &Context<'_>) -> Result<()> {
     let settings = context.settings;
 
-    let client = RelayClient::connect(&settings.nostr.relays)
+    let mut client = RelayClient::connect(&settings.nostr.relays)
         .await
         .context("connecting to the configured relays")?;
 
     let pipeline = Pipeline::new(context.pool.clone(), Policy::from(&settings.indexer));
-    let counts = Sync::new(&client, &pipeline, context.pool)
+    let mut sync = Sync::new(&mut client, &pipeline, context.pool)
         .with_authors(authors(settings)?)
-        .with_overlap(settings.nostr.resume_overlap_secs as i64)
+        .with_overlap(settings.nostr.resume_overlap_secs as i64);
+
+    let counts = sync
         .follow(async {
             if let Err(error) = tokio::signal::ctrl_c().await {
                 tracing::error!(%error, "cannot listen for SIGINT; sync will not stop cleanly");

@@ -13,11 +13,23 @@
 //! in `events.raw_json` and stays there — including when the parser rejects
 //! it, which is what makes a rejection cost one reprocessing run rather than
 //! a re-fetch from relays that may no longer hold the event.
+//!
+//! # One transaction per accepted event
+//!
+//! For an event that parses, steps 6, 7 and 8 commit together. The archive row
+//! is the dedup gate, so writing it on its own would make any later failure
+//! permanent: the raw event would be stored, its version and projection would
+//! not, and every retry would read the archive row and answer `Duplicate`
+//! without ever repairing it. Committing the three together means an
+//! interrupted ingest leaves nothing behind and the next attempt starts over.
+//!
+//! A parser rejection is the one write that stands alone, because there is
+//! nothing to pair it with: the event is archived and that is the whole of it.
 
 use std::collections::HashSet;
 
 use nostr_sdk::prelude::Event;
-use sqlx::SqlitePool;
+use sqlx::{Sqlite, SqlitePool, Transaction};
 
 use crate::config::IndexerSettings;
 use crate::db::repo;
@@ -46,7 +58,8 @@ const NETWORK_TAGGED: [u16; 2] = [parse::order::KIND, parse::dev_fee::KIND];
 pub enum IngestOutcome {
     /// New to the archive, parsed and persisted.
     Stored,
-    /// Already in the archive; nothing was written.
+    /// Already in the archive; nothing was written but this relay's cursor,
+    /// which moves because the relay did deliver the event.
     Duplicate,
     /// Turned away, for the stated reason.
     Rejected(Rejection),
@@ -222,35 +235,61 @@ impl Pipeline {
             return Ok(IngestOutcome::Rejected(rejection));
         }
 
-        // Step 6. The insert is its own statement rather than part of the
-        // transaction below, so that an event the parser turns away is still
-        // archived.
+        // Step 7's parsing happens before anything is written: it reads the
+        // event and nothing else, and doing it first is what lets the writes
+        // that follow be a single transaction.
         let record = repo::events::EventRecord::new(event, relay_url, now);
-        if !repo::events::insert_if_new(&self.pool, &record).await? {
-            return Ok(IngestOutcome::Duplicate);
-        }
-
-        // Step 7.
         let parsed = match Self::parse(event) {
             Ok(parsed) => parsed,
             Err(rejection) => {
+                // Step 6 alone. The event is kept so that a parser fixed later
+                // can be run over the archive instead of over the relays.
+                repo::events::insert_if_new(&self.pool, &record).await?;
                 tracing::debug!(id = %event.id, %rejection, "archived but not parsed");
                 return Ok(IngestOutcome::Rejected(rejection));
             }
         };
-        self.persist(event, &parsed).await?;
+
+        let mut tx = self.pool.begin().await?;
+
+        // Step 6.
+        if !repo::events::insert_if_new(&mut *tx, &record).await? {
+            // Step 8 still runs. Cursors are per relay, and `Subscription`
+            // hands over each relay's copy of an event precisely so that the
+            // relay that delivered this one is recorded as having reached it.
+            // Skipping the cursor here would leave a second relay permanently
+            // behind, re-requesting a backlog it has already sent.
+            Self::advance(&mut tx, event, relay_url, now).await?;
+            tx.commit().await?;
+            return Ok(IngestOutcome::Duplicate);
+        }
+
+        // Step 7.
+        Self::persist(&mut tx, event, &parsed).await?;
 
         // Step 8.
+        Self::advance(&mut tx, event, relay_url, now).await?;
+
+        tx.commit().await?;
+
+        Ok(IngestOutcome::Stored)
+    }
+
+    /// Step 8: this relay has now been read as far as this event.
+    async fn advance(
+        tx: &mut Transaction<'_, Sqlite>,
+        event: &Event,
+        relay_url: &str,
+        now: i64,
+    ) -> Result<(), sqlx::Error> {
         repo::sync_state::advance(
-            &self.pool,
+            &mut **tx,
             relay_url,
             event.kind.as_u16(),
             event.created_at.as_secs() as i64,
             now,
         )
-        .await?;
-
-        Ok(IngestOutcome::Stored)
+        .await
     }
 
     /// Steps 2 to 5: everything that can be decided from the event alone.
@@ -308,46 +347,48 @@ impl Pipeline {
         }
     }
 
-    /// Step 7's second half: the version and the projection it feeds, in one
-    /// transaction.
+    /// Step 7's second half: the version and the projection it feeds, written
+    /// into the caller's transaction.
     ///
     /// Together, because a version whose projection was never refreshed is a
     /// row that answers `orders` queries with the state before it — worse than
     /// not having stored it at all, and invisible until someone re-derives the
     /// numbers by hand.
-    async fn persist(&self, event: &Event, parsed: &Parsed) -> Result<(), sqlx::Error> {
+    async fn persist(
+        tx: &mut Transaction<'_, Sqlite>,
+        event: &Event,
+        parsed: &Parsed,
+    ) -> Result<(), sqlx::Error> {
         let pubkey = event.pubkey.to_hex();
         let created_at = event.created_at.as_secs() as i64;
         let name = parse::instance_name(event);
 
-        let mut tx = self.pool.begin().await?;
-
         // Every indexed kind is published *by* an instance, so the bestiary
         // grows from all four rather than from 38385 alone: an instance that
         // never publishes its profile is still one this network has seen.
-        repo::instances::upsert(&mut *tx, &pubkey, name.as_deref(), created_at).await?;
+        repo::instances::upsert(&mut **tx, &pubkey, name.as_deref(), created_at).await?;
         if let Some(name) = &name {
-            repo::instances::record_name(&mut *tx, &pubkey, name, created_at).await?;
+            repo::instances::record_name(&mut **tx, &pubkey, name, created_at).await?;
         }
 
         match parsed {
             Parsed::Order(version) => {
-                repo::orders::insert_version(&mut *tx, version).await?;
-                repo::orders::refresh_projection(&mut *tx, &version.order_id).await?;
+                repo::orders::insert_version(&mut **tx, version).await?;
+                repo::orders::refresh_projection(&mut **tx, &version.order_id).await?;
             }
             Parsed::DevFee(fee) => {
-                repo::dev_fees::insert(&mut *tx, fee).await?;
+                repo::dev_fees::insert(&mut **tx, fee).await?;
             }
             Parsed::Dispute(version) => {
-                repo::disputes::insert_version(&mut *tx, version).await?;
-                repo::disputes::refresh_projection(&mut *tx, &version.dispute_id).await?;
+                repo::disputes::insert_version(&mut **tx, version).await?;
+                repo::disputes::refresh_projection(&mut **tx, &version.dispute_id).await?;
             }
             Parsed::Info(info) => {
-                repo::instance_info::insert_version(&mut *tx, info).await?;
+                repo::instance_info::insert_version(&mut **tx, info).await?;
             }
         }
 
-        tx.commit().await
+        Ok(())
     }
 }
 

@@ -73,6 +73,9 @@ pub enum ClientError {
 #[derive(Debug)]
 pub struct RelayClient {
     client: Client,
+    /// Every relay the operator asked for, kept verbatim so that one which was
+    /// down at startup can be tried again. See [`RelayClient::reattach`].
+    configured: Vec<String>,
     /// The relays that actually answered, in the order they were configured.
     /// Callers iterate this rather than the configured list, so a relay that
     /// is down is simply not walked.
@@ -110,8 +113,48 @@ impl RelayClient {
 
         Ok(Self {
             client,
+            configured: relays.to_vec(),
             relays: connected,
         })
+    }
+
+    /// Tries the configured relays that are not in play, and keeps the ones
+    /// that answer this time.
+    ///
+    /// A relay that was down when the indexer started is not down for good,
+    /// and nothing else would ever pick it up again: [`connect`](Self::connect)
+    /// drops it, and every subscription and every backfill walk is built from
+    /// the relays that answered. A long-running `sync` would ignore it until
+    /// somebody restarted the process — and miss whatever only it carries.
+    ///
+    /// Rebuilds the list rather than appending to it, so the configured order
+    /// [`relays`](Self::relays) promises survives a relay rejoining late.
+    pub async fn reattach(&mut self) {
+        let configured = self.configured.clone();
+        let mut attached = Vec::with_capacity(configured.len());
+
+        for url in &configured {
+            // A URL that does not parse was reported at startup and will not
+            // start parsing; re-reporting it once a minute says nothing new.
+            let Ok(parsed) = RelayUrl::from_str(url) else {
+                continue;
+            };
+
+            if self.relays.contains(&parsed) {
+                attached.push(parsed);
+                continue;
+            }
+
+            match Self::add(&self.client, url).await {
+                Ok(url) => {
+                    tracing::info!(relay = %url, "relay is answering again");
+                    attached.push(url);
+                }
+                Err(reason) => tracing::debug!(relay = %url, %reason, "relay still unreachable"),
+            }
+        }
+
+        self.relays = attached;
     }
 
     /// Parses and connects one relay, returning why it was skipped if it was.

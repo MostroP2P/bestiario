@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+use nostr_sdk::local_relay::LocalRelay;
 use nostr_sdk::prelude::MockRelay;
 use sqlx::SqlitePool;
 
@@ -69,11 +70,11 @@ async fn an_event_published_while_sync_runs_is_stored() {
     // Arrange
     let pool = migrated().await;
     let relay = MockRelay::run().await.expect("start the local relay");
-    let client = RelayClient::connect(&[relay.url().await.to_string()])
+    let mut client = RelayClient::connect(&[relay.url().await.to_string()])
         .await
         .expect("connect");
     let pipeline = pipeline(&pool);
-    let sync = Sync::new(&client, &pipeline, &pool);
+    let mut sync = Sync::new(&mut client, &pipeline, &pool);
     let event = load(38383, "pending_range");
 
     // Act: publish once the subscription is up, then stop as soon as the row
@@ -107,12 +108,12 @@ async fn following_advances_the_cursor_so_an_interrupted_run_needs_no_flush() {
     // Arrange
     let pool = migrated().await;
     let relay = MockRelay::run().await.expect("start the local relay");
-    let client = RelayClient::connect(&[relay.url().await.to_string()])
+    let mut client = RelayClient::connect(&[relay.url().await.to_string()])
         .await
         .expect("connect");
     let url = relay.url().await.to_string();
     let pipeline = pipeline(&pool);
-    let sync = Sync::new(&client, &pipeline, &pool);
+    let mut sync = Sync::new(&mut client, &pipeline, &pool);
     let event = load(38383, "pending_range");
 
     // Act
@@ -147,7 +148,7 @@ async fn a_shutdown_before_anything_arrives_stops_cleanly() {
     // Arrange
     let pool = migrated().await;
     let relay = MockRelay::run().await.expect("start the local relay");
-    let client = RelayClient::connect(&[relay.url().await.to_string()])
+    let mut client = RelayClient::connect(&[relay.url().await.to_string()])
         .await
         .expect("connect");
     let pipeline = pipeline(&pool);
@@ -155,7 +156,7 @@ async fn a_shutdown_before_anything_arrives_stops_cleanly() {
     // Act
     let counts = tokio::time::timeout(
         PATIENCE,
-        Sync::new(&client, &pipeline, &pool).follow(std::future::ready(())),
+        Sync::new(&mut client, &pipeline, &pool).follow(std::future::ready(())),
     )
     .await
     .expect("sync stops")
@@ -163,4 +164,79 @@ async fn a_shutdown_before_anything_arrives_stops_cleanly() {
 
     // Assert
     assert_eq!(counts, Counts::default());
+}
+
+#[tokio::test]
+async fn a_relay_that_was_down_at_startup_is_followed_once_it_answers() {
+    // Arrange: one configured relay is down when the indexer starts, another
+    // is up. Without a retry the run would ignore the first for as long as
+    // the process lived, and never see what only it carries.
+    let pool = migrated().await;
+    let port = free_port();
+    let down = format!("ws://127.0.0.1:{port}");
+    let live = MockRelay::run().await.expect("start the local relay");
+
+    let mut client = RelayClient::connect(&[down, live.url().await.to_string()])
+        .await
+        .expect("one reachable relay is enough");
+    assert_eq!(client.relays().len(), 1);
+
+    // The relay comes back before `follow` builds its subscription.
+    let recovered = LocalRelay::builder().port(port).build();
+    recovered.run().await.expect("start the recovered relay");
+
+    let pipeline = pipeline(&pool);
+    let mut sync = Sync::new(&mut client, &pipeline, &pool);
+    let event = load(38383, "pending_range");
+
+    // Act: publish only on the relay that was down.
+    let (stop, stopped) = tokio::sync::oneshot::channel();
+    let publisher = async {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        recovered.add_event(event.clone()).await.expect("publish");
+
+        while stored_events(&pool).await == 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let _ = stop.send(());
+    };
+    let follower = sync.follow(async {
+        let _ = stopped.await;
+    });
+    let (counts, ()) = tokio::time::timeout(PATIENCE, async { tokio::join!(follower, publisher) })
+        .await
+        .expect("the recovered relay delivers");
+
+    // Assert
+    assert_eq!(counts.expect("follow").stored, 1);
+}
+
+#[tokio::test]
+async fn a_database_that_stops_answering_ends_the_run() {
+    // A relay that fails is retried; a database that fails is not. Spinning
+    // on it would leave `sync` looking healthy while storing nothing, which
+    // is the failure nobody notices until the numbers are asked for.
+    let pool = migrated().await;
+    let relay = MockRelay::run().await.expect("start the local relay");
+    let mut client = RelayClient::connect(&[relay.url().await.to_string()])
+        .await
+        .expect("connect");
+    let pipeline = pipeline(&pool);
+    pool.close().await;
+
+    let result = tokio::time::timeout(
+        PATIENCE,
+        Sync::new(&mut client, &pipeline, &pool).follow(std::future::pending()),
+    )
+    .await
+    .expect("the run ends rather than retrying");
+
+    assert!(result.is_err());
+}
+
+/// A port with nothing on it *yet*: bound to find a free one, then released
+/// so the relay under test can take it.
+fn free_port() -> u16 {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    listener.local_addr().expect("addr").port()
 }
