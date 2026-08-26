@@ -18,7 +18,7 @@ use sqlx::{Executor, Sqlite};
 use crate::ingest::parse::order::{Direction, FiatAmount, OrderVersion, Status};
 use crate::network::Network;
 
-use super::decode;
+use super::{csv, decode};
 
 /// One row of `orders`: an order as it currently stands.
 #[derive(Debug, Clone, PartialEq)]
@@ -75,7 +75,7 @@ where
     .bind(fiat_amount)
     .bind(fiat_min)
     .bind(fiat_max)
-    .bind(version.payment_methods.join(","))
+    .bind(csv::join(&version.payment_methods))
     .bind(version.premium)
     .bind(version.network.map(Network::as_str))
     .bind(version.expires_at)
@@ -95,6 +95,12 @@ where
 /// `canceled_at` from the *first* version to reach that status, because an
 /// instance republishes a status when some other field changes and the sale
 /// happened at the first one.
+///
+/// Two versions can share a `created_at`, since it has one-second resolution.
+/// NIP-01 settles that tie for an addressable event by retaining the
+/// lexicographically **lowest** event id, so that is the version projected
+/// here: picking the other one would make bestiario disagree with what the
+/// relays themselves keep.
 pub async fn refresh_projection<'e, E>(executor: E, order_id: &str) -> Result<(), sqlx::Error>
 where
     E: Executor<'e, Database = Sqlite>,
@@ -110,7 +116,7 @@ where
                 span.success_at, span.canceled_at
          FROM (
              SELECT * FROM order_versions WHERE order_id = ?1
-             ORDER BY created_at DESC, event_id DESC LIMIT 1
+             ORDER BY created_at DESC, event_id ASC LIMIT 1
          ) AS latest
          JOIN (
              SELECT MIN(created_at) AS first_seen_at,
@@ -211,7 +217,7 @@ impl OrderRow {
             fiat_code: self.fiat_code,
             amount_sats: self.amount_sats,
             fiat_amount: self.fiat_amount,
-            payment_methods: split_methods(&self.payment_methods),
+            payment_methods: csv::split(&self.payment_methods),
             premium: self.premium,
             network: decode("network", optional_network(self.network.as_deref()))?,
             success_at: self.success_at,
@@ -262,25 +268,12 @@ impl VersionRow {
             fiat_code: self.fiat_code,
             amount_sats: self.amount_sats,
             fiat,
-            payment_methods: split_methods(&self.payment_methods),
+            payment_methods: csv::split(&self.payment_methods),
             premium: self.premium,
             network: decode("network", optional_network(self.network.as_deref()))?,
             expires_at: self.expires_at,
         })
     }
-}
-
-/// The csv the column holds, back into the list the parser produced.
-///
-/// An empty column is no methods rather than one empty method: `"".split(',')`
-/// yields a single empty string, which would show up as a payment method
-/// named after nothing.
-fn split_methods(csv: &str) -> Vec<String> {
-    csv.split(',')
-        .map(str::trim)
-        .filter(|method| !method.is_empty())
-        .map(str::to_string)
-        .collect()
 }
 
 /// The stored `network`, if the column is not NULL.
