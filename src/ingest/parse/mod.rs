@@ -17,10 +17,13 @@
 
 pub mod dev_fee;
 pub mod dispute;
+pub mod identity;
 pub mod info;
 pub mod order;
 pub mod rates;
 pub mod relay_list;
+
+pub use identity::{MOSTRO, instance_name, is_mostro, platform};
 
 #[cfg(test)]
 pub(crate) mod fixtures;
