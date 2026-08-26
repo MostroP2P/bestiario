@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 
 use super::*;
+use crate::network::Network;
 
 /// A configuration with every rule satisfied. Tests mutate one line of it to
 /// exercise one rule, so a failure points at the rule and not at the fixture.
@@ -67,7 +68,7 @@ fn parses_a_fully_specified_file() {
         ["82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390"]
     );
     assert!(!settings.indexer.accept_unknown_instances);
-    assert_eq!(settings.indexer.networks, ["mainnet"]);
+    assert_eq!(settings.indexer.networks, [Network::Mainnet]);
     assert_eq!(settings.indexer.backfill_from, 1_735_689_600);
     assert_eq!(settings.assumptions.dev_fee_percentage_default, 0.30);
     assert_eq!(settings.database.url, "sqlite://bestiario.db");
@@ -94,7 +95,7 @@ url = "sqlite://bestiario.db"
     // Assert
     assert_eq!(settings.nostr.resume_overlap_secs, 3600);
     assert!(!settings.nostr.discover_relays);
-    assert_eq!(settings.indexer.networks, ["mainnet"]);
+    assert_eq!(settings.indexer.networks, [Network::Mainnet]);
     assert_eq!(settings.indexer.backfill_from, 0);
     assert_eq!(settings.assumptions.dev_fee_percentage_default, 0.30);
     assert!(settings.assumptions.dev_fee_percentage.is_empty());
@@ -222,19 +223,39 @@ fn rejects_an_empty_network_list() {
 #[test]
 fn rejects_a_misspelled_network() {
     // `mainet` would filter out every event and report zeros, which is the
-    // failure mode this rule exists to prevent.
-    let error = expect_invalid(&with_line("networks", r#"networks = ["mainet"]"#));
+    // failure mode this rule exists to prevent. The vocabulary now lives in
+    // the Network type, so this is caught by deserialization rather than by a
+    // validation rule of its own.
+    let error = Settings::from_toml_str(&with_line("networks", r#"networks = ["mainet"]"#))
+        .expect_err("misspelled network");
+
+    assert!(matches!(error, ConfigError::Load(_)), "got {error:?}");
+
+    // Rendered the way the binary renders a fatal error: `{:#}` walks the
+    // whole chain, which is where the offending value lives.
+    let message = format!("{:#}", anyhow::Error::from(error));
+    assert!(
+        message.contains("mainet"),
+        "should name the typo: {message}"
+    );
+}
+
+#[test]
+fn accepts_every_network_the_wire_format_can_carry() {
+    let settings = Settings::from_toml_str(&with_line(
+        "networks",
+        r#"networks = ["mainnet", "testnet", "signet", "regtest"]"#,
+    ))
+    .expect("all four are valid");
 
     assert_eq!(
-        error,
-        ValidationError::UnknownNetwork {
-            network: "mainet".to_string()
-        }
-    );
-    assert!(
-        error
-            .to_string()
-            .contains("mainnet, testnet, signet, regtest")
+        settings.indexer.networks,
+        [
+            Network::Mainnet,
+            Network::Testnet,
+            Network::Signet,
+            Network::Regtest
+        ]
     );
 }
 

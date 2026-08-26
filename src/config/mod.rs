@@ -19,13 +19,10 @@ use std::path::Path;
 
 use serde::Deserialize;
 
+use crate::network::Network;
+
 #[cfg(test)]
 mod tests;
-
-/// Networks a `network` tag may name. Validated eagerly so that a typo such
-/// as `mainet` fails at startup instead of silently filtering out every
-/// event.
-const KNOWN_NETWORKS: [&str; 4] = ["mainnet", "testnet", "signet", "regtest"];
 
 /// Environment prefix and separator: `BESTIARIO__DATABASE__URL` overrides
 /// `[database].url`.
@@ -38,7 +35,11 @@ const ENV_SEPARATOR: &str = "__";
 pub enum ConfigError {
     /// The file could not be read, or is not valid TOML, or does not match
     /// the expected shape.
-    #[error("could not load configuration: {0}")]
+    ///
+    /// The message does not interpolate the source: it is already declared as
+    /// one, and anyhow renders the whole chain, so naming it here would print
+    /// it twice.
+    #[error("could not load configuration")]
     Load(#[from] config::ConfigError),
 
     /// The file parsed, but a value does not make sense.
@@ -77,12 +78,6 @@ pub enum ValidationError {
 
     #[error("[indexer].networks is empty: at least one network is required")]
     NoNetworks,
-
-    #[error(
-        "[indexer].networks contains `{network}`: expected one of {}",
-        KNOWN_NETWORKS.join(", ")
-    )]
-    UnknownNetwork { network: String },
 
     #[error("[indexer].backfill_from is {value}: expected a unix timestamp, or 0 for everything")]
     NegativeBackfillFrom { value: i64 },
@@ -135,8 +130,10 @@ pub struct IndexerSettings {
     /// rather than only those listed above.
     #[serde(default)]
     pub accept_unknown_instances: bool,
+    /// A misspelling is rejected by deserialization, which names the accepted
+    /// values, rather than reaching a query that matches nothing.
     #[serde(default = "default_networks")]
-    pub networks: Vec<String>,
+    pub networks: Vec<Network>,
     /// Unix timestamp to backfill down to; `0` means everything the relays
     /// still hold.
     #[serde(default)]
@@ -176,8 +173,8 @@ fn default_resume_overlap_secs() -> u64 {
     3600
 }
 
-fn default_networks() -> Vec<String> {
-    vec!["mainnet".to_string()]
+fn default_networks() -> Vec<Network> {
+    vec![Network::Mainnet]
 }
 
 fn default_dev_fee_percentage() -> f64 {
@@ -243,12 +240,6 @@ impl Settings {
                     .iter()
                     .map(|p| p.trim().to_lowercase())
                     .collect(),
-                networks: self
-                    .indexer
-                    .networks
-                    .iter()
-                    .map(|n| n.trim().to_lowercase())
-                    .collect(),
                 ..self.indexer
             },
             assumptions: AssumptionSettings {
@@ -305,13 +296,6 @@ impl Settings {
 
         if self.indexer.networks.is_empty() {
             return Err(ValidationError::NoNetworks);
-        }
-        for network in &self.indexer.networks {
-            if !KNOWN_NETWORKS.contains(&network.as_str()) {
-                return Err(ValidationError::UnknownNetwork {
-                    network: network.clone(),
-                });
-            }
         }
 
         if self.indexer.backfill_from < 0 {
