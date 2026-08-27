@@ -1,5 +1,5 @@
 use super::*;
-use crate::activity::{Direction, Status};
+use crate::activity::{Direction, Origin, Status};
 use crate::disputes::{Dispute, Initiator};
 
 const WINDOW: Window = Window {
@@ -23,6 +23,8 @@ fn order(id: &str, pubkey: &str, fiat: &str, methods: &[&str], status: Status, s
         premium: 0.0,
         is_market_price: false,
         fiat_range: None,
+        pending_at: None,
+        origin: Origin::default(),
         taken_at: None,
         success_at: (status == Status::Success).then_some(1_200),
         canceled_at: (status == Status::Canceled).then_some(1_200),

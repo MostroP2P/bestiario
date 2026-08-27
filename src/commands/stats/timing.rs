@@ -29,8 +29,11 @@ pub async fn report(
     dimension: Option<Dimension>,
     now: i64,
 ) -> Result<Report> {
-    let orders = load::activity::orders(pool, &query.scope).await?;
     let window = Window::new(query.range.from(), query.range.until());
+    // Every transition that ends in the window, and the current book; not
+    // the history.
+    let orders =
+        load::activity::lifecycle_in(pool, &query.scope, window.from, window.until, now).await?;
 
     Ok(Report::new(
         query.range,

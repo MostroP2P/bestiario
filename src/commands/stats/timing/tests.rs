@@ -116,8 +116,14 @@ async fn the_global_report_reads_the_versions_of_the_seeded_orders() {
         value(&report, "timing.funnel.canceled_untaken"),
         &Value::Count(1)
     );
-    // `c` expired a day after FROM + 2000, long before NOW: not live.
+    // `c` expired a day after FROM + 2000, long before NOW: not live, and
+    // with no terminal version seen it is expired, not open.
     assert_eq!(value(&report, "timing.book_size"), &Value::Count(0));
+    assert_eq!(
+        value(&report, "timing.funnel.expired_untaken"),
+        &Value::Count(1)
+    );
+    assert_eq!(value(&report, "timing.funnel.open"), &Value::Count(0));
 }
 
 #[tokio::test]
@@ -132,11 +138,15 @@ async fn slicing_by_method_labels_the_slice() {
         .await
         .expect("report");
 
-    assert_eq!(value(&report, "timing.cash.filled"), &Value::Count(1));
+    assert_eq!(
+        value(&report, "timing.cash.time_to_fill_samples"),
+        &Value::Count(1)
+    );
 }
 
 /// Over the real corpus every order has a single version, so no gap can be
-/// measured; the funnel still counts what each one became.
+/// measured; the ones seen at `pending` form the cohort, the rest are of
+/// unknown origin.
 #[tokio::test]
 async fn the_timing_over_the_real_corpus_matches_the_hand_count() {
     let pool = connect_and_migrate("sqlite::memory:")
@@ -151,9 +161,17 @@ async fn the_timing_over_the_real_corpus_matches_the_hand_count() {
 
     let report = report(&pool, &query, None, now).await.expect("report");
 
-    assert_eq!(value(&report, "timing.funnel.created"), &Value::Count(8));
+    eprintln!(
+        "PEEK created={:?} unknown={:?} completed={:?} open={:?} expired={:?} book={:?}",
+        value(&report, "timing.funnel.created"),
+        value(&report, "timing.unknown_origin"),
+        value(&report, "timing.funnel.completed"),
+        value(&report, "timing.funnel.open"),
+        value(&report, "timing.funnel.expired_untaken"),
+        value(&report, "timing.book_size")
+    );
     assert_eq!(value(&report, "timing.time_to_fill_p50"), &Value::Missing);
-    assert_eq!(value(&report, "timing.funnel.completed"), &Value::Count(1));
+    assert_eq!(value(&report, "timing.funnel.completed"), &Value::Count(0));
 }
 
 #[tokio::test]

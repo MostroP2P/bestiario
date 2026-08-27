@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use super::*;
-use crate::activity::{Direction, Status};
+use crate::activity::{Direction, Origin, Status};
 use crate::rates::Snapshot;
 
 const WINDOW: Window = Window {
@@ -28,6 +28,8 @@ fn order(id: &str, pubkey: &str, success_at: i64, sats: i64) -> Order {
         premium: 0.0,
         is_market_price: false,
         fiat_range: None,
+        pending_at: None,
+        origin: Origin::default(),
         taken_at: None,
         success_at: Some(success_at),
         canceled_at: None,

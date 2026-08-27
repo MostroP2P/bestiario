@@ -28,6 +28,8 @@ fn order(id: &str, created_at: i64, status: Status) -> Order {
         premium: 0.0,
         is_market_price: false,
         fiat_range: None,
+        pending_at: None,
+        origin: Origin::default(),
         taken_at: None,
         success_at: None,
         canceled_at: None,

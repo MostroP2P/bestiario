@@ -2,6 +2,7 @@
 //! §12) for the market structure figures of §6.3.
 
 use super::*;
+use crate::activity::Origin;
 use crate::activity::Status;
 
 const WINDOW: Window = Window {
@@ -24,6 +25,8 @@ fn order(id: &str, direction: Direction, fiat: &str, created_at: i64, sats: i64)
         premium: 0.0,
         is_market_price: false,
         fiat_range: None,
+        pending_at: None,
+        origin: Origin::default(),
         taken_at: None,
         success_at: None,
         canceled_at: None,

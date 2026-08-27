@@ -48,9 +48,18 @@ impl Status {
     }
 }
 
+/// The dimensions of an order's first version — see [`Order::origin`].
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Origin {
+    pub fiat_code: String,
+    pub payment_methods: Vec<String>,
+    pub direction: Direction,
+}
+
 /// Which side the maker is on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Direction {
+    #[default]
     Buy,
     Sell,
 }
@@ -94,6 +103,16 @@ pub struct Order {
     pub is_market_price: bool,
     /// `[min, max]` of the first version, for a range order (§4 `range`).
     pub fiat_range: Option<(f64, f64)>,
+    /// `created_at` of the first `pending` version *seen*. `None` when the
+    /// first version bestiario caught was already later in the lifecycle
+    /// — usual in a backfill, since kind 38383 is replaceable and a relay
+    /// keeps only the latest state — and then nothing anchored on the
+    /// book entry can be measured (see [`crate::timing`]).
+    pub pending_at: Option<i64>,
+    /// The dimensions of the first version seen: what the order *was* when
+    /// it entered the book, for the figures that date from then. The
+    /// fields above are the latest version's.
+    pub origin: Origin,
     /// `created_at` of the first `in-progress` version — when a taker arrived.
     pub taken_at: Option<i64>,
     /// `created_at` of the first `success` version.
