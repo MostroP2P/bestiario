@@ -145,7 +145,9 @@ which shows one order whole — accepts the same window and scope flags:
 
 - `--from` and `--until`, as a unix timestamp or `YYYY-MM-DD` (UTC). The
   window is half-open — `--until` is excluded — so consecutive windows tile.
-  The default is the last thirty days.
+  The default is the last thirty days, and a window wider than a century is
+  refused: further back than any relay's history and further forward than
+  any question about it, so it is a typo rather than a request.
 - `--instance <PUBKEY|NAME>`: one instance, by pubkey, by a unique prefix of
   it, or by name.
 - `--network <NETWORK>`: one network, overriding the configured list.
