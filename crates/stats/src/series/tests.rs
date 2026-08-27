@@ -590,3 +590,162 @@ fn a_range_nobody_could_bucket_is_refused_without_being_built() {
         Err(SeriesError::TooManyBuckets)
     ));
 }
+
+#[test]
+fn a_refusal_to_split_names_the_dimension_it_was_asked_for() {
+    // The message is the whole value of the refusal: a caller who sees
+    // only the variant cannot tell which `--split` was rejected.
+    for (split, named) in [
+        (Split::Instance, "instance"),
+        (Split::Kind, "kind"),
+        (Split::Fiat, "fiat"),
+    ] {
+        let error = SeriesError::CannotSplit {
+            metric: "dev_fees.total_sats".to_string(),
+            split,
+        };
+        assert!(error.to_string().contains(named), "{error}");
+    }
+}
+
+#[test]
+fn the_open_book_itself_is_a_figure_about_now() {
+    // `disputes.open.1.id` names a dispute that is open at this instant;
+    // it belongs to no bucket, and the `_now` suffix does not catch it.
+    let error = report(
+        &data(),
+        window(),
+        Period::Month,
+        "disputes.open.1.age",
+        None,
+        NOW,
+    )
+    .expect_err("refused");
+
+    assert!(matches!(error, SeriesError::AboutNow { .. }), "{error}");
+}
+
+#[test]
+fn a_duration_grows_and_shrinks_like_any_other_magnitude() {
+    // A p50 that goes from a minute to two took twice as long.
+    assert_eq!(
+        delta(&Value::Seconds(60), &Value::Seconds(120)),
+        Value::Ratio(1.0)
+    );
+}
+
+#[test]
+fn a_figure_in_a_currency_has_a_magnitude_like_any_other() {
+    // Fiat amounts are compared within one metric, whose currency does not
+    // change from bucket to bucket.
+    let before = Value::fiat(100.0, "ARS");
+    let after = Value::fiat(150.0, "ARS");
+
+    assert_eq!(delta(&before, &after), Value::Ratio(0.5));
+}
+
+#[test]
+fn an_activity_series_splits_by_instance_too() {
+    let metrics = report(
+        &data(),
+        window(),
+        Period::Month,
+        "orders.created",
+        Some(Split::Instance),
+        NOW,
+    )
+    .expect("a series");
+
+    assert_eq!(
+        named(&metrics, "orders.created.Alpha (pk).2026-08"),
+        &Value::Count(3),
+        "two completed and one still open"
+    );
+}
+
+#[test]
+fn a_dev_fee_series_splits_by_the_instance_that_paid() {
+    let fees = DevFeeData {
+        fees: vec![
+            Fee {
+                event_id: "f1".into(),
+                order_id: "a1".into(),
+                pubkey: "pk".into(),
+                instance: "Alpha (pk)".into(),
+                created_at: AUGUST + DAY,
+                amount_sats: 100,
+                is_duplicate: false,
+                order_known: true,
+                settled_at: Some(AUGUST + DAY),
+                fee_in_force: Some(0.006),
+                settled_amount_sats: Some(10_000),
+            },
+            Fee {
+                event_id: "f2".into(),
+                order_id: "b1".into(),
+                pubkey: "pk2".into(),
+                instance: "Beta (pk2)".into(),
+                created_at: AUGUST + 2 * DAY,
+                amount_sats: 300,
+                is_duplicate: false,
+                order_known: true,
+                settled_at: Some(AUGUST + 2 * DAY),
+                fee_in_force: Some(0.006),
+                settled_amount_sats: Some(30_000),
+            },
+        ],
+        settlements: vec![],
+    };
+    let data = Data { fees, ..data() };
+
+    let metrics = report(
+        &data,
+        window(),
+        Period::Month,
+        "dev_fees.total_sats",
+        Some(Split::Instance),
+        NOW,
+    )
+    .expect("a series");
+
+    assert_eq!(
+        named(&metrics, "dev_fees.total_sats.Alpha (pk).2026-08"),
+        &Value::Sats(100)
+    );
+    assert_eq!(
+        named(&metrics, "dev_fees.total_sats.Beta (pk2).2026-08"),
+        &Value::Sats(300)
+    );
+}
+
+#[test]
+fn a_dispute_series_splits_by_the_instance_that_published_it() {
+    let disputes = DisputeData {
+        disputes: vec![crate::disputes::Dispute {
+            dispute_id: "d1".into(),
+            instance: "Alpha (pk)".into(),
+            opened_at: AUGUST + DAY,
+            status: crate::disputes::Status::Initiated,
+            initiator: None,
+            resolved_at: None,
+            outcome: None,
+        }],
+        taken: vec![],
+    };
+    let data = Data { disputes, ..data() };
+
+    let metrics = report(
+        &data,
+        window(),
+        Period::Month,
+        "disputes.opened",
+        Some(Split::Instance),
+        NOW,
+    )
+    .expect("a series");
+
+    assert_eq!(
+        named(&metrics, "disputes.opened.Alpha (pk).2026-08"),
+        &Value::Count(1)
+    );
+}

@@ -210,10 +210,20 @@ otherwise:
 1. **What exists.** Which partitions were published, at which resolutions,
    from when. Without it a client guesses and requests months that were never
    published, and cannot distinguish "no data" from "not published".
-2. **What changed.** `hash` is the SHA-256 of the document's `content`
-   string, hex, lowercase. A client compares it against what it has cached and
-   fetches only the differences. Closed partitions are otherwise
-   indistinguishable from restated ones.
+2. **What changed.** `hash` is the SHA-256 of the document's `payload`
+   (§6), hex, lowercase — the figures, not the envelope around them. A client
+   compares it against what it has cached and fetches only the differences.
+   Closed partitions are otherwise indistinguishable from restated ones.
+
+   Deliberately not the whole `content`: `snapshot_id` and `generated_at`
+   differ on every run, so a hash over them would make every closed
+   partition a new hash, a new revision and a new signature every time the
+   daemon runs — and the skip of §8, the cache of §10 and the whole point of
+   `revision` would be dead letters. What a reader wants to know is whether
+   the *figures* moved.
+
+   `updated_at` is when the payload last changed, not when the document was
+   last published, for the same reason.
 3. **What is current.** `snapshot_id` is the atomicity token of §7.
 
 `coverage` states the archive's real extent. A client MUST NOT render a
@@ -233,11 +243,42 @@ Two shapes, chosen by what the document holds. Both are JSON in `content`,
 UTF-8, uncompressed and not base64-encoded: an event that is unreadable in a
 generic Nostr client throws away most of the reason to publish on Nostr.
 
+Both are also split the same way, and the split is load-bearing:
+
+```json
+{
+  "schema_version": 1,
+  "snapshot_id": "01J8Z…",
+  "generated_at": "2026-08-27T03:05:00Z",
+  "revision": 2,
+  "payload": { "…": "the figures, and only the figures" }
+}
+```
+
+Everything outside `payload` describes the *run*: which publication computed
+this, when, and how many times the figures have moved. `payload` is the
+answer itself. Only `payload` is hashed (§5), so "did this document change"
+is a question about figures and not about clocks — which is what makes a
+closed partition cacheable, and what keeps the daemon from re-signing a year
+of history every night.
+
+The index of §5 is the one document with no such split: nothing hashes it —
+it is what the hashes are *in* — and it is republished on every run by
+definition, since naming the current snapshot is its whole job.
+
+`payload` is serialised deterministically: the same figures produce the same
+bytes, so the hash is a property of the answer rather than of the serialiser
+that happened to run. Field order is the order given below, and a
+floating-point figure is rendered the way the JSON report of SPEC §10 renders
+it. Two implementations that disagree here produce two hashes for one answer,
+which is a bug in the one that deviates.
+
 ### 6.1 Window documents
 
-The report envelope already specified in SPEC §10, plus `snapshot_id`:
-`generated_at`, `range`, `metrics`, one flat record per figure with `name`,
-`kind`, `unit`, `value`. No second format for the same thing.
+`payload` is the report envelope already specified in SPEC §10 minus its
+`generated_at`, which belongs to the run: `range`, and `metrics` as one flat
+record per figure with `name`, `kind`, `unit`, `value`. Those records are
+carried verbatim — no second format for the same thing.
 
 ### 6.2 Series partitions
 
@@ -248,22 +289,26 @@ The flat form repeats the envelope of every metric on every row, which for
 {
   "schema_version": 1,
   "snapshot_id": "01J8Z…",
-  "revision": 2,
   "generated_at": "2026-08-27T03:05:00Z",
-  "period": { "from": "2026-01-01T00:00:00Z", "until": "2026-02-01T00:00:00Z" },
-  "resolution": "daily",
-  "columns": [
-    { "name": "date",        "unit": "date" },
-    { "name": "created",     "kind": "observed", "unit": "count" },
-    { "name": "completed",   "kind": "observed", "unit": "count" },
-    { "name": "volume_sats", "kind": "observed", "unit": "sats" },
-    { "name": "volume_usd",  "kind": "inferred", "unit": "usd",
-      "error": "rate snapshot at or before success_at; see SPEC §5" }
-  ],
-  "rows": [
-    ["2026-01-01", 12, 7, 1361000, 980.4],
-    ["2026-01-02", 0, 0, 0, null]
-  ]
+  "revision": 2,
+  "restated_at": "2026-08-27T03:05:00Z",
+  "restated_because": "backfill",
+  "payload": {
+    "period": { "from": "2026-01-01T00:00:00Z", "until": "2026-02-01T00:00:00Z" },
+    "resolution": "daily",
+    "columns": [
+      { "name": "date",        "unit": "date" },
+      { "name": "created",     "kind": "observed", "unit": "count" },
+      { "name": "completed",   "kind": "observed", "unit": "count" },
+      { "name": "volume_sats", "kind": "observed", "unit": "sats" },
+      { "name": "volume_usd",  "kind": "inferred", "unit": "usd",
+        "error": "rate snapshot at or before success_at; see SPEC §5" }
+    ],
+    "rows": [
+      ["2026-01-01", 12, 7, 1361000, 980.4],
+      ["2026-01-02", 0, 0, 0, null]
+    ]
+  }
 }
 ```
 
@@ -293,18 +338,30 @@ is not atomic. A client that requests `summary:30d` and `volume:30d` while
 the daemon is mid-publication can receive one from each of two snapshots and
 render two figures that do not reconcile.
 
-Every document carries the `snapshot_id` it was computed under, as content
-and as an indexed `s` tag. The index declares the current one. A conformant
-client:
+The index is the authority on what a coherent set is. It names every
+document with the `hash` of the payload that belongs to the current snapshot,
+so a conformant client:
 
-1. Reads the index, takes its `snapshot_id`.
-2. Renders only documents bearing that `snapshot_id`.
+1. Reads the index, takes its `snapshot_id` and its `documents` list.
+2. Renders a document only when the SHA-256 of its `payload` equals the
+   `hash` the index names for that `d`.
 3. On a mismatch, marks that panel as updating and waits for the replacement
    — it MUST NOT mix snapshots silently.
 
-`snapshot_id` is monotonic and unique per publication run. The daemon
-publishes the index **last**, so an index that names a snapshot implies its
-documents are already on the relay.
+The check is on the hash and **not** on the `s` tag, which would be the
+obvious rule and is the wrong one. A document whose figures did not change is
+not republished (§8), so it still carries the `snapshot_id` of the run that
+last computed it — an older one, by design. Demanding an `s` match would
+reject exactly the documents that are most certainly current: unchanged ones
+are coherent with every snapshot since, which is what unchanged means.
+
+`snapshot_id` is monotonic and unique per publication run, and the `s` tag
+carries it so a client can ask a relay for a whole run in one filter. It is a
+fetch hint and a provenance record — *which run last computed this* — not the
+coherence test.
+
+The daemon publishes the index **last**, so an index that names a set of
+hashes implies the documents bearing them are already on the relay.
 
 ## 8. Restatement
 
@@ -314,7 +371,9 @@ partitions will change.
 
 That is allowed, and it MUST NOT be silent:
 
-- `revision` starts at 1 and increments on every content change.
+- `revision` starts at 1 and increments on every change of `payload` — of
+  the figures. A new `snapshot_id` or `generated_at` is a new run, not a new
+  revision, which is why the hash of §5 covers the payload alone.
 - `restated_at` and `restated_because` (`backfill` / `rebuild` /
   `schema` / `correction`) accompany any revision above 1.
 - The index carries the same fields, so a client detects a restatement
@@ -322,8 +381,15 @@ That is allowed, and it MUST NOT be silent:
 - A client that has cached a partition and sees a higher revision SHOULD
   surface that the figure changed, not just swap it.
 
-A republication with an unchanged hash is not a revision and MUST be skipped
-entirely: the daemon does not re-sign documents that did not change.
+During an ordinary publication run, a document whose payload hashes to what
+is already published is not re-signed and not sent: nothing about the answer
+changed, and a relay does not need a second copy of it. The index still lists
+it, with its existing hash, revision and `updated_at`, because "unchanged" is
+one of the things the index exists to say.
+
+The exception is §9.3. `--republish` puts documents on a relay that does not
+have them, so "the relay already has this" is precisely the assumption it
+exists to distrust; it regenerates and signs unconditionally.
 
 ## 9. Size
 
@@ -363,6 +429,19 @@ independent of what any relay holds. This is the recovery path for a pruned
 relay, a new relay, or a schema migration, and it is what makes §1.1 true
 rather than aspirational.
 
+It therefore **overrides the skip of §8**, which would otherwise defeat it:
+the documents a pruned relay is missing are overwhelmingly the ones whose
+figures have not changed in months, and a run that skipped them would send
+the recovering relay nothing. Every document in the range is regenerated,
+signed and sent, whatever its hash.
+
+Signed afresh rather than replayed from a store of past events: §1.1 puts the
+whole truth in the archive and keeps no state beside it, and a cache of
+signed events would be exactly such state — one that can disagree with the
+archive it was derived from. Re-signing an unchanged payload is not a
+restatement and does not touch `revision`; it is one publication run like any
+other, with its own `snapshot_id`, and the index goes last as always.
+
 Series partitions MUST NOT carry a NIP-40 `expiration` tag. Hot window
 documents MAY.
 
@@ -378,8 +457,10 @@ Normative for `mostro.world` and recommended for any other consumer:
 4. For a requested range: choose a resolution (§9.2), enumerate the
    partitions covering it, drop those with a cached `hash` matching the
    index, request the rest in one `REQ`.
-5. Verify every event's signature and that its `s` tag matches the index's
-   `snapshot_id`. Drop and re-request otherwise.
+5. Verify every event's signature and that the SHA-256 of its `payload`
+   matches the `hash` the index names for that `d` (§7). Drop and re-request
+   otherwise. Do not test the `s` tag for equality with the index's
+   `snapshot_id`: an unchanged document legitimately carries an older one.
 6. Render `inferred` figures visually distinct from `observed` ones, with the
    column's `error` text reachable. Render `null` as absence, never as zero.
 7. Show the age of the data, computed from `created_at`, and warn beyond a
@@ -393,7 +474,7 @@ indefinitely.
 | Tag | Indexed | Value |
 | --- | --- | --- |
 | `d` | yes | Document address, §3 |
-| `s` | yes | `snapshot_id`, §7 |
+| `s` | yes | `snapshot_id` of the run that last computed the payload — a fetch hint, not the coherence test, §7 |
 | `t` | yes | `bestiario` — discovery |
 | `alt` | no | Human-readable description, NIP-31 |
 | `resolution` | no | `daily` / `weekly` / `monthly`, series only |

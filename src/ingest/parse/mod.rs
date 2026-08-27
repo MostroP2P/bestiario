@@ -318,3 +318,6 @@ pub(crate) fn optional_network(event: &Event) -> Result<Option<Network>, ParseEr
             expected: "`mainnet`, `testnet`, `signet` or `regtest`",
         })
 }
+
+#[cfg(test)]
+mod tests;

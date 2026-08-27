@@ -323,3 +323,31 @@ fn a_clock_beyond_a_signed_second_count_is_rejected_rather_than_narrowed() {
         "{error}"
     );
 }
+
+#[test]
+fn content_that_is_not_an_object_says_what_was_expected() {
+    // The message is the only thing that tells an operator why a snapshot
+    // was turned away, so it names the shape rather than the type.
+    let event = rates_event("[]", &valid_tags());
+
+    let error = parse(&event).expect_err("refused");
+
+    let message = error.to_string();
+    assert!(
+        message.contains("an object with a `BTC` table of currency → price"),
+        "{message}"
+    );
+}
+
+#[test]
+fn a_btc_table_that_is_not_an_object_says_what_was_expected() {
+    let event = rates_event(r#"{"BTC": 78614.25}"#, &valid_tags());
+
+    let error = parse(&event).expect_err("refused");
+
+    let message = error.to_string();
+    assert!(
+        message.contains("`BTC` to be an object of currency → price"),
+        "{message}"
+    );
+}

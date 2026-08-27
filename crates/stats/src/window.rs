@@ -225,17 +225,6 @@ pub enum Period {
     Year,
 }
 
-impl Period {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Day => "day",
-            Self::Week => "week",
-            Self::Month => "month",
-            Self::Year => "year",
-        }
-    }
-}
-
 /// The first of the month after `at`, or `None` past the last year a date
 /// can represent.
 fn next_month(at: DateTime<Utc>) -> Option<DateTime<Utc>> {

@@ -224,3 +224,31 @@ fn a_window_opening_in_the_first_week_a_date_can_represent_has_no_weeks() {
     assert_eq!(window.weeks(), Vec::new());
     assert_eq!(window.days().len(), 3, "days need no Monday behind them");
 }
+
+#[test]
+fn the_period_before_a_bucket_is_a_calendar_shift_of_the_same_span() {
+    let day = Window::new(THURSDAY, THURSDAY + DAY);
+
+    assert_eq!(
+        day.preceding(Period::Day),
+        Some(Window::new(THURSDAY - DAY, THURSDAY))
+    );
+    assert_eq!(
+        day.preceding(Period::Week),
+        Some(Window::new(THURSDAY - 7 * DAY, THURSDAY - 6 * DAY))
+    );
+    // 2026-08-27 back a month is 2026-07-27, back a year is 2025-08-27.
+    let month = day.preceding(Period::Month).expect("a month back");
+    assert_eq!(month, Window::new(1_785_110_400, 1_785_196_800));
+    let year = day.preceding(Period::Year).expect("a year back");
+    assert_eq!(year, Window::new(1_756_252_800, 1_756_339_200));
+}
+
+#[test]
+fn a_bound_no_date_can_represent_has_no_period_before_it() {
+    let absurd = Window::new(i64::MIN, i64::MIN + 1);
+
+    for period in [Period::Day, Period::Week, Period::Month, Period::Year] {
+        assert_eq!(absurd.preceding(period), None, "{period:?}");
+    }
+}

@@ -394,3 +394,66 @@ fn a_tag_published_twice_is_an_error_rather_than_a_first_one_wins() {
 
     assert_eq!(error, ParseError::RepeatedTag { tag: "d", count: 2 });
 }
+
+#[test]
+fn an_expiry_that_is_not_a_timestamp_is_refused() {
+    // The tag is required, so a value that is not a number is the parser's
+    // last chance to notice before an order with no expiry is stored.
+    let mut tags = valid_tags();
+    tags.retain(|(name, _)| *name != "expires_at");
+    tags.push(("expires_at", vec!["soon"]));
+
+    let error = parse(&order_with(&tags)).expect_err("refused");
+
+    assert!(
+        matches!(
+            error,
+            ParseError::NotANumber {
+                tag: "expires_at",
+                ..
+            }
+        ),
+        "{error}"
+    );
+}
+
+#[test]
+fn an_expiry_before_the_epoch_is_refused() {
+    let mut tags = valid_tags();
+    tags.retain(|(name, _)| *name != "expires_at");
+    tags.push(("expires_at", vec!["-1"]));
+
+    let error = parse(&order_with(&tags)).expect_err("refused");
+
+    assert!(error.to_string().contains("expires_at"), "{error}");
+}
+
+#[test]
+fn an_order_with_no_payment_method_named_is_refused() {
+    // `["pm"]` — the tag is there and offers nothing.
+    let mut tags = valid_tags();
+    tags.retain(|(name, _)| *name != "pm");
+    tags.push(("pm", vec![]));
+
+    let error = parse(&order_with(&tags)).expect_err("refused");
+
+    assert!(
+        matches!(error, ParseError::EmptyTag { tag: "pm" }),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_fixed_amount_names_no_bounds() {
+    // The other half of `bounds`: a fixed order has one amount, not two,
+    // and callers ask this to tell the two shapes apart.
+    assert_eq!(FiatAmount::Fixed(100.0).bounds(), None);
+    assert_eq!(
+        FiatAmount::Range {
+            min: 10.0,
+            max: 100.0
+        }
+        .bounds(),
+        Some((10.0, 100.0))
+    );
+}
