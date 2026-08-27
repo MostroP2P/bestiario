@@ -382,3 +382,23 @@ fn a_conversion_is_reported_once_per_slice() {
         .expect("buy total");
     assert_eq!(buy.value, Value::fiat(77.5, "USD"));
 }
+
+#[test]
+fn a_period_groups_the_window_and_not_the_orders() {
+    // The slicing dimensions name a grouping of orders; the periods do
+    // not, and `report` answers those before it asks.
+    assert_eq!(
+        Dimension::Kind.grouping(),
+        Some(crate::activity::Dimension::Kind)
+    );
+    assert_eq!(
+        Dimension::Fiat.grouping(),
+        Some(crate::activity::Dimension::Fiat)
+    );
+    assert_eq!(
+        Dimension::Instance.grouping(),
+        Some(crate::activity::Dimension::Instance)
+    );
+    assert_eq!(Dimension::Month.grouping(), None);
+    assert_eq!(Dimension::Day.grouping(), None);
+}

@@ -59,6 +59,30 @@ pub enum Dimension {
     Day,
 }
 
+impl Dimension {
+    /// The grouping of orders this dimension asks for, or `None` when it
+    /// asks for a period instead — which cuts the window rather than the
+    /// orders, and is answered by [`report`] before this is consulted.
+    pub fn grouping(self) -> Option<activity::Dimension> {
+        match self {
+            Self::Kind => Some(activity::Dimension::Kind),
+            Self::Fiat => Some(activity::Dimension::Fiat),
+            Self::Instance => Some(activity::Dimension::Instance),
+            Self::Month | Self::Day => None,
+        }
+    }
+
+    /// The bucket size this dimension cuts the window into. A dimension
+    /// that groups orders instead reports monthly, which is what the
+    /// caller asks for only when [`grouping`](Self::grouping) is `None`.
+    fn period(self) -> Period {
+        match self {
+            Self::Day => Period::Day,
+            _ => Period::Month,
+        }
+    }
+}
+
 /// The fiat side of one currency.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FiatVolume {
@@ -222,32 +246,23 @@ pub fn report(
         block
     };
 
-    match dimension {
-        None => block("volume", orders, window),
-        Some(period @ (Dimension::Month | Dimension::Day)) => {
-            let period = match period {
-                Dimension::Day => Period::Day,
-                _ => Period::Month,
-            };
-            bucket::walk(window, period, coverage, |key, bucket, _| {
-                block(&format!("volume.{key}"), orders, bucket)
+    let Some(dimension) = dimension else {
+        return block("volume", orders, window);
+    };
+
+    // A dimension either groups the orders or cuts the window; the two are
+    // the whole of it, so neither arm can be dead.
+    match dimension.grouping() {
+        Some(by) => activity::slice(orders, by)
+            .into_iter()
+            .flat_map(|(key, group)| {
+                let group: Vec<Order> = group.into_iter().cloned().collect();
+                block(&format!("volume.{key}"), &group, window)
             })
-        }
-        Some(grouping) => {
-            let by = match grouping {
-                Dimension::Kind => activity::Dimension::Kind,
-                Dimension::Fiat => activity::Dimension::Fiat,
-                Dimension::Instance => activity::Dimension::Instance,
-                Dimension::Month | Dimension::Day => unreachable!("handled above"),
-            };
-            activity::slice(orders, by)
-                .into_iter()
-                .flat_map(|(key, group)| {
-                    let group: Vec<Order> = group.into_iter().cloned().collect();
-                    block(&format!("volume.{key}"), &group, window)
-                })
-                .collect()
-        }
+            .collect(),
+        None => bucket::walk(window, dimension.period(), coverage, |key, bucket, _| {
+            block(&format!("volume.{key}"), orders, bucket)
+        }),
     }
 }
 

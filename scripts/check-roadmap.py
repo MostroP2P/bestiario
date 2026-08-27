@@ -17,7 +17,8 @@ from pathlib import Path
 ROADMAP = Path(__file__).resolve().parent.parent / "docs" / "ROADMAP.md"
 
 # The last required row: the coverage pass that measures the finished project.
-# Rows after it are the optional phase that follows.
+# Rows after it are the optional phases that follow — the HTTP API and the
+# Nostr publication, neither of which the coverage figure is measuring.
 TERMINAL = 45
 
 # `| 07 | title | S | 01, 03 | scope |` — a row of one of the detailed tables.

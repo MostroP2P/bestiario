@@ -69,15 +69,6 @@ pub enum Initiator {
     Seller,
 }
 
-impl Initiator {
-    pub fn as_key(self) -> &'static str {
-        match self {
-            Self::Buyer => "buyer",
-            Self::Seller => "seller",
-        }
-    }
-}
-
 /// One dispute as the metrics see it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Dispute {

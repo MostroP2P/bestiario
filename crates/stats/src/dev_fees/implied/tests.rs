@@ -324,3 +324,29 @@ fn a_ratio_over_no_matched_order_is_missing() {
     assert_eq!(metrics[2].value, Value::Missing);
     assert_eq!(metrics[1].value, Value::Missing);
 }
+
+#[test]
+fn a_market_price_order_left_out_of_the_comparison_is_named_beside_it() {
+    // One fee whose order settled at a real amount, so the ratio exists,
+    // and one whose order is known at `amt = 0` — a market-price order
+    // nobody amended, which has no observed volume to compare against.
+    let data = data(vec![
+        fee("real", 100, Some(40_000)),
+        fee("market", 200, Some(0)),
+    ]);
+
+    let implied = summarise(&data, WINDOW, &quarter);
+    let metrics = metrics("dev_fees", &implied);
+    let comparison = metrics
+        .iter()
+        .find(|metric| metric.name == "dev_fees.implied_vs_observed")
+        .expect("the ratio");
+
+    assert_eq!(implied.zero_amount_orders, 1);
+    assert_eq!(implied.matched, 1, "only the one with an amount");
+    let error = comparison.error().expect("an error column");
+    assert!(
+        error.contains("1 fee left out at amt = 0"),
+        "the reader is told what the ratio does not cover: {error}"
+    );
+}

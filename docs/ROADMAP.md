@@ -27,7 +27,10 @@ source of truth for formats, schema and metrics. This document only answers
   ancestor. PR 45, the last required row, names enough of them to reach every
   row before it — checked, not assumed, by the script in
   [Verifying the graph](#verifying-the-graph). Phase 6 comes after it and is
-  optional, so it is deliberately outside that guarantee.
+  therefore outside that guarantee — not because it is optional, it is not,
+  but because PR 45 *raises* the CI gate and every row after it merges under
+  the raised one. The pass that sets a floor cannot also be the pass that
+  measures what comes later.
 - `Depends` lists PRs that must be merged first. PRs with no shared dependency
   can be developed in parallel branches.
 - Deliberate bundling: some rows group several trivial tasks (e.g. all four
@@ -45,14 +48,23 @@ source of truth for formats, schema and metrics. This document only answers
 | 3 | Valuation and inference | 32–38 | `stats volume --in USD`, inferred vs. observed volume with error margins |
 | 4 | Discovery, series and market views | 39–44 | `series`, `market <FIAT>`, relay/instance discovery |
 | 5 | Hardening | 45 | Coverage ≥ 95% overall and 100% across `crates/stats` and `ingest::parse` (SPEC §12) |
-| 6 | Exposure (HTTP API) | 46–49 | `bestiario-stats` served over HTTP without touching the aggregation layer |
+| 6 | Publication (Nostr) | 46–51 | `bestiario publish` puts a verifiable snapshot on the relays; a client renders it from a pubkey, not a host |
 
 Phases 0–2 produce the first genuinely useful release (`v0.1.0`): counts,
 dev fees and disputes, all observed, no inference — and, in PR 31, the README
 that makes it usable by someone who did not write it. Phase 3 is what makes
 the numbers comparable across currencies. Phase 4 is breadth. Phase 5 raises
-the coverage floor, once the metric catalog has stopped moving. Phase 6 is out
-of `SPEC.md` scope and stays optional.
+the coverage floor, once the metric catalog has stopped moving. Phase 6 is how
+the figures leave the machine that computed them, and it is required: a
+bestiario nobody can read from is a private notebook. It has a specification of
+its own, [`docs/NOSTR-PUBLICATION.md`](NOSTR-PUBLICATION.md), which SPEC §13.5
+points at.
+
+There is no HTTP API. There was one planned, and phase 6 replaces it: signed
+documents on a relay answer the same question — how does a reader get these
+figures — without a host to trust, a certificate to renew or a server to keep
+up. Two transports for one set of aggregations is one more contract than the
+project needs.
 
 ---
 
@@ -174,17 +186,30 @@ moving; done earlier it means writing tests for code that is about to change.
 
 ---
 
-## Phase 6 — Exposure (optional, outside SPEC scope)
+## Phase 6 — Publication over Nostr
 
-Only worth starting once phases 2–4 have run against real data for a while
-and the metric set has stopped moving.
+Specified in full in [`docs/NOSTR-PUBLICATION.md`](NOSTR-PUBLICATION.md), and
+referenced from SPEC §13.5. Required, like everything before it: the figures
+are worth computing because somebody reads them, and this is how they leave
+the machine that computed them.
+
+It follows PR 45 rather than interleaving with it because a published document
+format is a promise to every client that ever parsed one — restating a figure
+is specified (§8), changing the shape it arrives in is a `schema_version` bump
+— and the promise is cheaper to make once the metric catalog has stopped
+moving. Its rows merge under the coverage gate PR 45 raises.
+
+Section references in the `Scope` column below are to
+`docs/NOSTR-PUBLICATION.md` unless they say `SPEC`.
 
 | # | Title | Size | Depends | Scope |
 |---|---|---|---|---|
-| 46 | `feat(api): HTTP server skeleton` | M | 44 | `axum`, `/health`, config section `[api]`, graceful shutdown, behind a `api` cargo feature so the CLI-only build stays lean. |
-| 47 | `feat(api): metric endpoints over the stats crate` | L | 46 | One endpoint per view of §6.10 plus the `stats` families, reusing the phase-2/3 aggregations unchanged. If any endpoint needs a change inside `crates/stats`, that is a signal the layer boundary was wrong — fix it there, not in the handler. |
-| 48 | `feat(api): caching and rate limiting` | M | 47 | Short-TTL response cache keyed by range + filters; per-IP rate limit. Aggregations over a full backfill are not cheap enough to run per request. |
-| 49 | `feat(api): OpenAPI schema and JSON contract tests` | M | 47 | Generated schema plus tests asserting the HTTP JSON matches the CLI `--json` envelope exactly — one contract, two transports. |
+| 46 | `feat(publish): the document model` | M | 45 | The `d` grammar of §3 as a type that parses and renders, the tag set of §11, and `schema_version`. Pure functions over plain data, no relay and no database, so the grammar is testable as a grammar. A `d` value is the only thing a client constructs, so a typo must be a parse failure and never a fuzzy match — which is a property worth a test table rather than a code review. |
+| 47 | `feat(publish): a snapshot in one pass` | L | 46 | Every document of a snapshot computed from one read of the archive, sharing one `snapshot_id` (§7): window documents carrying the SPEC §10 metric records verbatim, series partitions in the columnar form of §6.2. Both split a per-run envelope from the `payload` that holds the figures, and the payload serialises deterministically — the hash of §5 is taken over it, so the same figures must produce the same bytes or a closed partition is never cacheable. A series partition is a series, so it goes through the aggregation of PR 42 rather than a second implementation — computing it twice would be two answers under one heading. Absence follows §6.3: a bucket outside coverage is `null` in every column, counts included, which is the rule the daily reports already apply and the single most misleading thing this feature could get wrong. |
+| 48 | `feat(publish): the index` | M | 47 | `d = index` (§5): what exists, what changed and what is current. Payload hash per document — never over the whole content, which carries a fresh `snapshot_id` every run — plus `revision`, `coverage` from the archive's real extent, and the `resolutions` a client picks from. Written to be shardable by year later without a client change (§5.1). |
+| 49 | `feat(cmd): publish --dry-run` | M | 48 | The command, the `[publish]` configuration section, and the size gate of §9.1: NIP-11 `limitation.max_content_length` read per relay at startup, checked against the configured ceiling, and a document over it is an error naming the document rather than a silent relay rejection. `--dry-run` prints sizes and hashes; `--out` writes the files the site serves before its relay connection is live. Signs nothing, publishes nothing: the whole snapshot is reviewable before a key is involved. |
+| 50 | `feat(publish): signing and relay publication` | M | 49 | The signing key from `[publish].nsec` or a file path, never from a flag, and publication to `[publish].relays` — configured separately from `[nostr].relays` because reading and writing are different trust decisions. The index goes last, so an index naming a snapshot implies its documents are already there (§7). |
+| 51 | `feat(publish): restatement and --republish` | M | 50 | `revision`, `restated_at` and `restated_because` (§8), and the rule that an unchanged payload hash is not a revision and is not re-signed during an ordinary run. `--republish [--from] [--until]` regenerates a range from the archive alone, which is what makes "the relay is not the archive" (§1.1) true rather than aspirational: the recovery path for a pruned relay, a new relay or a schema migration. It overrides that skip — the documents a pruned relay is missing are mostly the unchanged ones, so a run that honoured the skip would send it nothing — and signs afresh rather than replaying stored events, because a cache of signed events is the state §1.1 says the daemon does not keep. |
 
 ---
 
@@ -198,8 +223,9 @@ both failed review at least once:
 2. **Every row before PR 45 is reachable from it.** The hardening pass
    measures coverage of the finished project, so anything earlier that it does
    not transitively depend on could legitimately land after it — which would
-   make the coverage figure a measurement of an incomplete tree. Phase 6 is
-   optional and comes afterwards by design, so it is excluded.
+   make the coverage figure a measurement of an incomplete tree. Phase 6 comes
+   afterwards by design and is excluded: its rows merge under the gate PR 45
+   raises, rather than being measured by the run that raises it.
 3. **The detailed tables match the phase map.** The map is the declared
    contents of the plan; checking the tables against their own length would
    let a whole phase be deleted without complaint.

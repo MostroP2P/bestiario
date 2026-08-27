@@ -29,7 +29,8 @@ pull request. Work is delivered one PR per row.
   (see `docs/SPEC.md` §5).
 - Persist every event version; never overwrite history.
 - Verify event signatures before persisting anything.
-- `stats/` must stay free of I/O so it can back an HTTP API later.
+- `stats/` must stay free of I/O so it can back the Nostr publication of
+  `docs/NOSTR-PUBLICATION.md` later.
 - Tests first (TDD); aggregation functions are tested with real event
   fixtures under `tests/fixtures/`.
 - Conventional commits (`feat:`, `fix:`, `docs:`, `test:`, `chore:`, …).

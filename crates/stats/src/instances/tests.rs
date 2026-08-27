@@ -229,3 +229,31 @@ fn a_profile_whose_scope_cannot_reach_disputes_reports_them_as_missing() {
     assert_eq!(value(&metrics, "disputes.open_now"), &Value::Missing);
     assert_eq!(value(&metrics, "orders.created"), &Value::Count(0));
 }
+
+#[test]
+fn a_share_of_a_volume_that_does_not_fit_is_missing_rather_than_wrong() {
+    // The network's completed sats leave `i64` — a corrupt archive, not a
+    // figure — so the share of it cannot be stated either.
+    let own = vec![order("a", "aaaa0000", 1_100, Status::Success, 1_000)];
+    let network = vec![
+        order("a", "aaaa0000", 1_100, Status::Success, i64::MAX - 1),
+        order("b", "bbbb0000", 1_200, Status::Success, 2),
+    ];
+
+    let metrics = profile(
+        &alpha(),
+        &own,
+        &network,
+        &DevFeeData::default(),
+        Some(&DisputeData::default()),
+        WINDOW,
+        NOW,
+    );
+
+    assert_eq!(value(&metrics, "share.volume"), &Value::Missing);
+    assert_eq!(
+        value(&metrics, "share.orders"),
+        &Value::Ratio(0.5),
+        "the counts still add up"
+    );
+}

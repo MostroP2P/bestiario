@@ -590,8 +590,8 @@ tests/fixtures/      real event JSON per kind
 ```
 
 The aggregation layer receives data already loaded from `db/` and returns
-serializable structs; it knows nothing about SQLite or Nostr. It is what an
-HTTP API or dashboard reuses later.
+serializable structs; it knows nothing about SQLite or Nostr. It is what the
+publication pass of §13.5 and any dashboard reuse later.
 
 It is a **separate workspace crate**, `bestiario-stats`, re-exported as
 `bestiario::stats`. A module could keep the no-I/O rule only by convention;
@@ -701,6 +701,11 @@ bestiario rebuild                            # regenerate projections from event
 Default output is a table; `--json` emits `{ "generated_at", "range",
 "metrics": [ { "name", "kind": "observed|inferred", "value", "error": … } ] }`.
 
+That envelope is also what `bestiario publish` puts on a relay: the Nostr
+publication of §13.5 carries these records verbatim rather than defining a
+second shape for the same figures. See
+[`docs/NOSTR-PUBLICATION.md`](NOSTR-PUBLICATION.md) §6.
+
 ## 11. Dependencies (latest versions on crates.io as of 2026-08-25)
 
 | Crate | Version | Use |
@@ -776,8 +781,29 @@ plan and this section is the intent.
    standing rule: the useful moment to hunt uncovered branches is when the
    metric catalog has stopped moving, and doing it earlier means writing
    tests for code that is about to change.
-5. **Exposure**: HTTP API over the aggregation crate (out of this spec's
-   scope).
+5. **Publication**: the figures published as signed Nostr events, so that a
+   client reads them from a pubkey rather than from a host — specified in
+   full in [`docs/NOSTR-PUBLICATION.md`](NOSTR-PUBLICATION.md), which is
+   normative for that feature the way this document is for the rest. It is
+   long enough to be its own document and self-contained enough not to
+   interleave with the sections above: a new event kind, a document
+   addressing grammar, and a client contract, none of which the daemon needs
+   in order to compute a single figure.
+
+   It comes last because it distributes the report envelope of §10 and the
+   observed/inferred distinction of §5, and a published format is a promise
+   to every client that ever parsed one — worth making after those have
+   stopped moving. Last is not optional: figures nobody can read are a
+   private notebook, and this is how they leave the machine that computed
+   them.
+
+   An HTTP API over the aggregation crate was the plan here for a while, and
+   this replaces it. Both answer the same question — how does a reader get
+   these figures — and the signed documents answer it without a host to
+   trust, a certificate to renew or a server to keep running. Two transports
+   for one set of aggregations is one more contract than the project needs.
+   The no-I/O rule of §8 is unaffected: it was never about HTTP, it is about
+   the aggregation layer having exactly one job.
 
 ## 14. Open questions
 

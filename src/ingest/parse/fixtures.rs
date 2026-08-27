@@ -76,3 +76,16 @@ pub(crate) fn load(kind: u16, name: &str) -> Event {
     let json = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {path}: {e}"));
     Event::from_json(&json).unwrap_or_else(|e| panic!("parsing {path}: {e}"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[should_panic(expected = "reading")]
+    fn a_fixture_that_is_not_there_names_the_path_it_looked_for() {
+        // A test asking for a fixture that does not exist has a typo, and
+        // the panic is what tells its author where to look.
+        load(38383, "no-such-fixture");
+    }
+}

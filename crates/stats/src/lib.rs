@@ -8,7 +8,8 @@
 //!
 //! This is a **separate crate** rather than a module of `bestiario`, and that
 //! is the whole point. `docs/SPEC.md` §8 requires the aggregation layer to
-//! stay free of I/O so an HTTP API can reuse it unchanged (phase 5). A module
+//! stay free of I/O so the publication pass can reuse it unchanged (phase 6).
+//! A module
 //! could satisfy that rule only by convention: any file in the crate can
 //! reach for `sqlx` the moment it is convenient, and someone has to notice.
 //!
