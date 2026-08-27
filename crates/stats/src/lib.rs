@@ -37,6 +37,7 @@ pub mod instances;
 pub mod lifecycle;
 pub mod metric;
 pub mod percentile;
+pub mod rates;
 pub mod summary;
 pub mod volume;
 pub mod window;
