@@ -53,7 +53,7 @@ pub async fn report(
         load::activity::completed_in(pool, &query.scope, window.from, window.until).await?;
     let book = match convert_to {
         Some(_) => Some(
-            load::rates::book(pool)
+            load::rates::book(pool, window.from, window.until)
                 .await
                 .context("loading the rate snapshots")?,
         ),

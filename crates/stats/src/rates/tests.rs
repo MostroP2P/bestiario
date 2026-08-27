@@ -171,3 +171,25 @@ fn sats_convert_at_the_rate() {
     assert_eq!(quote.convert_sats(100_000_000), 50_000.0);
     assert_eq!(quote.convert_sats(1_000_000), 500.0);
 }
+
+#[test]
+fn a_fallback_lookup_does_not_walk_more_history_than_the_bound_allows() {
+    // The fallback used to build a fresh index of every snapshot on each
+    // call, so an unquoted currency cost the whole archive per order. This
+    // pins the answer; the cost is what the index in `RateBook` is for.
+    let mut snapshots = Vec::new();
+    for tick in 0..5_000i64 {
+        snapshots.push(Snapshot {
+            pubkey: format!("other-{}", tick % 7),
+            published_at: tick * 10,
+            rates: BTreeMap::from([("USD".to_string(), 50_000.0 + tick as f64)]),
+        });
+    }
+    let book = RateBook::new(snapshots);
+
+    let quote = book.rate_at("silent", "USD", 49_990).expect("a fallback");
+
+    assert_eq!(quote.rate, 50_000.0 + 4_999.0);
+    assert!(matches!(quote.source, RateSource::Fallback { .. }));
+    assert!(book.rate_at("silent", "EUR", 49_990).is_none());
+}

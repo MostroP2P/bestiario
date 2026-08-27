@@ -78,6 +78,10 @@ where
                 (SELECT v.amount_sats FROM order_versions v
                   WHERE v.order_id = o.order_id
                   ORDER BY v.created_at ASC, v.event_id ASC LIMIT 1) AS first_amount_sats,
+                (SELECT v.payment_methods FROM order_versions v
+                  WHERE v.order_id = o.order_id
+                  ORDER BY v.created_at ASC, v.event_id ASC LIMIT 1)
+                  AS first_payment_methods,
                 (SELECT v.fiat_min FROM order_versions v
                   WHERE v.order_id = o.order_id
                   ORDER BY v.created_at ASC, v.event_id ASC LIMIT 1) AS first_fiat_min,
@@ -149,6 +153,7 @@ struct Row {
     kind: String,
     fiat_code: String,
     payment_methods: String,
+    first_payment_methods: Option<String>,
     amount_sats: i64,
     fiat_amount: Option<f64>,
     premium: f64,
@@ -156,7 +161,6 @@ struct Row {
     first_fiat_min: Option<f64>,
     first_fiat_max: Option<f64>,
     first_fiat_code: Option<String>,
-    first_payment_methods: Option<String>,
     first_kind: Option<String>,
     pending_at: Option<i64>,
     success_at: Option<i64>,
@@ -168,6 +172,23 @@ struct Row {
 impl Row {
     fn into_order(self) -> Result<Order, sqlx::Error> {
         let instance = instance_label(&self.pubkey, self.instance_name.as_deref());
+
+        // Every order has at least one version, so the first-version reads
+        // are never NULL; the fallbacks keep a torn row honest.
+        let origin = activity::Origin {
+            fiat_code: self
+                .first_fiat_code
+                .unwrap_or_else(|| self.fiat_code.clone()),
+            payment_methods: csv::split(
+                self.first_payment_methods
+                    .as_deref()
+                    .unwrap_or(&self.payment_methods),
+            ),
+            direction: match self.first_kind {
+                Some(kind) => direction(decode("kind", Direction::parse(&kind))?),
+                None => direction(decode("kind", Direction::parse(&self.kind))?),
+            },
+        };
 
         Ok(Order {
             order_id: self.order_id,
@@ -184,14 +205,7 @@ impl Row {
             is_market_price: self.first_amount_sats == Some(0),
             fiat_range: self.first_fiat_min.zip(self.first_fiat_max),
             pending_at: self.pending_at,
-            origin: activity::Origin {
-                fiat_code: self.first_fiat_code.unwrap_or_default(),
-                payment_methods: csv::split(&self.first_payment_methods.unwrap_or_default()),
-                direction: match self.first_kind {
-                    Some(kind) => direction(decode("kind", Direction::parse(&kind))?),
-                    None => activity::Direction::default(),
-                },
-            },
+            origin,
             taken_at: self.taken_at,
             success_at: self.success_at,
             canceled_at: self.canceled_at,

@@ -123,8 +123,10 @@ impl RateBook {
             });
         }
 
-        let all: Vec<usize> = (0..self.snapshots.len()).collect();
-        self.newest(&all, fiat, at_ts)
+        // `everyone` is this index, built once: rebuilding it here made an
+        // unquoted currency cost one allocation over the whole archive per
+        // order asked about.
+        self.newest(&self.everyone, fiat, at_ts)
             .map(|(snapshot, rate)| RateQuote {
                 rate,
                 age_secs: at_ts - snapshot.published_at,

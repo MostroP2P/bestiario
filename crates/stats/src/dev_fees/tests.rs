@@ -25,7 +25,7 @@ fn fee(id: &str, order_id: &str, created_at: i64, amount_sats: i64) -> Fee {
         order_known: true,
         settled_at: None,
         fee_in_force: Some(0.006),
-        order_amount_sats: None,
+        settled_amount_sats: None,
     }
 }
 
@@ -280,4 +280,58 @@ fn the_implied_volume_of_the_dataset_is_the_thousand_sats_over_fee_times_pct() {
         .expect("present");
 
     assert_eq!(implied.value, Value::Sats(555_556));
+}
+
+#[test]
+fn each_instance_block_rests_on_its_own_assumed_share() {
+    // Arrange: Alpha keeps the default, Beta is assumed to forward twice as
+    // much, so the same fee implies half the volume.
+    let data = DevFeeData {
+        fees: vec![
+            Fee {
+                settled_at: Some(1_050),
+                ..fee("f1", "o1", 1_100, 100)
+            },
+            Fee {
+                pubkey: "bbbbbbbb".to_string(),
+                instance: "Beta (bbbbbbbb)".to_string(),
+                settled_at: Some(1_050),
+                ..fee("f2", "o2", 1_100, 100)
+            },
+        ],
+        settlements: vec![],
+    };
+    let pct = |pubkey: &str| if pubkey == "bbbbbbbb" { 0.60 } else { 0.30 };
+
+    // Act
+    let metrics = report(&data, WINDOW, Some(Dimension::Instance), &pct);
+    let implied = |instance: &str| {
+        metrics
+            .iter()
+            .find(|metric| metric.name == format!("dev_fees.{instance}.implied_volume"))
+            .expect("present")
+            .value
+            .clone()
+    };
+
+    // Assert: 100 / 0.0018 against 100 / 0.0036.
+    assert_eq!(implied("Alpha (aaaaaaaa)"), Value::Sats(55_556));
+    assert_eq!(implied("Beta (bbbbbbbb)"), Value::Sats(27_778));
+}
+
+#[test]
+fn a_fee_against_an_order_that_never_settled_leaves_the_observed_side_missing() {
+    // Arrange: the whole dataset's orders are unsettled as far as the fees
+    // know (the loader only fills `settled_amount_sats` for `success`).
+    let metrics = report(&dataset(), WINDOW, None, &THIRTY);
+
+    // Act
+    let observed = metrics
+        .iter()
+        .find(|metric| metric.name == "dev_fees.with_fee_volume")
+        .expect("present");
+
+    // Assert: missing, not a zero that would read as no volume.
+    assert_eq!(observed.value, Value::Missing);
+    assert!(!observed.is_inferred());
 }

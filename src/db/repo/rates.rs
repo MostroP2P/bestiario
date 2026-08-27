@@ -56,6 +56,35 @@ where
     .collect()
 }
 
+/// The snapshots published inside `[from, until)`, oldest first.
+///
+/// The lookup only ever consults a snapshot published at or before the
+/// instant asked about and no more than `MAX_AGE_SECS` earlier, so a report
+/// over a window needs no snapshot older than its floor minus that bound —
+/// and none at all from after it. Loading the lifetime table to answer for
+/// one week grows with the archive rather than with the question.
+pub async fn published_between<'e, E>(
+    executor: E,
+    from: i64,
+    until: i64,
+) -> Result<Vec<RateSnapshot>, sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    sqlx::query_as::<_, Row>(
+        "SELECT event_id, pubkey, published_at, source, rates_json
+         FROM rates WHERE published_at >= ? AND published_at < ?
+         ORDER BY published_at, event_id",
+    )
+    .bind(from)
+    .bind(until)
+    .fetch_all(executor)
+    .await?
+    .into_iter()
+    .map(Row::into_snapshot)
+    .collect()
+}
+
 /// Empties the table; see [`super::orders::clear_versions`].
 pub async fn clear<'e, E>(executor: E) -> Result<(), sqlx::Error>
 where

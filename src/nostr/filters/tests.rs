@@ -176,3 +176,43 @@ fn every_filter_of_a_batch_carries_the_same_window_and_authors() {
         assert_eq!(json["limit"], json!(10));
     }
 }
+
+#[test]
+fn the_rate_filter_names_the_mostro_identifier() {
+    // Kind 30078 is NIP-78's generic application-data kind: every app on the
+    // relay stores under it. Without the `d` bound, backfill and sync would
+    // download every unrelated 30078 address to archive it as a rejection.
+    let filter = for_kind(rates::KIND, &[], None, None);
+
+    assert_eq!(
+        as_json(&filter),
+        json!({ "kinds": [30078], "#d": ["mostro-rates"] })
+    );
+}
+
+#[test]
+fn the_rate_identifier_survives_the_author_and_range_narrowing() {
+    let filter = for_kind(rates::KIND, &pubkeys(&[MOSTRO]), Some(range()), Some(10));
+
+    assert_eq!(as_json(&filter)["#d"], json!(["mostro-rates"]));
+}
+
+#[test]
+fn only_the_rate_filter_carries_an_identifier() {
+    // The other kinds are Mostro's own, so their kind number already says
+    // what they are; a `d` bound there would only narrow them wrongly.
+    for kind in INDEXED_KINDS.into_iter().filter(|&k| k != rates::KIND) {
+        assert_eq!(as_json(&for_kind(kind, &[], None, None)).get("#d"), None);
+    }
+}
+
+#[test]
+fn every_filter_of_the_set_is_the_one_its_kind_would_get_alone() {
+    // per_kind is the production path; this pins that it does not lose the
+    // specialization for_kind applies.
+    let per_kind = per_kind(&[], None, None);
+
+    for (filter, kind) in per_kind.iter().zip(INDEXED_KINDS) {
+        assert_eq!(as_json(filter), as_json(&for_kind(kind, &[], None, None)));
+    }
+}

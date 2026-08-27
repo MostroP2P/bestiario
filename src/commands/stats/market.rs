@@ -39,6 +39,7 @@ pub async fn report(
     ))
 }
 
+/// The CLI's `--by` flag as the aggregation dimension it names.
 fn dimension(by: MarketDimension) -> Dimension {
     match by {
         MarketDimension::Fiat => Dimension::Fiat,

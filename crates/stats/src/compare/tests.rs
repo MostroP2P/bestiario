@@ -82,7 +82,7 @@ fn one_row_per_instance_with_its_own_figures() {
             order_known: true,
             settled_at: Some(1_200),
             fee_in_force: None,
-            order_amount_sats: Some(200),
+            settled_amount_sats: Some(200),
         }],
         settlements: vec![],
     };

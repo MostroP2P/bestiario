@@ -48,7 +48,11 @@ impl Status {
     }
 }
 
-/// The dimensions of an order's first version — see [`Order::origin`].
+/// The dimensions of an order's first version — see [`Order::origin`]:
+/// what the maker put on the book. The §6.3 rankings and first sightings
+/// and the §6.4 slices count these, since a method added to an order days
+/// later was not on offer when the order was created — and, dated by the
+/// order, would fake an earlier first sighting.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Origin {
     pub fiat_code: String,
@@ -88,6 +92,8 @@ pub struct Order {
     pub status: Status,
     pub direction: Direction,
     pub fiat_code: String,
+    /// From the latest version: what the order advertises now, which is
+    /// what a `--by method` slice of §6.1 asks about.
     pub payment_methods: Vec<String>,
     /// From the latest version. Not a §6.1 figure, but what a share of the
     /// network's volume (§6.5) and the summary's sats volume (§6.10) are

@@ -305,3 +305,35 @@ async fn lifecycle_in_reads_what_moved_in_the_window_and_the_live_book() {
     ids.sort_unstable();
     assert_eq!(ids, ["live", "moved"]);
 }
+#[tokio::test]
+async fn the_payment_methods_of_the_book_come_from_the_first_version() {
+    // Arrange: an order published with `cash` that later advertises `pix`
+    // as well. §6.3 counts what was on the book, §6.1 what it says now.
+    let pool = migrated().await;
+    ingest(
+        &pool,
+        &OrderVersion {
+            payment_methods: vec!["cash".to_string()],
+            ..version("o1", ALPHA, T0, Status::Pending)
+        },
+    )
+    .await;
+    ingest(
+        &pool,
+        &OrderVersion {
+            payment_methods: vec!["cash".to_string(), "pix".to_string()],
+            ..version("o1", ALPHA, T0 + 600, Status::Success)
+        },
+    )
+    .await;
+
+    // Act
+    let orders = orders(&pool, &mainnet()).await.expect("load");
+
+    // Assert
+    assert_eq!(orders[0].origin.payment_methods, vec!["cash".to_string()]);
+    assert_eq!(
+        orders[0].payment_methods,
+        vec!["cash".to_string(), "pix".to_string()]
+    );
+}

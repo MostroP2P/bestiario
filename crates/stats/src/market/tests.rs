@@ -25,12 +25,27 @@ fn order(id: &str, direction: Direction, fiat: &str, created_at: i64, sats: i64)
         premium: 0.0,
         is_market_price: false,
         fiat_range: None,
-        pending_at: None,
-        origin: Origin::default(),
+        pending_at: Some(created_at),
+        origin: Origin {
+            fiat_code: fiat.into(),
+            payment_methods: vec!["cash".into()],
+            direction,
+        },
         taken_at: None,
         success_at: None,
         canceled_at: None,
         expires_at: None,
+    }
+}
+
+/// `order` as published with `methods` on the book.
+fn on_book(methods: &[&str], order: Order) -> Order {
+    Order {
+        origin: Origin {
+            payment_methods: methods.iter().map(|m| m.to_string()).collect(),
+            ..order.origin.clone()
+        },
+        ..order
     }
 }
 
@@ -68,22 +83,28 @@ fn dataset() -> Vec<Order> {
             5.0,
             order("b", Direction::Sell, "ARS", 1_060, 30_000),
         ),
-        Order {
-            is_market_price: true,
-            payment_methods: vec!["zelle".into()],
-            ..completed(1_300, 1.0, order("c", Direction::Buy, "USD", 1_250, 20_000))
-        },
+        on_book(
+            &["zelle"],
+            Order {
+                is_market_price: true,
+                payment_methods: vec!["zelle".into()],
+                ..completed(1_300, 1.0, order("c", Direction::Buy, "USD", 1_250, 20_000))
+            },
+        ),
         Order {
             fiat_range: Some((10.0, 100.0)),
             fiat_amount: None,
             ..order("d", Direction::Sell, "USD", 1_300, 40_000)
         },
-        Order {
-            status: Status::Canceled,
-            canceled_at: Some(1_450),
-            payment_methods: vec!["pix".into()],
-            ..order("e", Direction::Buy, "BRL", 1_400, 5_000)
-        },
+        on_book(
+            &["pix"],
+            Order {
+                status: Status::Canceled,
+                canceled_at: Some(1_450),
+                payment_methods: vec!["pix".into()],
+                ..order("e", Direction::Buy, "BRL", 1_400, 5_000)
+            },
+        ),
         completed(
             1_500,
             4.0,
@@ -286,10 +307,14 @@ fn a_fiat_slice_drops_the_fiat_ranking_and_keeps_the_rest() {
     assert_eq!(names[0], "market.ARS.orders");
     assert!(names.contains(&"market.ARS.premium_spread"));
     assert!(names.contains(&"market.ARS.method_top3_by_orders"));
-    assert!(!names.iter().any(|name| name.contains("fiat_")));
+    assert!(!names.iter().any(|name| name.contains("fiat_top3")));
+    assert!(!names.iter().any(|name| name.contains("fiat_hhi")));
     assert!(!names.iter().any(|name| name.contains("new_fiats")));
-    // Per block: 21 − 6 ranking rows − 1 new_fiats row.
-    assert_eq!(by_fiat.len(), 3 * 14);
+    // Per block: 21 − 6 ranking rows − 1 new_fiats row; USD alone also
+    // carries the absolute range width, which needs a single currency.
+    assert_eq!(by_fiat.len(), 3 * 14 + 1);
+    assert!(names.contains(&"market.USD.range_width_fiat_avg"));
+    assert!(!names.contains(&"market.ARS.range_width_fiat_avg"));
 }
 
 #[test]
@@ -306,9 +331,11 @@ fn kind_and_instance_slices_keep_every_row() {
 fn a_long_list_names_the_first_few_and_counts_the_rest() {
     // Ten methods first seen in the window, one order each.
     let orders: Vec<Order> = (0..10)
-        .map(|i| Order {
-            payment_methods: vec![format!("method-{i:02}")],
-            ..order(&format!("o{i}"), Direction::Buy, "ARS", 1_100 + i, 1_000)
+        .map(|i| {
+            on_book(
+                &[&format!("method-{i:02}")],
+                order(&format!("o{i}"), Direction::Buy, "ARS", 1_100 + i, 1_000),
+            )
         })
         .collect();
 
@@ -325,5 +352,96 @@ fn a_long_list_names_the_first_few_and_counts_the_rest() {
              method-07, +2 more"
                 .into()
         )
+    );
+}
+
+#[test]
+fn the_method_ranking_counts_what_was_on_the_book_not_a_later_amendment() {
+    // Arrange: an order created with `cash` that later advertises `zelle`
+    // too. The book held `cash` alone.
+    let amended = Order {
+        payment_methods: vec!["cash".into(), "zelle".into()],
+        ..order("amended", Direction::Buy, "ARS", 1_100, 10_000)
+    };
+
+    // Act
+    let market = summarise(&[amended], WINDOW);
+
+    // Assert
+    assert_eq!(
+        market.methods_by_orders.entries,
+        vec![("cash".to_string(), 1)]
+    );
+}
+
+#[test]
+fn a_method_added_to_an_old_order_does_not_backdate_its_first_sighting() {
+    // Arrange: an order from before the window that now advertises `pix`,
+    // and an order created inside it that was published with `pix`. Dating
+    // `pix` by the old order would hide a genuine first sighting.
+    let old = Order {
+        payment_methods: vec!["cash".into(), "pix".into()],
+        ..order("old", Direction::Buy, "ARS", 500, 10_000)
+    };
+    let fresh = on_book(
+        &["pix"],
+        Order {
+            payment_methods: vec!["pix".into()],
+            ..order("fresh", Direction::Buy, "ARS", 1_100, 10_000)
+        },
+    );
+
+    // Act
+    let market = summarise(&[old, fresh], WINDOW);
+
+    // Assert
+    assert_eq!(market.new_methods, vec!["pix"]);
+}
+
+#[test]
+fn the_range_width_is_relative_everywhere_and_absolute_only_within_one_fiat() {
+    // Arrange: ARS [900, 1000] is the narrow one in its own currency and
+    // the wide one relative to its top; USD [10, 100] is the reverse.
+    let orders = vec![
+        Order {
+            fiat_range: Some((900.0, 1_000.0)),
+            fiat_amount: None,
+            ..order("ars", Direction::Sell, "ARS", 1_100, 10_000)
+        },
+        Order {
+            fiat_range: Some((10.0, 100.0)),
+            fiat_amount: None,
+            ..order("usd", Direction::Sell, "USD", 1_200, 10_000)
+        },
+    ];
+
+    // Act
+    let market = summarise(&orders, WINDOW);
+    let global = metrics("market", &market, None);
+    let by_fiat = report(&orders, WINDOW, Some(Dimension::Fiat));
+    let named = |name: &str| {
+        by_fiat
+            .iter()
+            .find(|metric| metric.name == name)
+            .map(|metric| metric.value.clone())
+    };
+
+    // Assert: the mean of 0.10 and 0.90 across currencies, and each
+    // currency's own width beside it in the slice.
+    assert!(approx(market.range_width_avg, 0.5));
+    assert!(approx(market.range_width_fiat_avg, 95.0));
+    assert!(
+        !global
+            .iter()
+            .any(|metric| metric.name.ends_with("range_width_fiat_avg")),
+        "a block that mixes currencies cannot average their widths"
+    );
+    assert_eq!(
+        named("market.ARS.range_width_fiat_avg"),
+        Some(Value::fiat(100.0, "ARS"))
+    );
+    assert_eq!(
+        named("market.USD.range_width_fiat_avg"),
+        Some(Value::fiat(90.0, "USD"))
     );
 }

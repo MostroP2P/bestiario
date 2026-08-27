@@ -10,7 +10,7 @@ use anyhow::Result;
 use crate::commands::Context;
 use crate::commands::range::{InstanceFilter, Range};
 use crate::db::load::Scope;
-use crate::db::repo::instances;
+use crate::db::repo::{events, instances};
 use crate::network::Network;
 
 /// What every stats command resolves from the global flags before it loads
@@ -50,6 +50,14 @@ impl Query {
     ) -> Result<Self> {
         let cli = context.cli;
         let range = Range::resolve(cli.from, cli.until, now)?;
+
+        // A migrated database that was never backfilled would print a
+        // table of zeros under a window heading, and a reader would take
+        // it for an answer. Refuse, and say what to run.
+        anyhow::ensure!(
+            !events::is_empty(context.pool).await?,
+            "the database holds no events yet; run `bestiario backfill` first"
+        );
 
         let known: Vec<_> = instances::all(context.pool)
             .await?
