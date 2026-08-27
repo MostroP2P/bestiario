@@ -168,6 +168,41 @@ impl RelayClient {
         self.relays = attached;
     }
 
+    /// Replaces the set this client considers its own, for the next
+    /// [`reattach`](Self::reattach) to dial.
+    ///
+    /// The connection set is not a fact of startup. A kind 10002 ingested
+    /// while a run is under way names a relay an instance publishes to, and
+    /// a client built once from the table as it stood would ignore it until
+    /// the process was restarted — missing whatever only that relay
+    /// carries. Callers hand back the recomputed set; nothing is dialled
+    /// here, so a caller can compare before paying for a connection.
+    ///
+    /// A relay already attached and still named stays attached: this only
+    /// changes what `reattach` will try.
+    pub fn reconfigure(&mut self, relays: &[String]) {
+        self.configured = relays.to_vec();
+    }
+
+    /// The relays named but not attached, normalised as they would be
+    /// dialled.
+    ///
+    /// What a caller asks before deciding a reconnection is worth it: an
+    /// empty answer means the client is already dialling everything it has
+    /// been told about.
+    pub fn unattached(&self) -> Vec<RelayUrl> {
+        let mut missing = Vec::new();
+        for url in &self.configured {
+            let Ok(parsed) = RelayUrl::from_str(url) else {
+                continue;
+            };
+            if !self.relays.contains(&parsed) && !missing.contains(&parsed) {
+                missing.push(parsed);
+            }
+        }
+        missing
+    }
+
     /// Parses and connects one relay, returning why it was skipped if it was.
     ///
     /// The reason is a `String` because the two failures come from unrelated
@@ -252,11 +287,40 @@ impl RelayClient {
         })
     }
 
+    /// Closes one subscription, leaving the connections open.
+    ///
+    /// A `sync` that rebuilds its subscription — because the relays it
+    /// should be following have changed — is not disconnecting, so the REQ
+    /// it is replacing has to be closed by name. Left open, the relay would
+    /// go on sending events for a subscription id nobody reads.
+    /// A relay that will not take the CLOSE is logged and left: the
+    /// subscription is being abandoned either way, and a failure to tidy up
+    /// after it is not a reason to stop following the others.
+    pub async fn close(&self, subscription: Subscription) {
+        if let Err(error) = self.client.unsubscribe(&subscription.id).await {
+            tracing::debug!(%error, "could not close the subscription");
+        }
+    }
+
     /// Closes every connection, so a `sync` interrupted with SIGINT leaves no
     /// half-open websocket behind.
     pub async fn shutdown(self) {
         self.client.shutdown().await;
     }
+}
+
+/// What a subscription hands over, and which relay it came from.
+///
+/// Both carry the relay because both are about *that* relay's progress: an
+/// event it holds, or the end of the history it holds. The pool's view of
+/// either would be the wrong unit — cursors are per relay.
+#[derive(Debug, Clone)]
+pub enum Incoming {
+    /// An event the relay is delivering under this subscription.
+    Event(RelayUrl, Event),
+    /// The relay has sent everything it had stored for this subscription;
+    /// what follows from it is live.
+    EndOfStored(RelayUrl),
 }
 
 /// A live subscription, read one `(relay, event)` pair at a time.
@@ -277,25 +341,49 @@ impl Subscription {
     /// history, and dedup is the pipeline's job (`docs/SPEC.md` §8.1 step 6),
     /// not the transport's.
     pub async fn next_event(&mut self) -> Option<(RelayUrl, Event)> {
+        loop {
+            match self.next_incoming().await? {
+                Incoming::Event(relay, event) => return Some((relay, event)),
+                Incoming::EndOfStored(_) => continue,
+            }
+        }
+    }
+
+    /// The next thing this subscription has to say: an event, or a relay
+    /// reporting that it has sent everything it had stored.
+    ///
+    /// EOSE is what tells a caller that a relay's *replay* is over and
+    /// everything after it is live. A caller that has to read one set of
+    /// kinds before asking for another — see `commands::sync` — has no other
+    /// way to know when the first set is done.
+    pub async fn next_incoming(&mut self) -> Option<Incoming> {
         use futures::StreamExt as _;
 
         while let Some(notification) = self.notifications.next().await {
             let ClientNotification::Message { relay_url, message } = notification else {
                 continue;
             };
-            let RelayMessage::Event {
-                subscription_id,
-                event,
-            } = *message
-            else {
-                continue;
-            };
-            // The client is shared, so another REQ's events arrive here too.
-            if subscription_id.as_ref() != &self.id {
-                continue;
-            }
 
-            return Some((relay_url, event.into_owned()));
+            match *message {
+                RelayMessage::Event {
+                    subscription_id,
+                    event,
+                } => {
+                    // The client is shared, so another REQ's events arrive
+                    // here too.
+                    if subscription_id.as_ref() != &self.id {
+                        continue;
+                    }
+                    return Some(Incoming::Event(relay_url, event.into_owned()));
+                }
+                RelayMessage::EndOfStoredEvents(subscription_id) => {
+                    if subscription_id.as_ref() != &self.id {
+                        continue;
+                    }
+                    return Some(Incoming::EndOfStored(relay_url));
+                }
+                _ => continue,
+            }
         }
 
         None

@@ -24,8 +24,10 @@ use super::{ParseError, expect_kind, repeated_tag_values};
 /// The kind this parser accepts.
 pub const KIND: u16 = 10002;
 
-/// The NIP-65 marker for a relay the instance only reads from.
-const READ_ONLY: &str = "read";
+/// The NIP-65 marker for a relay the instance publishes to. The other two
+/// cases the NIP defines are an absent marker — read and write both — and
+/// `read`, which is not a place the instance's own events land.
+const WRITE: &str = "write";
 
 /// One relay list — one 10002 event, parsed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,8 +50,12 @@ pub fn parse(event: &Event) -> Result<RelayList, ParseError> {
         let Some(url) = values.first() else {
             continue;
         };
-        // No marker means read and write both (NIP-65).
-        if values.get(1).is_some_and(|marker| marker == READ_ONLY) {
+        // NIP-65 defines three cases and no more: no marker at all, which
+        // means read and write both; `write`; and `read`. A marker that is
+        // none of them is not a write claim — it is an entry nobody can
+        // read the meaning of, and it is dropped like a URL nobody can
+        // dial rather than dialled on the strength of not saying `read`.
+        if !writes_to(values.get(1)) {
             continue;
         }
         let Ok(url) = RelayUrl::parse(url) else {
@@ -70,6 +76,15 @@ pub fn parse(event: &Event) -> Result<RelayList, ParseError> {
         created_at: event.created_at.as_secs() as i64,
         relays,
     })
+}
+
+/// Whether an `r` tag's marker claims the instance publishes there.
+///
+/// Only the two NIP-65 spellings that carry a write claim do: the marker
+/// left off, and [`WRITE`]. Everything else — `read`, a typo, a marker from
+/// some other convention — says nothing bestiario can act on.
+fn writes_to(marker: Option<&String>) -> bool {
+    marker.is_none_or(|marker| marker == WRITE)
 }
 
 #[cfg(test)]

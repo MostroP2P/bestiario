@@ -4,10 +4,12 @@
 //! that what is walked has the timestamps, kinds and tags the network really
 //! publishes — including the ones the pipeline turns away.
 
-use nostr_sdk::prelude::MockRelay;
+use clap::Parser as _;
+use nostr_sdk::prelude::{EventBuilder, FinalizeEvent, Keys, Kind, MockRelay, Tag, Timestamp};
 use sqlx::SqlitePool;
 
 use super::*;
+use crate::cli::Cli;
 use crate::db::connect_and_migrate;
 use crate::ingest::Policy;
 use crate::ingest::parse::fixtures::{for_relay, load};
@@ -252,5 +254,157 @@ async fn a_database_that_cannot_be_written_to_fails_the_run() {
     assert!(
         error.to_string().contains("storing event"),
         "unexpected error: {error}"
+    );
+}
+
+/// The settings a discovery test runs under: one relay configured, and the
+/// operator asking bestiario to follow what the instances advertise.
+fn settings_for(relay: &str, discover: bool) -> Settings {
+    Settings::from_toml_str(&format!(
+        r#"
+[nostr]
+relays = ["{relay}"]
+discover_relays = {discover}
+
+[indexer]
+instances = []
+accept_unknown_instances = true
+networks = ["mainnet"]
+
+[database]
+url = "sqlite::memory:"
+"#
+    ))
+    .expect("valid settings")
+}
+
+/// A kind 10002 naming `url` as a relay the signer publishes to.
+fn relay_list_naming(keys: &Keys, url: &str) -> Event {
+    EventBuilder::new(Kind::from_u16(10002), "")
+        .tag(Tag::parse(["r", url]).expect("well-formed tag"))
+        .custom_created_at(Timestamp::from_secs(NOW as u64 - 100))
+        .finalize(keys)
+        .expect("sign")
+}
+
+async fn stored_event_ids(pool: &SqlitePool) -> Vec<String> {
+    sqlx::query_scalar::<_, String>("SELECT id FROM events")
+        .fetch_all(pool)
+        .await
+        .expect("ids")
+}
+
+#[tokio::test]
+async fn a_relay_named_by_a_list_walked_this_run_is_walked_this_run() {
+    // Arrange: the configured relay carries only an instance's relay list,
+    // and the relay that list names is the only one holding the order. A
+    // client built once from the table as it stood at startup would never
+    // dial it, and the order would wait for a second invocation.
+    let keys = Keys::generate();
+    let advertised = MockRelay::run().await.expect("start the advertised relay");
+    let advertised_url = advertised.url().await.to_string();
+    let order = for_relay(&load(38383, "pending_range"));
+    advertised
+        .add_event(order.clone())
+        .await
+        .expect("the order lives only there");
+
+    let configured = MockRelay::run().await.expect("start the configured relay");
+    let configured_url = configured.url().await.to_string();
+    configured
+        .add_event(relay_list_naming(&keys, &advertised_url))
+        .await
+        .expect("the list lives here");
+
+    let pool = migrated().await;
+    let settings = settings_for(&configured_url, true);
+    let cli = Cli::try_parse_from(["bestiario", "backfill"]).expect("parses");
+    let context = Context {
+        settings: &settings,
+        pool: &pool,
+        cli: &cli,
+    };
+    let pipeline = Pipeline::new(
+        pool.clone(),
+        // The list's signer is listed, so §8.1 step 4b vouches for its
+        // untagged kind without a tagged event having to come first.
+        Policy::new(vec![keys.public_key().to_hex()], true, [Network::Mainnet]),
+    );
+    let mut client = RelayClient::connect(&[configured_url])
+        .await
+        .expect("connect");
+
+    // Act
+    let counts = walk_with_discovery(
+        &context,
+        &mut client,
+        &pipeline,
+        &filters::INDEXED_KINDS,
+        range(0),
+        NOW,
+    )
+    .await
+    .expect("the walk");
+
+    // Assert: the advertised relay is in play, and what only it held is in
+    // the archive.
+    assert_eq!(client.relays().len(), 2, "the advertised relay was dialled");
+    assert!(
+        stored_event_ids(&pool).await.contains(&order.id.to_hex()),
+        "the order only the advertised relay held is archived"
+    );
+    assert!(counts.stored >= 2, "the list and the order: {counts:?}");
+}
+
+#[tokio::test]
+async fn with_discovery_off_an_advertised_relay_is_not_dialled() {
+    // The flag is the operator's decision, and a relay list is a third
+    // party's claim. Off, the run follows exactly what was configured.
+    let keys = Keys::generate();
+    let advertised = MockRelay::run().await.expect("start the advertised relay");
+    let order = for_relay(&load(38383, "pending_range"));
+    advertised.add_event(order.clone()).await.expect("seed");
+
+    let configured = MockRelay::run().await.expect("start the configured relay");
+    let configured_url = configured.url().await.to_string();
+    configured
+        .add_event(relay_list_naming(
+            &keys,
+            &advertised.url().await.to_string(),
+        ))
+        .await
+        .expect("seed");
+
+    let pool = migrated().await;
+    let settings = settings_for(&configured_url, false);
+    let cli = Cli::try_parse_from(["bestiario", "backfill"]).expect("parses");
+    let context = Context {
+        settings: &settings,
+        pool: &pool,
+        cli: &cli,
+    };
+    let pipeline = Pipeline::new(
+        pool.clone(),
+        Policy::new(vec![keys.public_key().to_hex()], true, [Network::Mainnet]),
+    );
+    let mut client = RelayClient::connect(&[configured_url])
+        .await
+        .expect("connect");
+
+    walk_with_discovery(
+        &context,
+        &mut client,
+        &pipeline,
+        &filters::INDEXED_KINDS,
+        range(0),
+        NOW,
+    )
+    .await
+    .expect("the walk");
+
+    assert_eq!(client.relays().len(), 1, "only what was configured");
+    assert!(
+        !stored_event_ids(&pool).await.contains(&order.id.to_hex()),
+        "and nothing from the relay it did not dial"
     );
 }

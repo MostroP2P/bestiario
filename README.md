@@ -87,11 +87,21 @@ dials them alongside the configured ones.
 
 Discovery is additive and never subtractive: the configured relays always
 come first and are never dropped, since they are the operator's decision
-while a discovered relay is a third party's claim. With the flag off the
-connection set is exactly what `settings.toml` lists, whatever the
+while a discovered relay is a third party's claim. Only the relays an
+instance says it *writes* to are taken, which NIP-65 spells as an `r` tag
+with no marker or with `write`; an entry marked anything else carries no
+such claim and is dropped, like a URL that cannot be dialled. With the flag
+off the connection set is exactly what `settings.toml` lists, whatever the
 instances have advertised. A relay list carries no `y` tag, so bestiario
 takes one only from a pubkey it already knows as an instance — the same
 rule that guards rate snapshots.
+
+The connection set is not fixed at startup. A relay list read during a
+`backfill` is followed by that same invocation — the run walks the relays it
+discovers rather than leaving them for a second one — and a `sync` that
+stores one rebuilds its subscription over the wider set there and then, so a
+process meant to run for months does not go on dialling only the relays it
+happened to know about on the day it started.
 
 ## First backfill
 

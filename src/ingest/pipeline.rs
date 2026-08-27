@@ -57,11 +57,17 @@ const PLATFORM_TAGGED: [u16; 4] = [
 /// `[indexer].instances` or has already been seen publishing a
 /// platform-tagged event (`repo::instances::is_platform_proven`).
 ///
-/// Ordering works out in practice because [`INDEXED_KINDS`] walks rates last,
-/// so an instance's orders are archived before its snapshot is judged.
+/// Which makes the *order* events are read part of the rule rather than an
+/// accident of it: an instance's tagged events have to be archived before
+/// its untagged ones are judged, or a snapshot arriving first is turned away
+/// for want of a proof that was one event behind it. `backfill` gets that
+/// from [`INDEXED_KINDS`], which walks these two last; `sync` cannot, since
+/// a relay answers one subscription in whatever order it likes, so it asks
+/// for these kinds only once the tagged ones have been replayed to their
+/// end.
 ///
 /// [`INDEXED_KINDS`]: crate::nostr::filters::INDEXED_KINDS
-const UNTAGGED_KINDS: [u16; 2] = [parse::rates::KIND, parse::relay_list::KIND];
+pub const UNTAGGED_KINDS: [u16; 2] = [parse::rates::KIND, parse::relay_list::KIND];
 
 /// The kinds that carry a `network` tag and so pass the filter of step 5.
 const NETWORK_TAGGED: [u16; 2] = [parse::order::KIND, parse::dev_fee::KIND];

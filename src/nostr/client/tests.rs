@@ -306,6 +306,67 @@ async fn a_relay_that_was_down_at_startup_is_picked_up_when_it_comes_back() {
 }
 
 #[tokio::test]
+async fn a_relay_named_after_startup_is_dialled_by_the_next_reattach() {
+    // Arrange: a client built from one relay, as a run would be before any
+    // kind 10002 had been ingested.
+    let configured = relay().await;
+    let configured_url = configured.url().await;
+    let discovered = relay().await;
+    let discovered_url = discovered.url().await;
+    let mut client = RelayClient::connect(&[configured_url.to_string()])
+        .await
+        .expect("connect");
+    assert!(client.unattached().is_empty(), "nothing is waiting yet");
+
+    // Act: an instance advertises the second relay mid-run.
+    client.reconfigure(&[configured_url.to_string(), discovered_url.to_string()]);
+
+    // Assert: named but not yet dialled, and dialled by the reattach.
+    assert_eq!(client.unattached(), std::slice::from_ref(&discovered_url));
+    client.reattach().await;
+    assert_eq!(client.relays(), &[configured_url, discovered_url]);
+    assert!(
+        client.unattached().is_empty(),
+        "and nothing is left waiting"
+    );
+}
+
+#[tokio::test]
+async fn reconfiguring_with_the_same_relays_dials_nothing_again() {
+    // Asked after every relay list that lands, so "nothing new" has to be
+    // the cheap answer and the common one.
+    let live = relay().await;
+    let live_url = live.url().await;
+    let mut client = RelayClient::connect(&[live_url.to_string()])
+        .await
+        .expect("connect");
+
+    client.reconfigure(&[live_url.to_string(), live_url.to_string()]);
+
+    assert!(client.unattached().is_empty());
+    client.reattach().await;
+    assert_eq!(client.relays(), &[live_url], "and still once");
+}
+
+#[tokio::test]
+async fn a_named_relay_that_will_not_answer_is_reported_as_waiting() {
+    // The distinction the caller needs: unattached is about what has not
+    // been dialled, not about what was discovered. A relay that is named and
+    // down stays waiting, and a later reattach is free to find it up.
+    let live = relay().await;
+    let live_url = live.url().await;
+    let mut client = RelayClient::connect(&[live_url.to_string()])
+        .await
+        .expect("connect");
+
+    client.reconfigure(&[live_url.to_string(), DEAD_RELAY.to_string()]);
+    client.reattach().await;
+
+    assert_eq!(client.relays(), &[live_url]);
+    assert_eq!(client.unattached().len(), 1, "still named, still not there");
+}
+
+#[tokio::test]
 async fn reattaching_when_nothing_has_changed_leaves_the_relay_list_alone() {
     // Called before every resubscription, so it has to be free of side
     // effects when there is nothing to recover: no duplicates, no reordering,
