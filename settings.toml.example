@@ -13,7 +13,7 @@ discover_relays = false
 resume_overlap_secs = 3600
 
 [indexer]
-# Instance pubkeys to follow, in hex.
+# Instance pubkeys to follow, as hex or as NIP-19 `npub1…`.
 instances = [
   "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390",
 ]

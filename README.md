@@ -66,8 +66,8 @@ cp settings.toml.example settings.toml
 | Key | What it does |
 |---|---|
 | `[nostr].relays` | Relays to read from. `wss://relay.mostro.network` carries every instance. |
-| `[indexer].instances` | Pubkeys to follow, in hex. |
-| `[indexer].accept_unknown_instances` | `true` to index every pubkey that publishes Mostro events, whether listed or not. Events from other platforms on the same relays (they exist) are turned away either way. Rate snapshots (kind 30078) carry no platform tag, so they are taken only from a listed instance or from one already seen publishing a Mostro-tagged event. |
+| `[indexer].instances` | Pubkeys to follow, as hex or `npub1…`. |
+| `[indexer].accept_unknown_instances` | `true` to index every pubkey that publishes Mostro events, whether listed or not. Events from other platforms on the same relays (they exist) are turned away either way. |
 | `[indexer].networks` | Which networks count: `mainnet` alone by default. |
 | `[indexer].backfill_from` | How far back the first `backfill` reaches, as a unix timestamp. |
 | `[database].url` | Where the archive lives: `sqlite://bestiario.db`. |
