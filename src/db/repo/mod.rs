@@ -17,6 +17,7 @@ pub mod events;
 pub mod instance_info;
 pub mod instances;
 pub mod orders;
+pub mod rates;
 pub mod sync_state;
 
 /// Reports a column SQLite holds but this crate cannot read back.

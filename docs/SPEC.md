@@ -544,7 +544,18 @@ that reaches for them does not compile.
 4. For the kinds that carry `y` (38383, 8383, 38386, 38385): `y[0] ==
    "mostro"` → otherwise discard, because the Mostro relays also carry NIP-69
    orders from other platforms (§2.1). 30078 and 10002 publish no `y` at all
-   and skip this step; they are already restricted by step 3.
+   and cannot pass this test.
+4b. For those untagged kinds, step 3 alone is not enough when
+   `accept_unknown_instances = true`: nothing in a 30078 event says it comes
+   from a Mostro instance, and its content sets the price every converted
+   figure of §5 is multiplied by. Such an event is taken only from a pubkey
+   that is **listed in `instances`**, or that has **already published a
+   `y = mostro` event** (a row in `order_versions`, `dev_fees`,
+   `dispute_versions` or `instance_info`; the `instances` table itself is no
+   proof, since rate events write to it too). Otherwise discard without
+   archiving. Kinds are walked with 30078 last, so an instance's tagged
+   events are seen before its snapshot is judged; an instance that publishes
+   nothing else has to be listed by hand.
 5. Filter `network` per config (`networks = ["mainnet"]`) for 38383/8383.
 6. Dedup: `INSERT OR IGNORE INTO events`. If it already existed → stop.
 7. Parse by kind → insert into the specific table + update the projection

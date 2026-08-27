@@ -91,6 +91,11 @@ pub enum ParseError {
         min: f64,
         max: f64,
     },
+
+    /// The event's content — the one kind whose payload is not tags — is
+    /// not what the kind promises.
+    #[error("content: {reason}")]
+    InvalidContent { reason: String },
 }
 
 /// The values of every occurrence of the `name` tag.

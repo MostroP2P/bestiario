@@ -71,6 +71,7 @@ pub async fn rebuild(pool: &SqlitePool, from_raw: bool) -> Result<Rebuilt> {
         repo::disputes::clear_versions(pool).await?;
         repo::dev_fees::clear(pool).await?;
         repo::instance_info::clear(pool).await?;
+        repo::rates::clear(pool).await?;
     }
 
     repo::orders::clear_projection(pool).await?;
