@@ -17,6 +17,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use nostr_sdk::prelude::{FromBech32, PublicKey};
 use serde::Deserialize;
 
 use crate::network::Network;
@@ -28,6 +29,10 @@ mod tests;
 /// `[database].url`.
 const ENV_PREFIX: &str = "BESTIARIO";
 const ENV_SEPARATOR: &str = "__";
+
+/// Separator between the human-readable part and the data of a bech32
+/// string, as in `npub1…`.
+const BECH32_SEPARATOR: char = '1';
 
 /// Anything that can go wrong between "a file on disk" and "a usable
 /// [`Settings`]".
@@ -69,6 +74,9 @@ pub enum ValidationError {
 
     #[error("[indexer].instances contains `{pubkey}`: `{found}` is not a hexadecimal character")]
     PubkeyNotHex { pubkey: String, found: char },
+
+    #[error("[indexer].instances contains `{pubkey}`: not a valid npub ({reason})")]
+    PubkeyNotNpub { pubkey: String, reason: String },
 
     #[error(
         "[indexer].instances is empty and accept_unknown_instances is false: \
@@ -123,7 +131,8 @@ pub struct NostrSettings {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct IndexerSettings {
-    /// Instance pubkeys to follow, lowercase hex.
+    /// Instance pubkeys to follow, lowercase hex. The file may spell them
+    /// as hex or as NIP-19 `npub1…`; both are folded to hex on load.
     #[serde(default)]
     pub instances: Vec<String>,
     /// Index any pubkey publishing events tagged `y = ["mostro", ...]`,
@@ -150,7 +159,8 @@ pub struct AssumptionSettings {
     /// default is 0.30; instances do not publish the real value.
     #[serde(default = "default_dev_fee_percentage")]
     pub dev_fee_percentage_default: f64,
-    /// Per-instance overrides, keyed by pubkey.
+    /// Per-instance overrides, keyed by pubkey (lowercase hex; `npub1…` is
+    /// accepted in the file and folded like `[indexer].instances`).
     #[serde(default)]
     pub dev_fee_percentage: BTreeMap<String, f64>,
 }
@@ -216,7 +226,7 @@ impl Settings {
             .build()?
             .try_deserialize::<Settings>()?;
 
-        raw.normalized().validated()
+        raw.normalized()?.validated()
     }
 
     /// Parses TOML from memory, without the environment layer.
@@ -226,36 +236,44 @@ impl Settings {
             .build()?
             .try_deserialize::<Settings>()?;
 
-        raw.normalized().validated()
+        raw.normalized()?.validated()
     }
 
     /// Returns a copy with case-insensitive values folded to their canonical
-    /// case, so that later comparisons are plain string equality.
-    fn normalized(self) -> Self {
-        Self {
+    /// case and pubkeys folded to hex, so that later comparisons are plain
+    /// string equality.
+    ///
+    /// Fails only when a pubkey is spelled as an `npub1…` that does not
+    /// decode: there is no canonical form to fold it to, and the checksum
+    /// failure is the useful message.
+    fn normalized(self) -> Result<Self, ValidationError> {
+        let instances = self
+            .indexer
+            .instances
+            .iter()
+            .map(|p| canonical_pubkey(p))
+            .collect::<Result<Vec<_>, _>>()?;
+        let dev_fee_percentage = self
+            .assumptions
+            .dev_fee_percentage
+            .iter()
+            .map(|(k, v)| canonical_pubkey(k).map(|k| (k, *v)))
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
+
+        Ok(Self {
             indexer: IndexerSettings {
-                instances: self
-                    .indexer
-                    .instances
-                    .iter()
-                    .map(|p| p.trim().to_lowercase())
-                    .collect(),
+                instances,
                 ..self.indexer
             },
             assumptions: AssumptionSettings {
-                dev_fee_percentage: self
-                    .assumptions
-                    .dev_fee_percentage
-                    .iter()
-                    .map(|(k, v)| (k.trim().to_lowercase(), *v))
-                    .collect(),
+                dev_fee_percentage,
                 ..self.assumptions
             },
             report: ReportSettings {
                 reference_currency: self.report.reference_currency.trim().to_uppercase(),
             },
             ..self
-        }
+        })
     }
 
     fn validated(self) -> Result<Self, ConfigError> {
@@ -352,6 +370,38 @@ impl Settings {
     }
 }
 
+/// Trims and lowercases a pubkey as written in the file, and decodes it to
+/// hex if it is a NIP-19 `npub1…`. Hex is returned as is — its shape is
+/// checked later by [`validate_pubkey`], so that a malformed hex string still
+/// gets the hex-specific error rather than a bech32 one.
+///
+/// Lowercasing before decoding is sound: bech32 is case-insensitive, and a
+/// mixed-case string is invalid either way.
+fn canonical_pubkey(raw: &str) -> Result<String, ValidationError> {
+    let value = raw.trim().to_lowercase();
+    if !looks_like_bech32(&value) {
+        return Ok(value);
+    }
+    PublicKey::from_bech32(&value)
+        .map(|pubkey| pubkey.to_hex())
+        .map_err(|error| ValidationError::PubkeyNotNpub {
+            pubkey: value,
+            reason: error.to_string(),
+        })
+}
+
+/// Whether `value` has the `<hrp>1<data>` shape of a bech32 string with a
+/// prefix that cannot be hex — `npub`, but also `nsec` or `note`, so that a
+/// wrong-kind NIP-19 string is reported as such rather than as bad hex.
+fn looks_like_bech32(value: &str) -> bool {
+    value.split_once(BECH32_SEPARATOR).is_some_and(|(hrp, _)| {
+        !hrp.is_empty()
+            && hrp.chars().all(|c| c.is_ascii_lowercase())
+            && !hrp.chars().all(|c| c.is_ascii_hexdigit())
+    })
+}
+
+/// Checks the shape of an already-canonical (lowercase hex) pubkey.
 fn validate_pubkey(pubkey: &str) -> Result<(), ValidationError> {
     if pubkey.len() != 64 {
         return Err(ValidationError::PubkeyLength {
