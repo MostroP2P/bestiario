@@ -11,6 +11,9 @@
 //! the orders still open *now* as well as the window itself.
 
 pub mod activity;
+pub mod dev_fees;
+
+use sqlx::{QueryBuilder, Sqlite};
 
 use crate::network::Network;
 
@@ -25,6 +28,27 @@ pub struct Scope {
     /// Lowercase hex; `None` for every instance.
     pub pubkey: Option<String>,
     pub networks: Vec<Network>,
+}
+
+impl Scope {
+    /// Appends the `AND …` clauses of this scope to `query`, against the
+    /// table aliased `alias`, which must have `pubkey` and `network`
+    /// columns. The query must already be inside a `WHERE`.
+    pub(crate) fn apply(&self, query: &mut QueryBuilder<Sqlite>, alias: &str) {
+        if let Some(pubkey) = &self.pubkey {
+            query
+                .push(format!(" AND {alias}.pubkey = "))
+                .push_bind(pubkey.clone());
+        }
+        if !self.networks.is_empty() {
+            query.push(format!(" AND {alias}.network IN ("));
+            let mut networks = query.separated(", ");
+            for network in &self.networks {
+                networks.push_bind(network.as_str());
+            }
+            query.push(")");
+        }
+    }
 }
 
 /// How many leading hex characters identify an instance in a label.

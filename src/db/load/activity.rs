@@ -36,17 +36,7 @@ where
          WHERE 1 = 1",
     );
 
-    if let Some(pubkey) = &scope.pubkey {
-        query.push(" AND o.pubkey = ").push_bind(pubkey);
-    }
-    if !scope.networks.is_empty() {
-        query.push(" AND o.network IN (");
-        let mut networks = query.separated(", ");
-        for network in &scope.networks {
-            networks.push_bind(network.as_str());
-        }
-        query.push(")");
-    }
+    scope.apply(&mut query, "o");
     query.push(" ORDER BY o.first_seen_at, o.order_id");
 
     query
