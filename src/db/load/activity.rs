@@ -24,6 +24,33 @@ pub async fn orders<'e, E>(executor: E, scope: &Scope) -> Result<Vec<Order>, sql
 where
     E: Executor<'e, Database = Sqlite>,
 {
+    fetch(executor, scope, None).await
+}
+
+/// The orders in `scope` that reached `success` at `from..until`, oldest
+/// first — what a volume report needs and no more, so that its cost grows
+/// with the window asked for and not with the history kept. Reads the
+/// `orders_success_at` index.
+pub async fn completed_in<'e, E>(
+    executor: E,
+    scope: &Scope,
+    from: i64,
+    until: i64,
+) -> Result<Vec<Order>, sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    fetch(executor, scope, Some((from, until))).await
+}
+
+async fn fetch<'e, E>(
+    executor: E,
+    scope: &Scope,
+    completed_in: Option<(i64, i64)>,
+) -> Result<Vec<Order>, sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
     let mut query = QueryBuilder::<Sqlite>::new(
         "SELECT o.order_id, o.pubkey, i.name AS instance_name,
                 o.first_seen_at AS created_at, o.final_status AS status, o.kind,
@@ -49,6 +76,13 @@ where
     );
 
     scope.apply(&mut query, "o");
+    if let Some((from, until)) = completed_in {
+        query
+            .push(" AND o.final_status = 'success' AND o.success_at >= ")
+            .push_bind(from)
+            .push(" AND o.success_at < ")
+            .push_bind(until);
+    }
     query.push(" ORDER BY o.first_seen_at, o.order_id");
 
     query

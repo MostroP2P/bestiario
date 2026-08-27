@@ -54,7 +54,7 @@ pub fn report(
         ),
         observed(
             "volume_sats",
-            Value::Sats(volume::observed_sats(orders, window)),
+            volume::observed_sats(orders, window).map_or(Value::Missing, Value::Sats),
         ),
         observed("active_instances", Value::Count(active_instances as i64)),
         observed(
