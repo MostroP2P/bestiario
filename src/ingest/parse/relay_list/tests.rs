@@ -54,6 +54,27 @@ fn a_relay_the_instance_only_reads_from_is_not_where_it_publishes() {
 }
 
 #[test]
+fn a_marker_nip_65_does_not_define_is_no_claim_to_publish_there() {
+    // NIP-65 spells three cases and no more. A fourth says nothing, and a
+    // relay bestiario would dial has to be one an instance said it
+    // publishes to — not merely one it did not say `read` about.
+    let event = relay_event(&[
+        &["r", "wss://typo.example", "wrote"],
+        &["r", "wss://foreign.example", "foo"],
+        &["r", "wss://shouting.example", "WRITE"],
+        &["r", "wss://good.example", "write"],
+    ]);
+
+    let list = parse(&event).expect("a relay list");
+
+    assert_eq!(
+        list.relays,
+        ["wss://good.example"],
+        "only the marker the NIP defines carries the claim"
+    );
+}
+
+#[test]
 fn a_relay_url_is_normalised_the_way_the_client_will_dial_it() {
     let event = relay_event(&[
         &["r", "WSS://Relay.Example/"],

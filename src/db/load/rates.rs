@@ -41,20 +41,53 @@ where
 /// published no rate — §6.8 asks which feeds are dead, and one that never
 /// started is the strongest case of it. `pubkey` narrows to one instance.
 ///
+/// # Only the bestiary quotes
+///
+/// A rate row whose publisher has no `instances` entry is not admitted as
+/// a feed. §8.1 step 4b lets a kind 30078 event in only from a pubkey the
+/// bestiary already knows, and ingestion upserts that instance in the same
+/// transaction as the snapshot, so an orphan row is not a state normal
+/// ingestion or replay produces: it is admission bypassed or storage torn.
+/// Restoring its trust at report time would let the content of an
+/// unvouched event set the price §5 multiplies every converted figure by —
+/// "an unvouched feed is not a feed", and the report is the wrong place to
+/// decide otherwise. The rows are left out and named, so the omission is
+/// visible rather than silent.
+///
 /// Not scoped by network: a kind 30078 event carries no network tag.
 pub async fn feeds<'e, E>(executor: E, pubkey: Option<&str>) -> Result<Vec<Feed>, sqlx::Error>
 where
     E: Executor<'e, Database = Sqlite> + Copy,
 {
     let latest: BTreeMap<String, (i64, BTreeMap<String, f64>)> =
-        repo::rates::latest_per_instance(executor)
+        repo::rates::latest_per_instance(executor, pubkey)
             .await?
             .into_iter()
             .map(|snapshot| (snapshot.pubkey, (snapshot.published_at, snapshot.rates)))
             .collect();
 
     let known = repo::instances::all(executor).await?;
-    let mut feeds: Vec<Feed> = known
+    let bestiary: BTreeSet<&str> = known
+        .iter()
+        .map(|instance| instance.pubkey.as_str())
+        .collect();
+    let orphans: Vec<&str> = latest
+        .keys()
+        .map(String::as_str)
+        .filter(|quoting| !bestiary.contains(quoting))
+        .collect();
+    if !orphans.is_empty() {
+        return Err(sqlx::Error::Protocol(format!(
+            "rate snapshots from {} pubkey(s) with no instance row ({}): a 30078 \
+             event is admitted only from a vouched instance (SPEC §8.1 step 4b), \
+             so this is a bypassed admission or a torn store — re-ingest \
+             rather than report",
+            orphans.len(),
+            orphans.join(", ")
+        )));
+    }
+
+    Ok(known
         .iter()
         .filter(|instance| pubkey.is_none_or(|wanted| instance.pubkey == wanted))
         .map(|instance| {
@@ -65,28 +98,7 @@ where
                 rates: snapshot.map(|(_, rates)| rates.clone()).unwrap_or_default(),
             }
         })
-        .collect();
-
-    // A snapshot whose publisher is not in the bestiary — a rebuild that
-    // stored it before the instance row, say. Dropping it would leave the
-    // disparity a voice short, and silently.
-    let bestiary: BTreeSet<&str> = known
-        .iter()
-        .map(|instance| instance.pubkey.as_str())
-        .collect();
-    feeds.extend(
-        latest
-            .iter()
-            .filter(|(quoting, _)| !bestiary.contains(quoting.as_str()))
-            .filter(|(quoting, _)| pubkey.is_none_or(|wanted| *quoting == wanted))
-            .map(|(quoting, (at, rates))| Feed {
-                instance: instance_label(quoting, None),
-                published_at: Some(*at),
-                rates: rates.clone(),
-            }),
-    );
-
-    Ok(feeds)
+        .collect())
 }
 
 #[cfg(test)]

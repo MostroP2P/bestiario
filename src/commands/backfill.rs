@@ -98,13 +98,9 @@ impl<'a> Backfill<'a> {
     /// row first — so a run that swallowed the error would report a number it
     /// cannot back up and exit zero.
     pub async fn run(&self, kinds: &[u16], range: Range, now: i64) -> Result<Counts> {
-        let mut counts = Counts::default();
-
-        for relay in self.client.relays() {
-            for &kind in kinds {
-                counts += self.walk(relay, kind, range, now).await?;
-            }
-        }
+        let counts = self
+            .walk_relays(self.client.relays(), kinds, range, now)
+            .await?;
 
         tracing::info!(
             stored = counts.stored,
@@ -112,6 +108,30 @@ impl<'a> Backfill<'a> {
             rejected = counts.rejected,
             "backfill finished"
         );
+
+        Ok(counts)
+    }
+
+    /// The same walk over the relays named, rather than over every relay the
+    /// client holds.
+    ///
+    /// What a discovery round needs: a relay this run has already walked is
+    /// not worth walking twice, and a relay that a kind 10002 named halfway
+    /// through is worth walking now rather than at the next invocation.
+    pub async fn walk_relays(
+        &self,
+        relays: &[RelayUrl],
+        kinds: &[u16],
+        range: Range,
+        now: i64,
+    ) -> Result<Counts> {
+        let mut counts = Counts::default();
+
+        for relay in relays {
+            for &kind in kinds {
+                counts += self.walk(relay, kind, range, now).await?;
+            }
+        }
 
         Ok(counts)
     }
@@ -264,15 +284,12 @@ pub async fn run(context: &Context<'_>, kind: Option<u16>, now: i64) -> Result<(
     let range = Range::resolve(Some(from), context.cli.until, now)?;
 
     let relays = super::relays::connection_set(context.pool, settings, now).await?;
-    let client = RelayClient::connect(&relays)
+    let mut client = RelayClient::connect(&relays)
         .await
         .context("connecting to the relays")?;
 
     let pipeline = Pipeline::new(context.pool.clone(), Policy::from(&settings.indexer));
-    let counts = Backfill::new(&client, &pipeline)
-        .with_authors(authors(settings)?)
-        .run(&kinds, range, now)
-        .await;
+    let counts = walk_with_discovery(context, &mut client, &pipeline, &kinds, range, now).await;
 
     // Disconnected whatever the walk decided: leaving sockets open behind a
     // failed run would keep the relays holding a subscription nobody reads.
@@ -282,6 +299,91 @@ pub async fn run(context: &Context<'_>, kind: Option<u16>, now: i64) -> Result<(
 
     Ok(())
 }
+
+/// The walk, and then the relays the walk itself found.
+///
+/// The connection set is read before the first window and is out of date by
+/// the time the last one lands: a kind 10002 ingested along the way names a
+/// relay this run has not dialled, and treating the startup snapshot as
+/// final would leave whatever only that relay carries unindexed until
+/// somebody ran `backfill` a second time. So each round re-reads the set,
+/// dials what is new and walks *only* what the earlier rounds did not.
+///
+/// The rounds end when one discovers nothing, which is the normal case and
+/// usually the second round. [`MAX_DISCOVERY_ROUNDS`] is the backstop: relay
+/// lists can name relays that carry relay lists, and one invocation of
+/// `backfill` should terminate whatever the network advertises.
+///
+/// With `discover_relays` off there is nothing to find — `connection_set`
+/// returns the configured relays and nothing else — so the walk is the
+/// single round it always was.
+async fn walk_with_discovery(
+    context: &Context<'_>,
+    client: &mut RelayClient,
+    pipeline: &Pipeline,
+    kinds: &[u16],
+    range: Range,
+    now: i64,
+) -> Result<Counts> {
+    let settings = context.settings;
+    let authors = authors(settings)?;
+    let mut counts = Backfill::new(client, pipeline)
+        .with_authors(authors.clone())
+        .run(kinds, range, now)
+        .await?;
+
+    if !settings.nostr.discover_relays {
+        return Ok(counts);
+    }
+
+    for round in 1..=MAX_DISCOVERY_ROUNDS {
+        let set = super::relays::connection_set(context.pool, settings, now).await?;
+        client.reconfigure(&set);
+        if client.unattached().is_empty() {
+            break;
+        }
+
+        // `reattach` dials what is new and keeps what is already in play, so
+        // the relays it adds are exactly the ones this run has not walked.
+        let before = client.relays().to_vec();
+        client.reattach().await;
+        let fresh: Vec<RelayUrl> = client
+            .relays()
+            .iter()
+            .filter(|relay| !before.contains(relay))
+            .cloned()
+            .collect();
+
+        if fresh.is_empty() {
+            break;
+        }
+
+        tracing::info!(
+            round,
+            relays = fresh.len(),
+            "walking the relays this run discovered"
+        );
+        counts += Backfill::new(client, pipeline)
+            .with_authors(authors.clone())
+            .walk_relays(&fresh, kinds, range, now)
+            .await?;
+
+        if round == MAX_DISCOVERY_ROUNDS {
+            tracing::warn!(
+                rounds = MAX_DISCOVERY_ROUNDS,
+                "stopping discovery here; run backfill again to follow what is left"
+            );
+        }
+    }
+
+    Ok(counts)
+}
+
+/// How many times one `backfill` will follow a relay list to relays it has
+/// not walked. Two rounds cover a configured relay naming an instance's own,
+/// which is the shape the network actually has; the rest is a bound on a
+/// chain nobody should be able to make endless.
+const MAX_DISCOVERY_ROUNDS: usize = 3;
 
 /// The kinds one invocation walks: the one asked for, or all of them.
 ///
