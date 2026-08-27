@@ -19,6 +19,13 @@ use crate::network::Network;
 pub struct Query {
     pub range: Range,
     pub scope: Scope,
+    /// Whether `--network` narrowed the scope below the configured list.
+    ///
+    /// Dispute events carry no network tag, so a dispute figure cannot be
+    /// narrowed the same way; the views that combine families report those
+    /// figures as missing when this is set, rather than as a network-wide
+    /// number under a network-scoped heading.
+    pub network_narrowed: bool,
 }
 
 impl Query {
@@ -62,6 +69,7 @@ impl Query {
         Ok(Self {
             range,
             scope: Scope { pubkey, networks },
+            network_narrowed: cli.network.is_some(),
         })
     }
 }

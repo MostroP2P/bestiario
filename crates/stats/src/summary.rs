@@ -17,9 +17,19 @@ use crate::window::Window;
 pub const TOP_N: usize = 3;
 
 /// The summary for `orders` and `disputes` over `window`.
-pub fn report(orders: &[Order], disputes: &DisputeData, window: Window, now: i64) -> Vec<Metric> {
+///
+/// `disputes` is `None` when the scope cannot reach them — a `--network`
+/// narrowing, which dispute events carry no tag for — and the open-dispute
+/// count is then missing rather than network-wide under a scoped heading.
+pub fn report(
+    orders: &[Order],
+    disputes: Option<&DisputeData>,
+    window: Window,
+    now: i64,
+) -> Vec<Metric> {
     let activity = activity::summarise(orders, window, now);
-    let open_disputes = disputes::summarise(disputes, window, now).open_now;
+    let open_disputes =
+        disputes.map(|disputes| disputes::summarise(disputes, window, now).open.len());
 
     let created: Vec<&Order> = orders
         .iter()
@@ -59,7 +69,10 @@ pub fn report(orders: &[Order], disputes: &DisputeData, window: Window, now: i64
                     .flat_map(|order| order.payment_methods.iter().map(String::as_str)),
             ),
         ),
-        observed("open_disputes", Value::Count(open_disputes as i64)),
+        observed(
+            "open_disputes",
+            open_disputes.map_or(Value::Missing, |open| Value::Count(open as i64)),
+        ),
     ]
 }
 

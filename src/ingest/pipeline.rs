@@ -423,5 +423,39 @@ impl Pipeline {
     }
 }
 
+/// The whole fixture corpus of the indexed kinds, run through the pipeline
+/// the way a backfill would — other platforms included, which the pipeline
+/// turns away — so an aggregation test can start from real signed events
+/// rather than from structs typed by hand (`AGENTS.md`, tests-first rule).
+///
+/// Every network the corpus uses is admitted, so its one `success` order
+/// (published on regtest) is counted.
+#[cfg(test)]
+pub(crate) async fn seed_fixtures(pool: &SqlitePool, now: i64) {
+    use crate::ingest::parse::fixtures::corpus;
+
+    let pipeline = Pipeline::new(
+        pool.clone(),
+        Policy::new(
+            Vec::<String>::new(),
+            true,
+            [Network::Mainnet, Network::Regtest],
+        ),
+    );
+    for kind in [
+        parse::order::KIND,
+        parse::dev_fee::KIND,
+        parse::dispute::KIND,
+        parse::info::KIND,
+    ] {
+        for event in corpus(kind) {
+            pipeline
+                .ingest(&event, "wss://relay.mostro.network", now)
+                .await
+                .expect("ingest a fixture");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests;
