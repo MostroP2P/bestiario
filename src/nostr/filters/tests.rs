@@ -143,14 +143,14 @@ fn there_is_one_filter_per_indexed_kind_in_order() {
             json!([8383]),
             json!([38386]),
             json!([38385]),
-            json!([30078])
+            json!([30078]),
+            json!([10002])
         ]
     );
 }
 
 #[test]
 fn the_indexed_kinds_are_the_ones_with_a_parser() {
-    // Kind 10002 is in the spec but is relay discovery, not indexing (PR 40).
     assert_eq!(
         INDEXED_KINDS,
         [
@@ -158,10 +158,28 @@ fn the_indexed_kinds_are_the_ones_with_a_parser() {
             dev_fee::KIND,
             dispute::KIND,
             info::KIND,
-            rates::KIND
+            rates::KIND,
+            relay_list::KIND,
         ]
     );
-    assert!(!INDEXED_KINDS.contains(&10002));
+}
+
+#[test]
+fn the_kinds_that_carry_no_platform_tag_are_walked_last() {
+    // Their publisher is vouched for by having already been seen as an
+    // instance, which the tagged kinds are what establish.
+    let untagged = [rates::KIND, relay_list::KIND];
+    let first_untagged = INDEXED_KINDS
+        .iter()
+        .position(|kind| untagged.contains(kind))
+        .expect("both are indexed");
+
+    assert!(
+        INDEXED_KINDS[first_untagged..]
+            .iter()
+            .all(|kind| untagged.contains(kind)),
+        "nothing tagged follows an untagged kind"
+    );
 }
 
 #[test]

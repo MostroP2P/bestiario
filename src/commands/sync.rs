@@ -204,9 +204,10 @@ fn backoff(attempt: u32) -> Duration {
 pub async fn run(context: &Context<'_>) -> Result<()> {
     let settings = context.settings;
 
-    let mut client = RelayClient::connect(&settings.nostr.relays)
+    let relays = super::relays::connection_set(context.pool, settings, super::now()).await?;
+    let mut client = RelayClient::connect(&relays)
         .await
-        .context("connecting to the configured relays")?;
+        .context("connecting to the relays")?;
 
     let pipeline = Pipeline::new(context.pool.clone(), Policy::from(&settings.indexer));
     let mut sync = Sync::new(&mut client, &pipeline, context.pool)
