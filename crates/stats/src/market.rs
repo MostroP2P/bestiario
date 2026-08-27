@@ -33,6 +33,14 @@
 //! creation is not what was on the book, and a method added to an old
 //! order would otherwise be dated by that order's creation and hide a
 //! genuine first sighting.
+//!
+//! An order names several methods at once, and each ranking credits it to
+//! every method it names. `method_top3_by_volume` therefore adds up to
+//! more than the volume that was traded — one order of 1 361 sats offered
+//! over two methods shows 1 361 against each. The sats are attributed to a
+//! method, not divided between them; splitting them would invent a figure
+//! nobody published. This is why the concentration rows exist only for
+//! currencies, which an order names exactly one of.
 
 use std::collections::BTreeSet;
 
@@ -76,8 +84,12 @@ pub struct Market {
     pub market_price_share: Option<f64>,
     /// Range orders over orders created.
     pub range_share: Option<f64>,
-    /// Mean `(max − min) / max` over the range orders created — the
-    /// comparable form, since a block may mix currencies.
+    /// Mean `(max − min) / max` over the range orders created whose `max`
+    /// is positive — the comparable form, since a block may mix
+    /// currencies. A `[0, 0]` range is legal on the wire (`fa` is only
+    /// checked for being non-negative) and has no relative width to take,
+    /// so it is counted by [`range_share`](Self::range_share) and left out
+    /// of both averages: the two denominators need not agree.
     pub range_width_avg: Option<f64>,
     /// Mean `max − min` over the same orders, in fiat. Only meaningful,
     /// and only reported, when the block is a single currency.
@@ -107,11 +119,18 @@ pub fn summarise(orders: &[Order], window: Window) -> Market {
         .iter()
         .filter(|order| order.direction == Direction::Buy)
         .count();
-    let sats: i64 = trades.iter().map(|order| order.amount_sats).sum();
-    let buy_sats: i64 = trades
+    // In `i128`: `amt` is admitted up to `i64::MAX`, so two such orders
+    // overflow an `i64` sum — a panic in debug, a wrapped negative in
+    // release, and a share silently reported as missing. The share itself
+    // is a ratio, so the wider accumulator costs nothing.
+    let sats: i128 = trades
+        .iter()
+        .map(|order| i128::from(order.amount_sats))
+        .sum();
+    let buy_sats: i128 = trades
         .iter()
         .filter(|order| order.direction == Direction::Buy)
-        .map(|order| order.amount_sats)
+        .map(|order| i128::from(order.amount_sats))
         .sum();
 
     let premiums = |side: Option<Direction>| -> Vec<f64> {
@@ -172,6 +191,10 @@ pub fn summarise(orders: &[Order], window: Window) -> Market {
 }
 
 /// The keys whose earliest order in `orders` was created in `window`.
+///
+/// "Earliest" is earliest *in `orders`*, so what counts as new follows
+/// whatever [`report`] passed in: the whole history for the global block,
+/// and only the slice's own orders for a slice — see [`report`].
 fn first_sightings(
     orders: &[Order],
     window: Window,
@@ -197,6 +220,17 @@ fn first_sightings(
 /// `dimension` is `None`. Names follow [`crate::activity::report`]. A fiat
 /// slice drops the fiat ranking and the new-currency row, which say
 /// nothing about one currency.
+///
+/// Every row of a slice is that slice's own, the first sightings
+/// included: `market.buy.new_methods` names the methods whose first *buy*
+/// order fell in the window, not their first order of any kind, and
+/// `market.<instance>.new_fiats` names what is new *to that instance*. A
+/// method a seller has offered for a year is new to the `buy` block the
+/// day a buyer first names it. That is the same restriction every other
+/// row of the block is under — an instance block's `orders` counts that
+/// instance's orders — but it is the one row where the unqualified name
+/// invites the global reading, so it is spelled out here and in the
+/// README.
 pub fn report(orders: &[Order], window: Window, dimension: Option<Dimension>) -> Vec<Metric> {
     let Some(dimension) = dimension else {
         return metrics("market", &summarise(orders, window), None);
@@ -234,6 +268,12 @@ pub fn metrics(prefix: &str, market: &Market, fiat: Option<&str>) -> Vec<Metric>
     let percent = |value: Option<f64>| ratio(value.map(|premium| premium / 100.0));
     // A list cell names the first few and counts the rest: a window that
     // brings a dozen new payment methods is a fact, not a paragraph.
+    //
+    // An empty list renders as `—`. `Value` has no empty-list form, and
+    // giving these rows a `Count(0)` would make one metric a string in
+    // one window and a number in the next, which no `--json` consumer can
+    // type. On these two rows `—` reads as "none new in the window", not
+    // as "not computed"; the README says so.
     let text = |items: &[String]| match items.len() {
         0 => Value::Missing,
         n if n <= LISTED => Value::Text(items.join(", ")),
