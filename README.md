@@ -667,6 +667,48 @@ $ bestiario instance Mostro --from 2026-08-23 --until 2026-08-27
 └──────────────────────────────────┴──────────────────────────────────────────────────────────────────┘
 ```
 
+### One currency's market
+
+```console
+$ bestiario market ARS --from 2026-08-23 --until 2026-08-27
+2026-08-23T00:00:00+00:00 — 2026-08-27T00:00:00+00:00
+┌─────────────────────────────────────┬───────────────────────────────────────────┐
+│ metric                              ┆ value                                     │
+╞═════════════════════════════════════╪═══════════════════════════════════════════╡
+│ market.ARS.orders                   ┆ 2                                         │
+│ market.ARS.buy_orders_share         ┆ 50.0%                                     │
+│ market.ARS.buy_volume_share         ┆ —                                         │
+│ market.ARS.premium_avg              ┆ —                                         │
+│ market.ARS.premium_p50              ┆ —                                         │
+│ market.ARS.premium_p50_buy          ┆ —                                         │
+│ market.ARS.premium_p50_sell         ┆ —                                         │
+│ market.ARS.premium_spread           ┆ —                                         │
+│ market.ARS.market_price_share       ┆ 50.0%                                     │
+│ market.ARS.range_share              ┆ 50.0%                                     │
+│ market.ARS.range_width_avg          ┆ 66.7%                                     │
+│ market.ARS.range_width_fiat_avg     ┆ 50000.00 ARS                              │
+│ market.ARS.method_top3_by_orders    ┆ CBU 2, CVU 2, Belo 1                      │
+│ market.ARS.method_top3_by_volume    ┆ —                                         │
+│ market.ARS.new_methods              ┆ Belo, CBU, CVU, Lemon, MODO, Mercado Pago │
+│ market.ARS.time_to_fill_samples     ┆ 0                                         │
+│ market.ARS.time_to_fill_p50         ┆ —                                         │
+│ market.ARS.time_to_fill_p90         ┆ —                                         │
+│ market.ARS.book_size                ┆ 1                                         │
+│ market.ARS.instances                ┆ 1                                         │
+│ market.ARS.instances_top3_by_orders ┆ Mostro (6320ee5e) 2                       │
+│ market.ARS.instances_top3_by_volume ┆ —                                         │
+└─────────────────────────────────────┴───────────────────────────────────────────┘
+```
+
+Everything the reports know about one currency, in one place: which way its
+book leans and at what premium, how it is priced, which payment methods it
+is offered over, how long an order takes to find a taker, and which
+instances trade it at all. The figures are the ones `stats market` and
+`stats timing` report, over the orders standing in that currency — a
+currency is what an order's latest version says it is — so nothing here can
+drift from the family it came from. Ranking currencies inside a single
+currency would say nothing, so those rows are absent.
+
 ### Comparison
 
 ```console
