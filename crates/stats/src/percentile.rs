@@ -7,7 +7,9 @@
 //! p0 the minimum, which is what a reader expects of the words.
 
 /// The `p`-th percentile of `samples` (`0.0..=1.0`), or `None` when there
-/// are no samples to take it from.
+/// are no samples to take it from — or when the samples do not order: a
+/// `NaN` among them has no rank, and a percentile over it would name a
+/// value nobody can place, so none is named.
 ///
 /// Sorts a copy: the caller's order is not touched, and the sample sizes
 /// here are a network's worth of orders, not a stream.
@@ -17,9 +19,16 @@ pub fn percentile<T: Copy + PartialOrd>(samples: &[T], p: f64) -> Option<T> {
     }
 
     let mut sorted = samples.to_vec();
-    // Total order assumed: the callers hand over sats and fiat amounts,
-    // never a NaN — `Value::ratio` and the parsers keep those out.
-    sorted.sort_by(|a, b| a.partial_cmp(b).expect("no NaN among the samples"));
+    let mut ordered = true;
+    sorted.sort_by(|a, b| {
+        a.partial_cmp(b).unwrap_or_else(|| {
+            ordered = false;
+            std::cmp::Ordering::Equal
+        })
+    });
+    if !ordered {
+        return None;
+    }
 
     // Nearest rank: the smallest index k such that at least p of the
     // samples are at or below sorted[k]. `ceil(p × n)`, one-based, clamped

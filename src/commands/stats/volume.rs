@@ -38,8 +38,11 @@ pub async fn report(
     dimension: Option<Dimension>,
     now: i64,
 ) -> Result<Report> {
-    let orders = load::activity::orders(pool, &query.scope).await?;
     let window = Window::new(query.range.from(), query.range.until());
+    // Only what the window can count: every §6.2 figure is over the orders
+    // that reached `success` inside it, and a month slice is inside it too.
+    let orders =
+        load::activity::completed_in(pool, &query.scope, window.from, window.until).await?;
 
     Ok(Report::new(
         query.range,

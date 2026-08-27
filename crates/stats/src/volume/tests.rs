@@ -59,8 +59,8 @@ fn volume_sums_the_orders_completed_in_the_window() {
 
     // Assert
     assert_eq!(volume.completed, 4);
-    assert_eq!(volume.sats, 2_185_000);
-    assert_eq!(observed_sats(&dataset(), WINDOW), 2_185_000);
+    assert_eq!(volume.sats, Some(2_185_000));
+    assert_eq!(observed_sats(&dataset(), WINDOW), Some(2_185_000));
 }
 
 #[test]
@@ -83,22 +83,72 @@ fn every_completed_order_lands_in_exactly_one_size_bucket() {
 }
 
 #[test]
-fn the_boundaries_of_the_buckets_are_exclusive_above() {
+fn a_named_boundary_belongs_to_the_bucket_it_tops() {
+    // 9 999 → <10k; 10 000 and 50 000 → 10k–50k; 1 000 000 → 200k–1M;
+    // one sat more → >1M; and the largest order there can be lands too.
+    let sizes = [9_999, 10_000, 50_000, 1_000_000, 1_000_001, i64::MAX];
+    let orders: Vec<Order> = sizes
+        .iter()
+        .map(|&size| order(&size.to_string(), Status::Success, Some(1_100), size))
+        .collect();
+
+    assert_eq!(summarise(&orders, WINDOW).buckets, [1, 2, 0, 1, 2]);
+    assert_eq!(bucket(1_000_000), 3);
+    assert_eq!(bucket(1_000_001), 4);
+}
+
+#[test]
+fn a_sum_beyond_every_satoshi_is_missing_not_wrapped() {
     let orders = vec![
-        order("a", Status::Success, Some(1_100), 10_000),
-        order("b", Status::Success, Some(1_100), 1_000_000),
+        order("a", Status::Success, Some(1_100), i64::MAX - 1),
+        Order {
+            direction: Direction::Sell,
+            ..order("b", Status::Success, Some(1_100), 2)
+        },
     ];
 
-    assert_eq!(summarise(&orders, WINDOW).buckets, [0, 1, 0, 0, 1]);
+    let volume = summarise(&orders, WINDOW);
+
+    assert_eq!(volume.sats, None, "the total leaves i64");
+    assert_eq!(volume.buy_sats, Some(i64::MAX - 1), "each side still fits");
+    assert_eq!(volume.sell_sats, Some(2));
+    assert_eq!(volume.ticket_avg, Some(i64::MAX / 2 + 1), "the mean fits");
+    assert_eq!(volume.completed, 2);
+    assert_eq!(observed_sats(&orders, WINDOW), None);
+    assert_eq!(
+        metrics("volume", &volume)[0].value,
+        Value::Missing,
+        "reported as missing, not as a wrapped number"
+    );
+}
+
+#[test]
+fn the_average_ticket_is_rounded_to_the_nearest_sat_halves_up() {
+    let tickets = |sizes: &[i64]| {
+        let orders: Vec<Order> = sizes
+            .iter()
+            .enumerate()
+            .map(|(i, &size)| order(&i.to_string(), Status::Success, Some(1_100), size))
+            .collect();
+        summarise(&orders, WINDOW).ticket_avg
+    };
+
+    assert_eq!(tickets(&[1, 2]), Some(2), "1.5 rounds up");
+    assert_eq!(tickets(&[1, 1, 2]), Some(1), "1.33 rounds down");
+    assert_eq!(tickets(&[1, 2, 2]), Some(2), "1.67 rounds up");
+    assert_eq!(tickets(&[7]), Some(7));
 }
 
 #[test]
 fn volume_splits_by_the_maker_s_side() {
     let volume = summarise(&dataset(), WINDOW);
 
-    assert_eq!(volume.buy_sats, 155_000);
-    assert_eq!(volume.sell_sats, 2_030_000);
-    assert_eq!(volume.buy_sats + volume.sell_sats, volume.sats);
+    assert_eq!(volume.buy_sats, Some(155_000));
+    assert_eq!(volume.sell_sats, Some(2_030_000));
+    assert_eq!(
+        volume.buy_sats.zip(volume.sell_sats).map(|(b, s)| b + s),
+        volume.sats
+    );
 }
 
 #[test]
@@ -106,12 +156,16 @@ fn fiat_volume_is_per_currency_and_skips_range_orders() {
     let volume = summarise(&dataset(), WINDOW);
 
     let ars = &volume.fiat["ARS"];
-    assert_eq!(ars.total, 350.0);
+    let ars_figures = ars.figures.as_ref().expect("finite");
+    assert_eq!(ars_figures.total, 350.0);
     assert_eq!(ars.orders, 2, "the range order has no fiat amount");
-    assert_eq!(ars.ticket_avg, 175.0);
-    assert_eq!(ars.ticket_p50, 50.0);
-    assert_eq!(ars.ticket_p90, 300.0);
-    assert_eq!(volume.fiat["USD"].total, 15.0);
+    assert_eq!(ars_figures.ticket_avg, 175.0);
+    assert_eq!(ars_figures.ticket_p50, 50.0);
+    assert_eq!(ars_figures.ticket_p90, 300.0);
+    assert_eq!(
+        volume.fiat["USD"].figures.as_ref().expect("finite").total,
+        15.0
+    );
     assert_eq!(volume.fiat.len(), 2);
 }
 
@@ -119,7 +173,7 @@ fn fiat_volume_is_per_currency_and_skips_range_orders() {
 fn an_empty_window_is_zero_volume_with_no_tickets() {
     let volume = summarise(&dataset(), Window::new(5_000, 6_000));
 
-    assert_eq!(volume.sats, 0);
+    assert_eq!(volume.sats, Some(0));
     assert_eq!(volume.ticket_avg, None);
     assert_eq!(volume.largest, None);
     assert!(volume.fiat.is_empty());
@@ -129,7 +183,7 @@ fn an_empty_window_is_zero_volume_with_no_tickets() {
 #[test]
 fn no_completed_orders_is_zero_volume_not_a_missing_one() {
     // Unlike a rate, a sum over nothing is a real answer: nothing traded.
-    assert_eq!(observed_sats(&[], Window::new(0, 1)), 0);
+    assert_eq!(observed_sats(&[], Window::new(0, 1)), Some(0));
 }
 
 #[test]
@@ -207,4 +261,38 @@ fn every_observed_volume_metric_is_observed() {
             .iter()
             .all(|metric| !metric.is_inferred())
     );
+}
+
+#[test]
+fn a_fiat_sum_that_overflows_withholds_the_whole_currency_block() {
+    // Each amount is finite; their sum is not. Reporting tickets for a
+    // currency whose total cannot be stated would be half an answer.
+    let orders = vec![
+        Order {
+            fiat_amount: Some(f64::MAX),
+            ..order("a", Status::Success, Some(1_100), 1_000)
+        },
+        Order {
+            fiat_amount: Some(f64::MAX),
+            ..order("b", Status::Success, Some(1_100), 1_000)
+        },
+    ];
+
+    let volume = summarise(&orders, WINDOW);
+    let ars = &volume.fiat["ARS"];
+    assert_eq!(ars.orders, 2);
+    assert_eq!(ars.figures, None);
+
+    let metrics = metrics("volume", &volume);
+    let value = |name: &str| {
+        &metrics
+            .iter()
+            .find(|metric| metric.name == format!("volume.fiat.ARS.{name}"))
+            .expect("present")
+            .value
+    };
+    assert_eq!(value("orders"), &Value::Count(2));
+    for name in ["total", "ticket_avg", "ticket_p50", "ticket_p90"] {
+        assert_eq!(value(name), &Value::Missing, "{name}");
+    }
 }

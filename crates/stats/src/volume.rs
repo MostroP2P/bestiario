@@ -17,15 +17,31 @@ use crate::metric::{Metric, Value};
 use crate::percentile::percentile;
 use crate::window::Window;
 
-/// The size buckets of §6.2, as `(label, exclusive upper bound in sats)`;
-/// the last one is open.
-pub const BUCKETS: [(&str, i64); 5] = [
-    ("lt_10k", 10_000),
-    ("10k_50k", 50_000),
-    ("50k_200k", 200_000),
-    ("200k_1m", 1_000_000),
-    ("gt_1m", i64::MAX),
+/// The size buckets of §6.2 — `<10k`, `10k–50k`, `50k–200k`, `200k–1M`,
+/// `>1M` — as `(label, inclusive upper bound in sats)`; the last one has
+/// none. A named boundary belongs to the bucket it names the top of:
+/// exactly one million sats is a `200k–1M` order, not a `>1M` one.
+pub const BUCKETS: [(&str, Option<i64>); 5] = [
+    ("lt_10k", Some(9_999)),
+    ("10k_50k", Some(50_000)),
+    ("50k_200k", Some(200_000)),
+    ("200k_1m", Some(1_000_000)),
+    ("gt_1m", None),
 ];
+
+/// The bucket `size` falls in, as an index into [`BUCKETS`].
+pub fn bucket(size: i64) -> usize {
+    BUCKETS
+        .iter()
+        .position(|(_, upper)| upper.is_none_or(|upper| size <= upper))
+        .expect("the last bucket is open")
+}
+
+/// `∑ sats`, or `None` when the sum leaves `i64` — beyond every satoshi
+/// there is, and so a corrupt input rather than a figure.
+pub fn sum_sats(sats: impl Iterator<Item = i64>) -> Option<i64> {
+    sats.map(i128::from).sum::<i128>().try_into().ok()
+}
 
 /// The ways `stats volume --by` can slice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,10 +56,19 @@ pub enum Dimension {
 /// The fiat side of one currency.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FiatVolume {
-    /// `∑ fiat_amount` of completed fixed-amount orders in this currency.
-    pub total: f64,
-    /// How many of them.
+    /// Completed fixed-amount orders in this currency.
     pub orders: u64,
+    /// Their figures; `None` when the amounts, each finite, add up to
+    /// something that is not — then no figure of the block is trusted,
+    /// not the tickets either, since they come from the same amounts.
+    pub figures: Option<FiatFigures>,
+}
+
+/// The finite figures of one currency.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FiatFigures {
+    /// `∑ fiat_amount`.
+    pub total: f64,
     pub ticket_avg: f64,
     pub ticket_p50: f64,
     pub ticket_p90: f64,
@@ -54,9 +79,12 @@ pub struct FiatVolume {
 pub struct Volume {
     /// Orders that reached `success` in the window.
     pub completed: u64,
-    /// `∑ amount_sats` over them.
-    pub sats: i64,
-    /// Ticket sizes in sats; `None` when nothing completed.
+    /// `∑ amount_sats` over them; `None` only if the sum leaves `i64`
+    /// ([`sum_sats`]).
+    pub sats: Option<i64>,
+    /// Ticket sizes in sats; `None` when nothing completed. The average
+    /// is rounded to the nearest sat, halves up — a sat is indivisible,
+    /// and floor would bias every average down.
     pub ticket_avg: Option<i64>,
     pub ticket_p50: Option<i64>,
     pub ticket_p90: Option<i64>,
@@ -64,18 +92,17 @@ pub struct Volume {
     pub largest: Option<i64>,
     /// Completed orders per size bucket, in [`BUCKETS`] order.
     pub buckets: [u64; 5],
-    /// The sats split by the maker's side.
-    pub buy_sats: i64,
-    pub sell_sats: i64,
+    /// The sats split by the maker's side; `None` as for `sats`.
+    pub buy_sats: Option<i64>,
+    pub sell_sats: Option<i64>,
     /// Per currency code, over the fixed-amount orders only.
     pub fiat: BTreeMap<String, FiatVolume>,
 }
 
-/// `∑ amount_sats` of the orders that reached `success` in `window`.
-pub fn observed_sats(orders: &[Order], window: Window) -> i64 {
-    completed(orders, window)
-        .map(|order| order.amount_sats)
-        .sum()
+/// `∑ amount_sats` of the orders that reached `success` in `window`;
+/// `None` as for [`sum_sats`].
+pub fn observed_sats(orders: &[Order], window: Window) -> Option<i64> {
+    sum_sats(completed(orders, window).map(|order| order.amount_sats))
 }
 
 /// The orders that reached `success` in `window`.
@@ -93,18 +120,15 @@ pub fn summarise(orders: &[Order], window: Window) -> Volume {
 
     let mut buckets = [0; 5];
     for &size in &sizes {
-        let index = BUCKETS
-            .iter()
-            .position(|(_, upper)| size < *upper)
-            .expect("the last bucket is open");
-        buckets[index] += 1;
+        buckets[bucket(size)] += 1;
     }
 
     let side = |direction: Direction| {
-        done.iter()
-            .filter(|order| order.direction == direction)
-            .map(|order| order.amount_sats)
-            .sum()
+        sum_sats(
+            done.iter()
+                .filter(|order| order.direction == direction)
+                .map(|order| order.amount_sats),
+        )
     };
 
     let mut by_fiat: BTreeMap<String, Vec<f64>> = BTreeMap::new();
@@ -118,23 +142,13 @@ pub fn summarise(orders: &[Order], window: Window) -> Volume {
     }
     let fiat = by_fiat
         .into_iter()
-        .map(|(code, amounts)| {
-            let total: f64 = amounts.iter().sum();
-            let volume = FiatVolume {
-                total,
-                orders: amounts.len() as u64,
-                ticket_avg: total / amounts.len() as f64,
-                ticket_p50: percentile(&amounts, 0.5).expect("non-empty"),
-                ticket_p90: percentile(&amounts, 0.9).expect("non-empty"),
-            };
-            (code, volume)
-        })
+        .map(|(code, amounts)| (code, fiat_volume(&amounts)))
         .collect();
 
     Volume {
         completed: done.len() as u64,
-        sats: sizes.iter().sum(),
-        ticket_avg: (!sizes.is_empty()).then(|| sizes.iter().sum::<i64>() / sizes.len() as i64),
+        sats: sum_sats(sizes.iter().copied()),
+        ticket_avg: mean_sats(&sizes),
         ticket_p50: percentile(&sizes, 0.5),
         ticket_p90: percentile(&sizes, 0.9),
         largest: sizes.iter().copied().max(),
@@ -142,6 +156,33 @@ pub fn summarise(orders: &[Order], window: Window) -> Volume {
         buy_sats: side(Direction::Buy),
         sell_sats: side(Direction::Sell),
         fiat,
+    }
+}
+
+/// The mean of `sizes` to the nearest sat, halves up; `None` over nothing.
+fn mean_sats(sizes: &[i64]) -> Option<i64> {
+    if sizes.is_empty() {
+        return None;
+    }
+    let n = sizes.len() as i128;
+    let sum: i128 = sizes.iter().map(|&size| i128::from(size)).sum();
+    // (sum / n) rounded half up, in integers: (2·sum + n) div (2·n).
+    (2 * sum + n).div_euclid(2 * n).try_into().ok()
+}
+
+/// One currency's figures over its `amounts`, each finite; the whole
+/// block is withheld when their sum is not.
+fn fiat_volume(amounts: &[f64]) -> FiatVolume {
+    let total: f64 = amounts.iter().sum();
+    let figures = (total.is_finite() && !amounts.is_empty()).then(|| FiatFigures {
+        total,
+        ticket_avg: total / amounts.len() as f64,
+        ticket_p50: percentile(amounts, 0.5).expect("finite and non-empty"),
+        ticket_p90: percentile(amounts, 0.9).expect("finite and non-empty"),
+    });
+    FiatVolume {
+        orders: amounts.len() as u64,
+        figures,
     }
 }
 
@@ -180,7 +221,7 @@ pub fn metrics(prefix: &str, volume: &Volume) -> Vec<Metric> {
         |name: &str, value: Option<i64>| observed(name, value.map_or(Value::Missing, Value::Sats));
 
     let mut metrics = vec![
-        observed("sats", Value::Sats(volume.sats)),
+        sats("sats", volume.sats),
         observed("completed", Value::Count(volume.completed as i64)),
         sats("ticket_avg", volume.ticket_avg),
         sats("ticket_p50", volume.ticket_p50),
@@ -193,13 +234,17 @@ pub fn metrics(prefix: &str, volume: &Volume) -> Vec<Metric> {
             Value::Count(count as i64),
         ));
     }
-    metrics.push(observed("buy_sats", Value::Sats(volume.buy_sats)));
-    metrics.push(observed("sell_sats", Value::Sats(volume.sell_sats)));
+    metrics.push(sats("buy_sats", volume.buy_sats));
+    metrics.push(sats("sell_sats", volume.sell_sats));
     for (code, fiat) in &volume.fiat {
-        let fiat_value = |amount: f64| Value::fiat(amount, code.clone());
+        let figure = |pick: fn(&FiatFigures) -> f64| {
+            fiat.figures.as_ref().map_or(Value::Missing, |figures| {
+                Value::fiat(pick(figures), code.clone())
+            })
+        };
         metrics.push(observed(
             &format!("fiat.{code}.total"),
-            fiat_value(fiat.total),
+            figure(|figures| figures.total),
         ));
         metrics.push(observed(
             &format!("fiat.{code}.orders"),
@@ -207,15 +252,15 @@ pub fn metrics(prefix: &str, volume: &Volume) -> Vec<Metric> {
         ));
         metrics.push(observed(
             &format!("fiat.{code}.ticket_avg"),
-            fiat_value(fiat.ticket_avg),
+            figure(|figures| figures.ticket_avg),
         ));
         metrics.push(observed(
             &format!("fiat.{code}.ticket_p50"),
-            fiat_value(fiat.ticket_p50),
+            figure(|figures| figures.ticket_p50),
         ));
         metrics.push(observed(
             &format!("fiat.{code}.ticket_p90"),
-            fiat_value(fiat.ticket_p90),
+            figure(|figures| figures.ticket_p90),
         ));
     }
 

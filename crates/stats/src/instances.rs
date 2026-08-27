@@ -110,7 +110,7 @@ pub fn profile(
     metrics.extend(activity::metrics("orders", &activity));
     metrics.push(Metric::observed(
         "volume.sats",
-        Value::Sats(volume::observed_sats(own, window)),
+        volume::observed_sats(own, window).map_or(Value::Missing, Value::Sats),
     ));
     metrics.extend(dev_fees::metrics(
         "dev_fees",
@@ -130,10 +130,10 @@ pub fn profile(
     ));
     metrics.push(Metric::observed(
         "share.volume",
-        share(
-            volume::observed_sats(own, window) as f64,
-            volume::observed_sats(network, window) as f64,
-        ),
+        match volume::observed_sats(own, window).zip(volume::observed_sats(network, window)) {
+            Some((own, network)) => share(own as f64, network as f64),
+            None => Value::Missing,
+        },
     ));
 
     metrics
