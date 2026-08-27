@@ -12,6 +12,7 @@
 
 pub mod activity;
 pub mod dev_fees;
+pub mod disputes;
 
 use sqlx::{QueryBuilder, Sqlite};
 
@@ -35,11 +36,7 @@ impl Scope {
     /// table aliased `alias`, which must have `pubkey` and `network`
     /// columns. The query must already be inside a `WHERE`.
     pub(crate) fn apply(&self, query: &mut QueryBuilder<Sqlite>, alias: &str) {
-        if let Some(pubkey) = &self.pubkey {
-            query
-                .push(format!(" AND {alias}.pubkey = "))
-                .push_bind(pubkey.clone());
-        }
+        self.apply_instance(query, alias);
         if !self.networks.is_empty() {
             query.push(format!(" AND {alias}.network IN ("));
             let mut networks = query.separated(", ");
@@ -47,6 +44,19 @@ impl Scope {
                 networks.push_bind(network.as_str());
             }
             query.push(")");
+        }
+    }
+}
+
+impl Scope {
+    /// The instance half of [`apply`](Self::apply) alone, for a table with
+    /// no `network` column. Disputes (kind 38386) carry no `network` tag,
+    /// so the network filter cannot reach them and is not pretended to.
+    pub(crate) fn apply_instance(&self, query: &mut QueryBuilder<Sqlite>, alias: &str) {
+        if let Some(pubkey) = &self.pubkey {
+            query
+                .push(format!(" AND {alias}.pubkey = "))
+                .push_bind(pubkey.clone());
         }
     }
 }

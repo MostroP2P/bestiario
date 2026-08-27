@@ -163,9 +163,13 @@ pub enum StatsCommand {
     },
 
     /// Disputes by status, initiator and outcome (SPEC §6.7).
+    ///
+    /// Without `--by` every figure is reported for the whole window;
+    /// `status` and `initiator` are the histograms alone, `instance` and
+    /// `period` one block per slice.
     Disputes {
-        #[arg(long, value_enum, default_value_t = DisputeDimension::Status)]
-        by: DisputeDimension,
+        #[arg(long, value_enum)]
+        by: Option<DisputeDimension>,
     },
 
     /// Exchange rate feeds and their freshness (SPEC §6.8).
