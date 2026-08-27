@@ -590,8 +590,8 @@ tests/fixtures/      real event JSON per kind
 ```
 
 The aggregation layer receives data already loaded from `db/` and returns
-serializable structs; it knows nothing about SQLite or Nostr. It is what an
-HTTP API or dashboard reuses later.
+serializable structs; it knows nothing about SQLite or Nostr. It is what the
+publication pass of §13.5 and any dashboard reuse later.
 
 It is a **separate workspace crate**, `bestiario-stats`, re-exported as
 `bestiario::stats`. A module could keep the no-I/O rule only by convention;
@@ -702,7 +702,7 @@ Default output is a table; `--json` emits `{ "generated_at", "range",
 "metrics": [ { "name", "kind": "observed|inferred", "value", "error": … } ] }`.
 
 That envelope is also what `bestiario publish` puts on a relay: the Nostr
-publication of §13.6 carries these records verbatim rather than defining a
+publication of §13.5 carries these records verbatim rather than defining a
 second shape for the same figures. See
 [`docs/NOSTR-PUBLICATION.md`](NOSTR-PUBLICATION.md) §6.
 
@@ -757,8 +757,8 @@ second shape for the same figures. See
 ## 13. Phases
 
 High-level ordering only. The PR-by-PR breakdown lives in
-`docs/ROADMAP.md`, which splits these six into eight numbered phases
-(0–7, since the foundations below come before phase 1 here) with
+`docs/ROADMAP.md`, which splits these five into seven numbered phases
+(0–6, since the foundations below come before phase 1 here) with
 dependencies; when the two disagree, the roadmap is the operational
 plan and this section is the intent.
 
@@ -781,9 +781,7 @@ plan and this section is the intent.
    standing rule: the useful moment to hunt uncovered branches is when the
    metric catalog has stopped moving, and doing it earlier means writing
    tests for code that is about to change.
-5. **Exposure**: HTTP API over the aggregation crate (out of this spec's
-   scope).
-6. **Publication**: the figures published as signed Nostr events, so that a
+5. **Publication**: the figures published as signed Nostr events, so that a
    client reads them from a pubkey rather than from a host — specified in
    full in [`docs/NOSTR-PUBLICATION.md`](NOSTR-PUBLICATION.md), which is
    normative for that feature the way this document is for the rest. It is
@@ -792,11 +790,20 @@ plan and this section is the intent.
    addressing grammar, and a client contract, none of which the daemon needs
    in order to compute a single figure.
 
-   It comes last and does not depend on phase 5: publication distributes the
-   report envelope of §10 and the observed/inferred distinction of §5, so it
-   wants those to have stopped moving, and it wants nothing from the HTTP
-   API. The two are alternative transports for the same aggregations, not a
-   sequence.
+   It comes last because it distributes the report envelope of §10 and the
+   observed/inferred distinction of §5, and a published format is a promise
+   to every client that ever parsed one — worth making after those have
+   stopped moving. Last is not optional: figures nobody can read are a
+   private notebook, and this is how they leave the machine that computed
+   them.
+
+   An HTTP API over the aggregation crate was the plan here for a while, and
+   this replaces it. Both answer the same question — how does a reader get
+   these figures — and the signed documents answer it without a host to
+   trust, a certificate to renew or a server to keep running. Two transports
+   for one set of aggregations is one more contract than the project needs.
+   The no-I/O rule of §8 is unaffected: it was never about HTTP, it is about
+   the aggregation layer having exactly one job.
 
 ## 14. Open questions
 
