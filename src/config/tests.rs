@@ -596,7 +596,7 @@ fn accepts_a_per_instance_override_keyed_by_npub_and_looks_it_up_by_hex() {
         )])
     );
     assert_eq!(
-        settings.dev_fee_percentage_for(
+        settings.assumptions.dev_fee_percentage_for(
             "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390"
         ),
         0.5
