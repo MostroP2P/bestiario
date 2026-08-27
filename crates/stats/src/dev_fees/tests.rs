@@ -10,16 +10,22 @@ const WINDOW: Window = Window {
     until: 2_000,
 };
 
+/// The daemon default share, for every instance.
+const THIRTY: fn(&str) -> f64 = |_| 0.30;
+
 fn fee(id: &str, order_id: &str, created_at: i64, amount_sats: i64) -> Fee {
     Fee {
         event_id: id.to_string(),
         order_id: order_id.to_string(),
+        pubkey: "aaaaaaaa".to_string(),
         instance: "Alpha (aaaaaaaa)".to_string(),
         created_at,
         amount_sats,
         is_duplicate: false,
         order_known: true,
         settled_at: None,
+        fee_in_force: Some(0.006),
+        order_amount_sats: None,
     }
 }
 
@@ -193,8 +199,8 @@ fn slicing_by_instance_splits_fees_and_settlements_alike() {
 }
 
 #[test]
-fn the_global_report_names_the_seven_figures_of_the_spec() {
-    let names: Vec<String> = report(&dataset(), WINDOW, None)
+fn the_global_report_names_the_seven_figures_of_the_spec_then_the_implied_three() {
+    let names: Vec<String> = report(&dataset(), WINDOW, None, &THIRTY)
         .into_iter()
         .map(|metric| metric.name)
         .collect();
@@ -209,13 +215,16 @@ fn the_global_report_names_the_seven_figures_of_the_spec() {
             "dev_fees.latency_p90",
             "dev_fees.duplicates",
             "dev_fees.orphans",
+            "dev_fees.implied_volume",
+            "dev_fees.with_fee_volume",
+            "dev_fees.implied_vs_observed",
         ]
     );
 }
 
 #[test]
 fn a_sliced_report_puts_the_slice_key_in_the_name() {
-    let by_instance = report(&dataset(), WINDOW, Some(Dimension::Instance));
+    let by_instance = report(&dataset(), WINDOW, Some(Dimension::Instance), &THIRTY);
     assert_eq!(by_instance[0].name, "dev_fees.Alpha (aaaaaaaa).total_sats");
     assert_eq!(by_instance[0].value, Value::Sats(1_000));
 
@@ -224,15 +233,16 @@ fn a_sliced_report_puts_the_slice_key_in_the_name() {
         &dataset(),
         Window::new(1_782_864_000, 1_788_220_800),
         Some(Dimension::Month),
+        &THIRTY,
     );
-    assert_eq!(by_month.len(), 14);
+    assert_eq!(by_month.len(), 20);
     assert_eq!(by_month[0].name, "dev_fees.2026-07.total_sats");
-    assert_eq!(by_month[7].name, "dev_fees.2026-08.total_sats");
+    assert_eq!(by_month[10].name, "dev_fees.2026-08.total_sats");
 }
 
 #[test]
 fn missing_figures_are_reported_as_missing_not_as_zero() {
-    let metrics = report(&dataset(), Window::new(5_000, 6_000), None);
+    let metrics = report(&dataset(), Window::new(5_000, 6_000), None, &THIRTY);
     let coverage = metrics
         .iter()
         .find(|metric| metric.name == "dev_fees.coverage")
@@ -247,10 +257,27 @@ fn missing_figures_are_reported_as_missing_not_as_zero() {
 }
 
 #[test]
-fn every_dev_fee_metric_is_observed() {
-    assert!(
-        report(&dataset(), WINDOW, None)
-            .iter()
-            .all(|metric| !metric.is_inferred())
+fn every_dev_fee_figure_is_observed_except_the_implied_volume_and_its_ratio() {
+    let inferred: Vec<String> = report(&dataset(), WINDOW, None, &THIRTY)
+        .into_iter()
+        .filter(Metric::is_inferred)
+        .map(|metric| metric.name)
+        .collect();
+
+    assert_eq!(
+        inferred,
+        ["dev_fees.implied_volume", "dev_fees.implied_vs_observed"]
     );
+}
+
+#[test]
+fn the_implied_volume_of_the_dataset_is_the_thousand_sats_over_fee_times_pct() {
+    // 1000 sats of fees at fee 0.006 × pct 0.30 = 0.0018: 555_556 sats.
+    let metrics = report(&dataset(), WINDOW, None, &THIRTY);
+    let implied = metrics
+        .iter()
+        .find(|metric| metric.name == "dev_fees.implied_volume")
+        .expect("present");
+
+    assert_eq!(implied.value, Value::Sats(555_556));
 }

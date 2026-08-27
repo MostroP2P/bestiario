@@ -69,12 +69,15 @@ fn one_row_per_instance_with_its_own_figures() {
         fees: vec![Fee {
             event_id: "f".into(),
             order_id: "a1".into(),
+            pubkey: "alpha".into(),
             instance: "Alpha".into(),
             created_at: 1_300,
             amount_sats: 40,
             is_duplicate: false,
             order_known: true,
             settled_at: Some(1_200),
+            fee_in_force: None,
+            order_amount_sats: Some(200),
         }],
         settlements: vec![],
     };

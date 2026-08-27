@@ -357,23 +357,41 @@ was captured, so there is nothing to price it with: the total is `—`, not
 ```console
 $ bestiario stats dev-fees --from 2026-08-23 --until 2026-08-27
 2026-08-23T00:00:00+00:00 — 2026-08-27T00:00:00+00:00
-┌──────────────────────┬──────────┐
-│ metric               ┆ value    │
-╞══════════════════════╪══════════╡
-│ dev_fees.total_sats  ┆ 117 sats │
-│ dev_fees.paid        ┆ 2        │
-│ dev_fees.coverage    ┆ —        │
-│ dev_fees.latency_p50 ┆ —        │
-│ dev_fees.latency_p90 ┆ —        │
-│ dev_fees.duplicates  ┆ 0        │
-│ dev_fees.orphans     ┆ 2        │
-└──────────────────────┴──────────┘
+┌────────────────────────────────────┬──────────┬──────────────────────────────────────────────────────────┐
+│ metric                             ┆ value    ┆ error                                                    │
+╞════════════════════════════════════╪══════════╪══════════════════════════════════════════════════════════╡
+│ dev_fees.total_sats                ┆ 117 sats ┆                                                          │
+│ dev_fees.paid                      ┆ 2        ┆                                                          │
+│ dev_fees.coverage                  ┆ —        ┆                                                          │
+│ dev_fees.latency_p50               ┆ —        ┆                                                          │
+│ dev_fees.latency_p90               ┆ —        ┆                                                          │
+│ dev_fees.duplicates                ┆ 0        ┆                                                          │
+│ dev_fees.orphans                   ┆ 2        ┆                                                          │
+│ dev_fees.implied_volume (inf)      ┆ —        ┆ no fee inverted; 2 fees not invertible (no fee in force) │
+│ dev_fees.with_fee_volume           ┆ 0 sats   ┆                                                          │
+│ dev_fees.implied_vs_observed (inf) ┆ —        ┆ no inverted fee names a known order                      │
+└────────────────────────────────────┴──────────┴──────────────────────────────────────────────────────────┘
 ```
 
 An order paid for twice — a known daemon bug — counts once towards the
 total and once under `duplicates`. `coverage` is the share of completed
 orders that produced a fee, over the instances known to charge one.
 `--by instance` and `--by period` slice it.
+
+The last three rows are the comparison of SPEC §6.6. A dev fee is
+`round(fee × amount × pct)`, so each fee *implies* an order of about
+`fee ÷ (fee_in_force × pct)` sats — including the fees whose order has
+already expired off the relays, which is what makes the figure worth
+having. It is inferred twice over, and the `error` column says how: one
+sat of rounding on a fee is `1 ÷ (fee × pct)` sats of volume, and `pct` —
+the share of its fee an instance forwards — is not published by anyone, so
+it is the `[assumptions]` of `settings.toml` (`0.30`, the daemon default,
+unless overridden per instance). `with_fee_volume` is the observed sats of
+the orders that are still known, and `implied_vs_observed` is
+`implied ÷ observed − 1` over those same orders: a positive figure means
+the instance forwards more than assumed. Here every fee names an order the
+relays no longer have and the instance's fee at the time is unknown, so
+nothing can be inverted and the rows say so.
 
 ### Disputes
 
