@@ -81,12 +81,26 @@ pub async fn profile_report(pool: &SqlitePool, query: &Query, now: i64) -> Resul
         .collect();
 
     let fees = load::dev_fees::load(pool, &query.scope).await?;
-    let disputes = load::disputes::load(pool, &query.scope).await?;
+    // Disputes cannot be narrowed to a network (they carry none), so under
+    // `--network` the block is reported as missing rather than network-wide.
+    let disputes = if query.network_narrowed {
+        None
+    } else {
+        Some(load::disputes::load(pool, &query.scope).await?)
+    };
     let window = Window::new(query.range.from(), query.range.until());
 
     Ok(Report::new(
         query.range,
-        instances::profile(&profile, &own, &network, &fees, &disputes, window, now),
+        instances::profile(
+            &profile,
+            &own,
+            &network,
+            &fees,
+            disputes.as_ref(),
+            window,
+            now,
+        ),
         now,
     ))
 }

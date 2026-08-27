@@ -132,6 +132,7 @@ async fn a_dispute_carries_its_opening_and_its_resolution() {
             status: disputes::Status::Settled,
             initiator: Some(disputes::Initiator::Buyer),
             resolved_at: Some(T0 + 500),
+            outcome: Some(disputes::Status::Settled),
         }]
     );
 }
@@ -167,6 +168,38 @@ async fn taken_orders_are_dated_by_the_taker_or_by_the_settlement_when_none_was_
         .map(|t| (t.order_id.as_str(), t.left_pending_at))
         .collect();
     assert_eq!(seen, vec![("taken", T0 + 100), ("settled", T0 + 300)]);
+}
+
+#[tokio::test]
+async fn the_outcome_is_the_first_terminal_version_even_when_a_later_one_differs() {
+    let pool = migrated().await;
+    dispute(&pool, "d1", ALPHA, T0, Status::Initiated, None, None).await;
+    dispute(&pool, "d1", ALPHA, T0 + 100, Status::Settled, None, None).await;
+    dispute(&pool, "d1", ALPHA, T0 + 200, Status::Released, None, None).await;
+
+    let data = load(&pool, &mainnet()).await.expect("load");
+
+    assert_eq!(data.disputes[0].status, disputes::Status::Released);
+    assert_eq!(data.disputes[0].outcome, Some(disputes::Status::Settled));
+    assert_eq!(data.disputes[0].resolved_at, Some(T0 + 100));
+}
+
+#[tokio::test]
+async fn the_network_scope_reaches_neither_read() {
+    // Disputes carry no network; filtering only the orders would divide
+    // every network's disputes by one network's takers.
+    let pool = migrated().await;
+    dispute(&pool, "d", ALPHA, T0, Status::Initiated, None, None).await;
+    order(&pool, "o", ALPHA, T0, order::Status::Success).await;
+
+    let scope = Scope {
+        pubkey: None,
+        networks: vec![Network::Testnet],
+    };
+    let data = load(&pool, &scope).await.expect("load");
+
+    assert_eq!(data.disputes.len(), 1);
+    assert_eq!(data.taken.len(), 1);
 }
 
 #[tokio::test]

@@ -17,6 +17,19 @@ async fn migrated() -> SqlitePool {
 }
 
 async fn info(pool: &SqlitePool, pubkey: &str, created_at: i64, version: &str, fee: Option<f64>) {
+    sparse_info(pool, pubkey, created_at, Some(version), fee, true).await;
+}
+
+/// A 38385 carrying only what is given: `version`, `fee`, and the rest of
+/// the profile only when `full`.
+async fn sparse_info(
+    pool: &SqlitePool,
+    pubkey: &str,
+    created_at: i64,
+    version: Option<&str>,
+    fee: Option<f64>,
+    full: bool,
+) {
     let id = format!("info-{pubkey}-{created_at}");
     events::insert_if_new(
         pool,
@@ -40,13 +53,13 @@ async fn info(pool: &SqlitePool, pubkey: &str, created_at: i64, version: &str, f
             pubkey: pubkey.to_string(),
             created_at,
             fee,
-            max_order_amount: Some(500_000),
-            min_order_amount: Some(1_000),
-            fiat_currencies: Some("ARS,VES".to_string()),
-            mostro_version: Some(version.to_string()),
-            protocol_version: Some("1".to_string()),
-            ln_networks: Some("mainnet".to_string()),
-            bond_enabled: Some(true),
+            max_order_amount: full.then_some(500_000),
+            min_order_amount: full.then_some(1_000),
+            fiat_currencies: full.then(|| "ARS,VES".to_string()),
+            mostro_version: version.map(str::to_string),
+            protocol_version: full.then(|| "1".to_string()),
+            ln_networks: full.then(|| "mainnet".to_string()),
+            bond_enabled: full.then_some(true),
         },
     )
     .await
@@ -88,6 +101,25 @@ async fn a_profile_is_the_instance_row_plus_its_latest_info() {
             last_seen_at: T0 + 500,
         }]
     );
+}
+
+#[tokio::test]
+async fn a_newer_sparse_info_does_not_erase_what_an_older_one_published() {
+    // The latest event carries only a version: the fee and the limits are
+    // still the ones the instance last stated.
+    let pool = migrated().await;
+    instances::upsert(&pool, ALPHA, None, T0)
+        .await
+        .expect("instance");
+    info(&pool, ALPHA, T0, "0.13.0", Some(0.005)).await;
+    sparse_info(&pool, ALPHA, T0 + 100, Some("0.14.0"), None, false).await;
+
+    let profiles = profiles(&pool, &Scope::default()).await.expect("load");
+
+    assert_eq!(profiles[0].mostro_version.as_deref(), Some("0.14.0"));
+    assert_eq!(profiles[0].fee, Some(0.005));
+    assert_eq!(profiles[0].min_order_sats, Some(1_000));
+    assert_eq!(profiles[0].fiat_currencies, vec!["ARS", "VES"]);
 }
 
 #[tokio::test]
