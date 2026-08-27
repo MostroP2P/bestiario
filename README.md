@@ -352,23 +352,63 @@ was captured, so there is nothing to price it with: the total is `—`, not
 ```console
 $ bestiario stats dev-fees --from 2026-08-23 --until 2026-08-27
 2026-08-23T00:00:00+00:00 — 2026-08-27T00:00:00+00:00
-┌──────────────────────┬──────────┐
-│ metric               ┆ value    │
-╞══════════════════════╪══════════╡
-│ dev_fees.total_sats  ┆ 117 sats │
-│ dev_fees.paid        ┆ 2        │
-│ dev_fees.coverage    ┆ —        │
-│ dev_fees.latency_p50 ┆ —        │
-│ dev_fees.latency_p90 ┆ —        │
-│ dev_fees.duplicates  ┆ 0        │
-│ dev_fees.orphans     ┆ 2        │
-└──────────────────────┴──────────┘
+┌────────────────────────────────────┬──────────┬──────────────────────────────────────────────┐
+│ metric                             ┆ value    ┆ error                                        │
+╞════════════════════════════════════╪══════════╪══════════════════════════════════════════════╡
+│ dev_fees.total_sats                ┆ 117 sats ┆                                              │
+│ dev_fees.paid                      ┆ 2        ┆                                              │
+│ dev_fees.coverage                  ┆ —        ┆                                              │
+│ dev_fees.latency_p50               ┆ —        ┆                                              │
+│ dev_fees.latency_p90               ┆ —        ┆                                              │
+│ dev_fees.duplicates                ┆ 0        ┆                                              │
+│ dev_fees.orphans                   ┆ 2        ┆                                              │
+│ dev_fees.implied_volume (inf)      ┆ —        ┆ no fee inverted; 2 fees with no fee in force │
+│ dev_fees.with_fee_volume           ┆ —        ┆                                              │
+│ dev_fees.implied_vs_observed (inf) ┆ —        ┆ no fee names a settled order                 │
+└────────────────────────────────────┴──────────┴──────────────────────────────────────────────┘
 ```
 
 An order paid for twice — a known daemon bug — counts once towards the
 total and once under `duplicates`. `coverage` is the share of completed
 orders that produced a fee, over the instances known to charge one.
 `--by instance` and `--by period` slice it.
+
+The last three rows are the comparison of SPEC §6.6. A dev fee is
+`round(fee × amount × pct)`, so each fee *implies* an order of about
+`fee ÷ (fee_in_force × pct)` sats — including the fees whose order has
+already expired off the relays, which is what makes the figure worth
+having. It is inferred twice over, and the `error` column says how: one
+sat of rounding on a fee is `1 ÷ (fee × pct)` sats of volume, and `pct` —
+the share of its fee an instance forwards — is not published by anyone, so
+it is the `[assumptions]` of `settings.toml` (`0.30`, the daemon default,
+unless overridden per instance).
+
+A third qualification outweighs both in a backfill: a fee whose instance
+never published a `fee` the projection still has cannot be inverted at
+all. Those fees are not in the sum and no rounding bound covers them, so
+whenever there is one the `error` column says `lower bound: n of m fees
+inverted` and the figure is to be read as the floor it is.
+
+`with_fee_volume` is the observed side: `∑ amount_sats` of the orders that
+a fee names **and** that reached `success` — a fee paid against an order
+the relays no longer have, or one that was later canceled, has no observed
+volume to show, and the row is `—` rather than `0` when none of them does.
+It is observed in the strict sense: it does not move with what could be
+inverted. `implied_vs_observed` is `implied ÷ observed − 1` over the
+intersection — the fees that were inverted *and* name a settled order of a
+positive amount — so a positive figure means the instance forwards more
+than assumed. Orders still known at `amt = 0` (market price, never
+amended: SPEC §3) are out of the ratio, which would otherwise divide by
+nothing, and the column says how many.
+
+The two sides are dated differently on purpose: a fee counts in the window
+its own event falls in, while the order it names may have settled in the
+previous one. `with_fee_volume` for a month is therefore not the same set
+as `volume.total` for that month, and the two are not meant to reconcile.
+
+Here every fee names an order the relays no longer have and the instance's
+fee at the time is unknown, so nothing can be inverted and the rows say
+so.
 
 ### Disputes
 

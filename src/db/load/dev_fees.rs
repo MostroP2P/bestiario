@@ -7,6 +7,12 @@
 //! fee names it and what the instance's fee in force was at the time, which
 //! is the `fee_in_force` lookup of `repo::instance_info` folded into the
 //! query so a network's worth of orders is one round trip, not one per row.
+//! The fees carry the same lookup — at the order's settlement, or at the
+//! payment itself when the order is unseen — since the volume implied by a
+//! fee (§5) is the fee divided by the rate that produced it. They also
+//! carry the amount of the order they name, but only once it reached
+//! `success`: §6.6 sets the implied volume beside the settled one, and an
+//! order that was canceled after a fee was paid is not volume.
 
 use sqlx::{Executor, QueryBuilder, Sqlite};
 
@@ -38,7 +44,15 @@ where
         "SELECT f.event_id, f.order_id, f.pubkey, i.name AS instance_name, f.created_at,
                 f.amount_sats, f.is_duplicate,
                 o.order_id IS NOT NULL AS order_known,
-                CASE WHEN o.final_status = 'success' THEN o.success_at END AS settled_at
+                CASE WHEN o.final_status = 'success' THEN o.success_at END AS settled_at,
+                (SELECT ii.fee FROM instance_info ii
+                  WHERE ii.pubkey = f.pubkey AND ii.fee IS NOT NULL
+                    AND ii.created_at <= COALESCE(
+                      CASE WHEN o.final_status = 'success' THEN o.success_at END,
+                      f.created_at)
+                  ORDER BY ii.created_at DESC, ii.event_id ASC LIMIT 1) AS fee_in_force,
+                CASE WHEN o.final_status = 'success' THEN o.amount_sats END
+                  AS settled_amount_sats
          FROM dev_fees f
          LEFT JOIN instances i ON i.pubkey = f.pubkey
          LEFT JOIN orders o ON o.order_id = f.order_id
@@ -95,6 +109,8 @@ struct FeeRow {
     is_duplicate: i64,
     order_known: i64,
     settled_at: Option<i64>,
+    fee_in_force: Option<f64>,
+    settled_amount_sats: Option<i64>,
 }
 
 impl FeeRow {
@@ -103,11 +119,14 @@ impl FeeRow {
             event_id: self.event_id,
             order_id: self.order_id,
             instance: instance_label(&self.pubkey, self.instance_name.as_deref()),
+            pubkey: self.pubkey,
             created_at: self.created_at,
             amount_sats: self.amount_sats,
             is_duplicate: self.is_duplicate != 0,
             order_known: self.order_known != 0,
             settled_at: self.settled_at,
+            fee_in_force: self.fee_in_force,
+            settled_amount_sats: self.settled_amount_sats,
         }
     }
 }

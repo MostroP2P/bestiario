@@ -4,6 +4,7 @@ use sqlx::SqlitePool;
 
 use super::*;
 use crate::commands::range::Range;
+use crate::config::AssumptionSettings;
 use crate::db::connect_and_migrate;
 use crate::db::load::Scope;
 use crate::db::repo::events::{self, EventRecord};
@@ -139,7 +140,9 @@ async fn the_global_report_reads_the_seeded_fees() {
     let pool = seeded().await;
 
     // Act
-    let report = report(&pool, &query(), None, NOW).await.expect("report");
+    let report = report(&pool, &query(), None, &AssumptionSettings::default(), NOW)
+        .await
+        .expect("report");
 
     // Assert
     assert_eq!(value(&report, "dev_fees.total_sats"), &Value::Sats(350));
@@ -154,9 +157,15 @@ async fn the_global_report_reads_the_seeded_fees() {
 async fn slicing_by_instance_labels_the_slice() {
     let pool = seeded().await;
 
-    let report = report(&pool, &query(), Some(Dimension::Instance), NOW)
-        .await
-        .expect("report");
+    let report = report(
+        &pool,
+        &query(),
+        Some(Dimension::Instance),
+        &AssumptionSettings::default(),
+        NOW,
+    )
+    .await
+    .expect("report");
 
     assert_eq!(
         value(&report, "dev_fees.Alpha (82fa8cb9).total_sats"),
@@ -174,7 +183,7 @@ async fn every_cli_dimension_maps_to_an_aggregation_dimension() {
 async fn the_json_rendering_is_the_envelope_of_the_spec() {
     let pool = seeded().await;
 
-    let rendered = report(&pool, &query(), None, NOW)
+    let rendered = report(&pool, &query(), None, &AssumptionSettings::default(), NOW)
         .await
         .expect("report")
         .render(Format::Json);
@@ -182,4 +191,46 @@ async fn the_json_rendering_is_the_envelope_of_the_spec() {
 
     assert_eq!(json["metrics"][0]["name"], "dev_fees.total_sats");
     assert_eq!(json["metrics"][0]["unit"], "sats");
+}
+
+#[tokio::test]
+async fn the_implied_volume_rests_on_the_configured_share() {
+    // Arrange: the seed's two fees, 300 + 50 sats, under fee 0.006. At the
+    // default share of 0.30 that is 350 / 0.0018 = 194_444 sats; at a
+    // configured 0.60 it is half.
+    let pool = seeded().await;
+    let mut assumptions = AssumptionSettings::default();
+    assumptions
+        .dev_fee_percentage
+        .insert(ALPHA.to_string(), 0.60);
+
+    // Act
+    let default = report(&pool, &query(), None, &AssumptionSettings::default(), NOW)
+        .await
+        .expect("report");
+    let doubled = report(&pool, &query(), None, &assumptions, NOW)
+        .await
+        .expect("report");
+
+    // Assert
+    assert_eq!(
+        value(&default, "dev_fees.implied_volume"),
+        &Value::Sats(194_444)
+    );
+    assert_eq!(
+        value(&doubled, "dev_fees.implied_volume"),
+        &Value::Sats(97_222)
+    );
+    // Only the paid order is known: 10_000 sats observed.
+    assert_eq!(
+        value(&default, "dev_fees.with_fee_volume"),
+        &Value::Sats(10_000)
+    );
+    let implied = default
+        .metrics
+        .iter()
+        .find(|metric| metric.name == "dev_fees.implied_volume")
+        .expect("present");
+    assert!(implied.is_inferred());
+    assert!(implied.error().expect("error").contains("pct assumed 0.30"));
 }

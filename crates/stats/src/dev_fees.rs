@@ -1,5 +1,5 @@
-//! Dev fee metrics — `docs/SPEC.md` §6.6, minus the inferred-volume row that
-//! needs the valuation layer of phase 3.
+//! Dev fee metrics — `docs/SPEC.md` §6.6; the inferred-volume row and its
+//! comparison against the observed one are in [`implied`].
 //!
 //! Two inputs, because the figures look at the fees from both ends. The
 //! [`Fee`]s answer how much was sent, how late, how often twice, and how
@@ -22,10 +22,11 @@ use crate::percentile::percentile;
 use crate::window::Window;
 
 /// One kind 8383 event, with what is known about the order it names.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Fee {
     pub event_id: String,
     pub order_id: String,
+    pub pubkey: String,
     /// The instance label, as in [`crate::activity::Order::instance`].
     pub instance: String,
     pub created_at: i64,
@@ -40,6 +41,16 @@ pub struct Fee {
     /// `success_at` of the order, when it is known and completed; what the
     /// payment latency is measured from.
     pub settled_at: Option<i64>,
+    /// The instance's `fee` in force when the order settled — or, for an
+    /// orphan, when the fee was paid. What [`implied`] divides by; `None`
+    /// when no kind 38385 in force said.
+    pub fee_in_force: Option<f64>,
+    /// `amount_sats` of the order, when it is known **and** reached
+    /// `success`: the observed figure the implied one is set beside
+    /// (`docs/SPEC.md` §6.6 counts the settled ones). `None` for an order
+    /// the relays no longer have, and for one that never settled — a fee
+    /// against a canceled order says nothing about volume.
+    pub settled_amount_sats: Option<i64>,
 }
 
 /// One completed order, seen from the coverage side.
@@ -60,7 +71,7 @@ pub struct Settlement {
 }
 
 /// Everything the §6.6 figures are computed from.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct DevFeeData {
     pub fees: Vec<Fee>,
     pub settlements: Vec<Settlement>,
@@ -104,11 +115,7 @@ pub fn summarise(data: &DevFeeData, window: Window) -> DevFees {
         .map(|fee| fee.order_id.as_str())
         .collect();
 
-    let canonical: Vec<&Fee> = data
-        .fees
-        .iter()
-        .filter(|fee| !fee.is_duplicate && window.contains(fee.created_at))
-        .collect();
+    let canonical = canonical(data, window);
 
     let latencies: Vec<i64> = canonical
         .iter()
@@ -137,6 +144,15 @@ pub fn summarise(data: &DevFeeData, window: Window) -> DevFees {
     }
 }
 
+/// The fees that count in `window`: one per order — duplicates out — and
+/// dated by the fee event.
+pub(crate) fn canonical(data: &DevFeeData, window: Window) -> Vec<&Fee> {
+    data.fees
+        .iter()
+        .filter(|fee| !fee.is_duplicate && window.contains(fee.created_at))
+        .collect()
+}
+
 /// `data` split by instance label, keys in sorted order.
 pub fn by_instance(data: &DevFeeData) -> BTreeMap<String, DevFeeData> {
     let mut groups: BTreeMap<String, DevFeeData> = BTreeMap::new();
@@ -162,20 +178,34 @@ pub fn by_instance(data: &DevFeeData) -> BTreeMap<String, DevFeeData> {
 /// The report for `stats dev-fees --by <dimension>`, or the global one when
 /// `dimension` is `None`. Names follow [`crate::activity::report`]:
 /// `dev_fees.total_sats`, `dev_fees.<instance>.total_sats`,
-/// `dev_fees.2026-08.total_sats`.
-pub fn report(data: &DevFeeData, window: Window, dimension: Option<Dimension>) -> Vec<Metric> {
+/// `dev_fees.2026-08.total_sats`. Every block is the seven observed
+/// figures and then the three of [`implied`], which need `dev_fee_pct`:
+/// the share to assume for an instance's pubkey.
+pub fn report(
+    data: &DevFeeData,
+    window: Window,
+    dimension: Option<Dimension>,
+    dev_fee_pct: &dyn Fn(&str) -> f64,
+) -> Vec<Metric> {
+    let block = |prefix: &str, data: &DevFeeData, window: Window| {
+        let mut block = metrics(prefix, &summarise(data, window));
+        block.extend(implied::metrics(
+            prefix,
+            &implied::summarise(data, window, dev_fee_pct),
+        ));
+        block
+    };
+
     match dimension {
-        None => metrics("dev_fees", &summarise(data, window)),
+        None => block("dev_fees", data, window),
         Some(Dimension::Month) => window
             .months()
             .into_iter()
-            .flat_map(|(key, month)| metrics(&format!("dev_fees.{key}"), &summarise(data, month)))
+            .flat_map(|(key, month)| block(&format!("dev_fees.{key}"), data, month))
             .collect(),
         Some(Dimension::Instance) => by_instance(data)
             .into_iter()
-            .flat_map(|(key, group)| {
-                metrics(&format!("dev_fees.{key}"), &summarise(&group, window))
-            })
+            .flat_map(|(key, group)| block(&format!("dev_fees.{key}"), &group, window))
             .collect(),
     }
 }
@@ -198,6 +228,8 @@ pub fn metrics(prefix: &str, dev_fees: &DevFees) -> Vec<Metric> {
         observed("orphans", Value::Count(dev_fees.orphans as i64)),
     ]
 }
+
+pub mod implied;
 
 #[cfg(test)]
 mod tests;

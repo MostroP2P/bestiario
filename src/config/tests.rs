@@ -359,8 +359,8 @@ fn dev_fee_percentage_falls_back_to_the_default_for_an_instance_without_an_overr
     let settings = Settings::from_toml_str(&toml).expect("valid settings");
 
     // Act / Assert
-    assert_eq!(settings.dev_fee_percentage_for(overridden), 0.5);
-    assert_eq!(settings.dev_fee_percentage_for(&other), 0.30);
+    assert_eq!(settings.assumptions.dev_fee_percentage_for(overridden), 0.5);
+    assert_eq!(settings.assumptions.dev_fee_percentage_for(&other), 0.30);
 }
 
 #[test]
@@ -369,7 +369,12 @@ fn dev_fee_percentage_lookup_is_case_insensitive() {
     let toml = format!("{VALID}\n[assumptions.dev_fee_percentage]\n\"{pubkey}\" = 0.5\n");
     let settings = Settings::from_toml_str(&toml).expect("valid settings");
 
-    assert_eq!(settings.dev_fee_percentage_for(&pubkey.to_uppercase()), 0.5);
+    assert_eq!(
+        settings
+            .assumptions
+            .dev_fee_percentage_for(&pubkey.to_uppercase()),
+        0.5
+    );
 }
 
 /// Serializes the tests that call [`Settings::load`], because that is the one
@@ -591,7 +596,7 @@ fn accepts_a_per_instance_override_keyed_by_npub_and_looks_it_up_by_hex() {
         )])
     );
     assert_eq!(
-        settings.dev_fee_percentage_for(
+        settings.assumptions.dev_fee_percentage_for(
             "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390"
         ),
         0.5
