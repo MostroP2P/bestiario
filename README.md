@@ -488,13 +488,15 @@ $ bestiario stats rates --fiat USD --instance Mostro
 ╞════════════════════════════════════╪══════════════╡
 │ rates.feeds                        ┆ 1            │
 │ rates.fresh                        ┆ 0            │
+│ rates.stale                        ┆ 0            │
 │ rates.dead                         ┆ 1            │
 │ rates.silent                       ┆ 0            │
+│ rates.skewed                       ┆ 0            │
 │ rates.currencies                   ┆ 141          │
 │ rates.USD.quoted_by                ┆ 1            │
-│ rates.USD.comparable               ┆ 1            │
-│ rates.USD.low                      ┆ 78614.25 USD │
-│ rates.USD.high                     ┆ 78614.25 USD │
+│ rates.USD.comparable               ┆ 0            │
+│ rates.USD.low                      ┆ —            │
+│ rates.USD.high                     ┆ —            │
 │ rates.USD.disparity                ┆ —            │
 │ rates.USD.Mostro (6320ee5e)        ┆ 78614.25 USD │
 │ rates.Mostro (6320ee5e).age        ┆ 16.5h        │
@@ -509,21 +511,29 @@ a live thing, and §6.8 asks what it says *now* — the window still heads the
 report, as everywhere.
 
 A feed is `fresh` while its latest snapshot is under five minutes old, the
-bound a rate has to price a trade; `stale` past that but within the hour a
-kind 30078 event declares itself valid for; `dead` past that hour, with
-nothing since; and `silent` when the instance has published no rate at all.
-Rate snapshots carry no `y` tag, so bestiario stores one only from a pubkey
-it has already seen publishing as an instance — an unvouched feed is not a
-feed.
+bound a rate has to price a trade; `stale` past that but within the ten
+minutes a kind 30078 event declares itself valid for through its NIP-40
+`expiration`; `dead` past that expiry, with nothing since; `silent` when
+the instance has published no rate at all; and `skewed` when its latest
+snapshot is dated in the future, which is a clock nobody shares rather than
+an age. Every instance falls in exactly one of the five, and the counts add
+up to the statuses listed below them. Rate snapshots carry no `y` tag, so
+bestiario stores one only from a pubkey it has already seen publishing as
+an instance — an unvouched feed is not a feed, and a stored snapshot whose
+publisher is missing from the bestiary fails the report rather than being
+quietly readmitted to it.
 
 `--fiat <CURRENCY>` adds the currency's block: who quotes it, the cheapest
-and dearest quote, and the disparity between them. The disparity compares
-only the quotes standing *at the same instant* — those within five minutes
-of the newest one — because two prices an hour apart differ by the market
-moving, which is not a disagreement between instances. The others are
-counted under `quoted_by` and left out; one comparable quote disagrees with
-nobody, and the row says `—` rather than zero. Without `--instance` the
-report covers every instance in the bestiary, one block each.
+and dearest quote, and the disparity between them. The disparity is about
+*now*: only the quotes that are still fresh set `low`, `high` and the
+ratio, because two prices an hour apart differ by the market moving — which
+is not a disagreement between instances — and a price whose own event has
+expired is not what the feed quotes today. Everyone quoting the currency is
+still counted under `quoted_by`, so a currency nobody quotes live says `—`
+rather than reporting the disagreement of two dead snapshots; one
+comparable quote disagrees with nobody, and that row says `—` too. Without
+`--instance` the report covers every instance in the bestiary, one block
+each.
 
 ### Dev fees
 

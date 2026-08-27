@@ -87,23 +87,45 @@ where
 
 /// The latest snapshot of every instance that has published one, by
 /// pubkey — what the §6.8 report asks about, which is the present state of
-/// each feed and not its history.
-pub async fn latest_per_instance<'e, E>(executor: E) -> Result<Vec<RateSnapshot>, sqlx::Error>
+/// each feed and not its history. `pubkey` narrows it to one publisher.
+///
+/// # Which snapshot is the latest
+///
+/// Kind 30078 is addressable, and NIP-01 settles which of two versions is
+/// the current one by `created_at`, the id breaking a tie — not by the
+/// `published_at` tag, which is the instance's own claim and may sit up to
+/// `MAX_CLOCK_DIVERGENCE_SECS` either side of it. Two snapshots whose
+/// tags and clocks disagree in order would otherwise report the rate and
+/// the freshness of an event the relay has already replaced, so the rank
+/// joins `events` and orders the way the protocol does.
+///
+/// The scope is pushed into the query rather than applied after it: a
+/// report for one instance should not rank every publisher's history, and
+/// should not decode — nor be failed by — a corrupt row belonging to
+/// somebody else.
+pub async fn latest_per_instance<'e, E>(
+    executor: E,
+    pubkey: Option<&str>,
+) -> Result<Vec<RateSnapshot>, sqlx::Error>
 where
     E: Executor<'e, Database = Sqlite>,
 {
     sqlx::query_as::<_, Row>(
         "SELECT event_id, pubkey, published_at, source, rates_json
          FROM (
-             SELECT event_id, pubkey, published_at, source, rates_json,
+             SELECT rates.event_id, rates.pubkey, rates.published_at,
+                    rates.source, rates.rates_json,
                     ROW_NUMBER() OVER (
-                        PARTITION BY pubkey ORDER BY published_at DESC, event_id ASC
+                        PARTITION BY rates.pubkey
+                        ORDER BY events.created_at DESC, rates.event_id ASC
                     ) AS rank
-             FROM rates
+             FROM rates JOIN events ON events.id = rates.event_id
+             WHERE ?1 IS NULL OR rates.pubkey = ?1
          )
          WHERE rank = 1
          ORDER BY pubkey",
     )
+    .bind(pubkey)
     .fetch_all(executor)
     .await?
     .into_iter()
