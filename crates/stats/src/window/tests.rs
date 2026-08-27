@@ -106,3 +106,82 @@ fn a_day_the_earlier_month_does_not_have_clamps_to_its_last_one() {
 fn a_window_before_the_epoch_of_dates_has_no_previous_month() {
     assert_eq!(Window::new(i64::MIN, i64::MIN + 1).previous_month(), None);
 }
+
+/// 2026-08-27T00:00:00Z is a Thursday.
+const THURSDAY: i64 = 1_787_788_800;
+const DAY: i64 = 86_400;
+
+#[test]
+fn days_are_calendar_days_clipped_to_the_window() {
+    // Arrange: midday Thursday to midday Saturday.
+    let window = Window::new(THURSDAY + DAY / 2, THURSDAY + 2 * DAY + DAY / 2);
+
+    // Act
+    let days = window.days();
+
+    // Assert
+    let keys: Vec<&str> = days.iter().map(|(key, _)| key.as_str()).collect();
+    assert_eq!(keys, ["2026-08-27", "2026-08-28", "2026-08-29"]);
+    assert_eq!(days[0].1.from, window.from, "the first day is clipped");
+    assert_eq!(days[0].1.until, THURSDAY + DAY);
+    assert_eq!(days[2].1.until, window.until, "and so is the last");
+}
+
+#[test]
+fn weeks_open_on_monday_whichever_day_the_window_does() {
+    let window = Window::new(THURSDAY, THURSDAY + 8 * DAY);
+
+    let weeks = window.weeks();
+
+    let keys: Vec<&str> = weeks.iter().map(|(key, _)| key.as_str()).collect();
+    assert_eq!(keys, ["2026-W35", "2026-W36"]);
+    assert_eq!(
+        weeks[0].1.from, THURSDAY,
+        "the week began on Monday; the window did not"
+    );
+    // The second bucket is a whole week from its Monday.
+    assert_eq!(weeks[1].1.from, THURSDAY + 4 * DAY);
+}
+
+#[test]
+fn years_are_calendar_years() {
+    // 2025-12-31 to 2026-01-02.
+    let new_year = 1_767_225_600;
+    let window = Window::new(new_year - DAY, new_year + DAY);
+
+    let years = window.years();
+
+    let keys: Vec<&str> = years.iter().map(|(key, _)| key.as_str()).collect();
+    assert_eq!(keys, ["2025", "2026"]);
+    assert_eq!(years[1].1.from, new_year);
+}
+
+#[test]
+fn the_buckets_tile_the_window_exactly() {
+    let window = Window::new(THURSDAY + 1_000, THURSDAY + 20 * DAY - 7);
+
+    for period in [Period::Day, Period::Week, Period::Month, Period::Year] {
+        let buckets = window.buckets(period);
+        assert_eq!(
+            buckets[0].1.from, window.from,
+            "{period:?} opens the window"
+        );
+        assert_eq!(
+            buckets.last().expect("a bucket").1.until,
+            window.until,
+            "{period:?} closes it"
+        );
+        for pair in buckets.windows(2) {
+            assert_eq!(pair[0].1.until, pair[1].1.from, "{period:?} leaves no gap");
+        }
+    }
+}
+
+#[test]
+fn a_window_of_no_length_has_no_buckets() {
+    let empty = Window::new(THURSDAY, THURSDAY);
+
+    for period in [Period::Day, Period::Week, Period::Month, Period::Year] {
+        assert!(empty.buckets(period).is_empty(), "{period:?}");
+    }
+}

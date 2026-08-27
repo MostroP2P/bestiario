@@ -478,6 +478,62 @@ seller has offered for a year is new to the `buy` block the day a buyer
 first names it, and `market.<instance>.new_fiats` names what is new to
 that instance.
 
+### Series
+
+```console
+$ bestiario series orders.created --by day --from 2026-08-23 --until 2026-08-27
+2026-08-23T00:00:00+00:00 — 2026-08-27T00:00:00+00:00
+┌─────────────────────────────────┬───────┐
+│ metric                          ┆ value │
+╞═════════════════════════════════╪═══════╡
+│ orders.created.2026-08-23       ┆ 0     │
+│ orders.created.2026-08-23.delta ┆ —     │
+│ orders.created.2026-08-24       ┆ 0     │
+│ orders.created.2026-08-24.delta ┆ —     │
+│ orders.created.2026-08-25       ┆ 0     │
+│ orders.created.2026-08-25.delta ┆ —     │
+│ orders.created.2026-08-26       ┆ 8     │
+│ orders.created.2026-08-26.delta ┆ —     │
+└─────────────────────────────────┴───────┘
+```
+
+Any metric of the families above, once per bucket, with the change against
+the bucket before it. `--by` takes `day`, `week`, `month` or `year`;
+`--split instance|kind|fiat` plots one line per slice:
+
+```console
+$ bestiario series volume.sats --by day --split kind --from 2026-08-23 --until 2026-08-27
+2026-08-23T00:00:00+00:00 — 2026-08-27T00:00:00+00:00
+┌─────────────────────────────────┬───────┐
+│ metric                          ┆ value │
+╞═════════════════════════════════╪═══════╡
+│ orders.created.2026-08-23       ┆ 0     │
+│ orders.created.2026-08-23.delta ┆ —     │
+│ orders.created.2026-08-24       ┆ 0     │
+│ orders.created.2026-08-24.delta ┆ —     │
+│ orders.created.2026-08-25       ┆ 0     │
+│ orders.created.2026-08-25.delta ┆ —     │
+│ orders.created.2026-08-26       ┆ 8     │
+│ orders.created.2026-08-26.delta ┆ —     │
+└─────────────────────────────────┴───────┘_SPLIT
+```
+
+The Δ is a relative change for a magnitude — a count, a sum, a duration —
+since that is what "grew by a third" means, and the arithmetic difference
+for a figure that is already a proportion: a completion rate going from 20%
+to 30% rose by ten points, not by half. The first bucket has nothing to
+have changed from, and a change from zero is not a proportion of anything;
+both read `—` — which, over a corpus this sparse, is every bucket of the
+examples above.
+
+The metric name is whatever the reports call it, and nothing keeps a
+separate list: a metric a family gains is one `series` can plot the day it
+lands. A name that does not exist is answered with the ones that do. Two
+kinds of figure are refused rather than plotted: those about *now*
+(`orders.open_now`), which would be the same number in every bucket, and
+those that are already a change against a previous period
+(`orders.created_delta`), since a Δ of a Δ answers nothing.
+
 ### Dev fees
 
 ```console
