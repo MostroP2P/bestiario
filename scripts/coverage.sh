@@ -39,10 +39,18 @@ for argument in "$@"; do
 done
 
 report=$(mktemp)
-trap 'rm -f "$report"' EXIT
+listing=$(mktemp)
+trap 'rm -f "$report" "$listing"' EXIT
 
 echo "Measuring the workspace…"
 cargo llvm-cov --workspace --all-features --json --output-path "$report" >/dev/null
+
+# The same suite again, for llvm's own list of uncovered lines. A second
+# run is the price of gate 2 being checked by something other than the code
+# that implements it: this gate has already passed three times while seeing
+# nothing, and no single clever implementation catches its own blindness.
+echo "Measuring again for llvm's own reading…"
+cargo llvm-cov --workspace --all-features --summary-only --show-missing-lines > "$listing"
 
 # The report is fed on stdin throughout: given a filename positionally, jq
 # with `--args` reads stdin anyway, which is a hang at best and an empty
@@ -62,14 +70,18 @@ else
 fi
 
 printf '\nGate 2: every line of %s executed\n' "${PURE_LAYERS[*]}"
-python3 scripts/uncovered.py "$report" "${PURE_LAYERS[@]}" || status=1
+python3 scripts/uncovered.py "$report" --llvm "$listing" "${PURE_LAYERS[@]}" || status=1
+
+# Before exiting, not after: a failing gate is exactly when the annotated
+# report is worth opening, and `--open` that only ever repeated the failure
+# would send a reader to a page they cannot reach.
+for argument in "$@"; do
+  [ "$argument" = "--open" ] && cargo llvm-cov report --html --open
+done
 
 if [ "$status" -ne 0 ]; then
   echo
   echo "Run scripts/coverage.sh --open to see the report."
-  exit "$status"
 fi
 
-for argument in "$@"; do
-  [ "$argument" = "--open" ] && cargo llvm-cov report --html --open
-done
+exit "$status"

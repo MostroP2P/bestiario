@@ -213,4 +213,16 @@ fn two_instances_publishing_in_the_same_second_are_ordered_by_pubkey() {
         book.rate_at("beta", "USD", 1_000).expect("a rate").rate,
         51_000.0
     );
+
+    // An instance with no snapshot of its own is answered from the shared
+    // index instead, where the same tie is broken the same way: the later
+    // pubkey sorts last and is what a backwards walk reaches first.
+    let fallback = book.rate_at("gamma", "USD", 1_000).expect("a rate");
+    assert_eq!(fallback.rate, 51_000.0);
+    assert_eq!(
+        fallback.source,
+        RateSource::Fallback {
+            pubkey: "beta".into()
+        }
+    );
 }
