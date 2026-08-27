@@ -85,6 +85,32 @@ where
     .collect()
 }
 
+/// The latest snapshot of every instance that has published one, by
+/// pubkey — what the §6.8 report asks about, which is the present state of
+/// each feed and not its history.
+pub async fn latest_per_instance<'e, E>(executor: E) -> Result<Vec<RateSnapshot>, sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    sqlx::query_as::<_, Row>(
+        "SELECT event_id, pubkey, published_at, source, rates_json
+         FROM (
+             SELECT event_id, pubkey, published_at, source, rates_json,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY pubkey ORDER BY published_at DESC, event_id ASC
+                    ) AS rank
+             FROM rates
+         )
+         WHERE rank = 1
+         ORDER BY pubkey",
+    )
+    .fetch_all(executor)
+    .await?
+    .into_iter()
+    .map(Row::into_snapshot)
+    .collect()
+}
+
 /// Empties the table; see [`super::orders::clear_versions`].
 pub async fn clear<'e, E>(executor: E) -> Result<(), sqlx::Error>
 where

@@ -478,6 +478,53 @@ seller has offered for a year is new to the `buy` block the day a buyer
 first names it, and `market.<instance>.new_fiats` names what is new to
 that instance.
 
+### Exchange rates
+
+```console
+$ bestiario stats rates --fiat USD --instance Mostro
+2026-07-28T03:06:40+00:00 — 2026-08-27T03:06:40+00:00
+┌────────────────────────────────────┬──────────────┐
+│ metric                             ┆ value        │
+╞════════════════════════════════════╪══════════════╡
+│ rates.feeds                        ┆ 1            │
+│ rates.fresh                        ┆ 0            │
+│ rates.dead                         ┆ 1            │
+│ rates.silent                       ┆ 0            │
+│ rates.currencies                   ┆ 141          │
+│ rates.USD.quoted_by                ┆ 1            │
+│ rates.USD.comparable               ┆ 1            │
+│ rates.USD.low                      ┆ 78614.25 USD │
+│ rates.USD.high                     ┆ 78614.25 USD │
+│ rates.USD.disparity                ┆ —            │
+│ rates.USD.Mostro (6320ee5e)        ┆ 78614.25 USD │
+│ rates.Mostro (6320ee5e).age        ┆ 16.5h        │
+│ rates.Mostro (6320ee5e).status     ┆ dead         │
+│ rates.Mostro (6320ee5e).currencies ┆ 141          │
+└────────────────────────────────────┴──────────────┘
+```
+
+What each instance quotes right now, and how alive its feed is. These are
+the only figures in the tool that are not taken over the window: a feed is
+a live thing, and §6.8 asks what it says *now* — the window still heads the
+report, as everywhere.
+
+A feed is `fresh` while its latest snapshot is under five minutes old, the
+bound a rate has to price a trade; `stale` past that but within the hour a
+kind 30078 event declares itself valid for; `dead` past that hour, with
+nothing since; and `silent` when the instance has published no rate at all.
+Rate snapshots carry no `y` tag, so bestiario stores one only from a pubkey
+it has already seen publishing as an instance — an unvouched feed is not a
+feed.
+
+`--fiat <CURRENCY>` adds the currency's block: who quotes it, the cheapest
+and dearest quote, and the disparity between them. The disparity compares
+only the quotes standing *at the same instant* — those within five minutes
+of the newest one — because two prices an hour apart differ by the market
+moving, which is not a disagreement between instances. The others are
+counted under `quoted_by` and left out; one comparable quote disagrees with
+nobody, and the row says `—` rather than zero. Without `--instance` the
+report covers every instance in the bestiary, one block each.
+
 ### Dev fees
 
 ```console

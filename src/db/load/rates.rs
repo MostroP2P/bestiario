@@ -2,8 +2,13 @@
 
 use sqlx::{Executor, Sqlite};
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use crate::db::repo;
+use crate::stats::rates::feeds::Feed;
 use crate::stats::rates::{MAX_AGE_SECS, RateBook, Snapshot};
+
+use super::instance_label;
 
 /// The snapshots that can price the orders completed in `[from, until)`,
 /// from every instance: the fallback of [`RateBook::rate_at`] needs the
@@ -28,6 +33,60 @@ where
         .collect();
 
     Ok(RateBook::new(snapshots))
+}
+
+/// One [`Feed`] per known instance: its latest snapshot, or none at all.
+///
+/// Every instance in the bestiary is listed, including those that have
+/// published no rate — §6.8 asks which feeds are dead, and one that never
+/// started is the strongest case of it. `pubkey` narrows to one instance.
+///
+/// Not scoped by network: a kind 30078 event carries no network tag.
+pub async fn feeds<'e, E>(executor: E, pubkey: Option<&str>) -> Result<Vec<Feed>, sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite> + Copy,
+{
+    let latest: BTreeMap<String, (i64, BTreeMap<String, f64>)> =
+        repo::rates::latest_per_instance(executor)
+            .await?
+            .into_iter()
+            .map(|snapshot| (snapshot.pubkey, (snapshot.published_at, snapshot.rates)))
+            .collect();
+
+    let known = repo::instances::all(executor).await?;
+    let mut feeds: Vec<Feed> = known
+        .iter()
+        .filter(|instance| pubkey.is_none_or(|wanted| instance.pubkey == wanted))
+        .map(|instance| {
+            let snapshot = latest.get(&instance.pubkey);
+            Feed {
+                instance: instance_label(&instance.pubkey, instance.name.as_deref()),
+                published_at: snapshot.map(|(at, _)| *at),
+                rates: snapshot.map(|(_, rates)| rates.clone()).unwrap_or_default(),
+            }
+        })
+        .collect();
+
+    // A snapshot whose publisher is not in the bestiary — a rebuild that
+    // stored it before the instance row, say. Dropping it would leave the
+    // disparity a voice short, and silently.
+    let bestiary: BTreeSet<&str> = known
+        .iter()
+        .map(|instance| instance.pubkey.as_str())
+        .collect();
+    feeds.extend(
+        latest
+            .iter()
+            .filter(|(quoting, _)| !bestiary.contains(quoting.as_str()))
+            .filter(|(quoting, _)| pubkey.is_none_or(|wanted| *quoting == wanted))
+            .map(|(quoting, (at, rates))| Feed {
+                instance: instance_label(quoting, None),
+                published_at: Some(*at),
+                rates: rates.clone(),
+            }),
+    );
+
+    Ok(feeds)
 }
 
 #[cfg(test)]
