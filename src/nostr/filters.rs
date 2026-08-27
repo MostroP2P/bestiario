@@ -47,6 +47,15 @@ pub fn for_kind(
 ) -> Filter {
     let mut filter = Filter::new().kind(Kind::from_u16(kind));
 
+    // Kind 30078 is NIP-78's generic application-data kind, shared by every
+    // application storing under it, so the kind alone does not describe a
+    // rate snapshot — the `d` does. Without this the relay would send every
+    // unrelated 30078 address for the pipeline to verify, archive as a
+    // rejection and never advance a cursor over.
+    if kind == rates::KIND {
+        filter = filter.identifier(rates::IDENTIFIER);
+    }
+
     if !authors.is_empty() {
         filter = filter.authors(authors.iter().copied());
     }

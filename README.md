@@ -67,7 +67,7 @@ cp settings.toml.example settings.toml
 |---|---|
 | `[nostr].relays` | Relays to read from. `wss://relay.mostro.network` carries every instance. |
 | `[indexer].instances` | Pubkeys to follow, in hex. |
-| `[indexer].accept_unknown_instances` | `true` to index every pubkey that publishes Mostro events, whether listed or not. Events from other platforms on the same relays (they exist) are turned away either way. |
+| `[indexer].accept_unknown_instances` | `true` to index every pubkey that publishes Mostro events, whether listed or not. Events from other platforms on the same relays (they exist) are turned away either way. Rate snapshots (kind 30078) carry no platform tag, so they are taken only from a listed instance or from one already seen publishing a Mostro-tagged event. |
 | `[indexer].networks` | Which networks count: `mainnet` alone by default. |
 | `[indexer].backfill_from` | How far back the first `backfill` reaches, as a unix timestamp. |
 | `[database].url` | Where the archive lives: `sqlite://bestiario.db`. |
@@ -80,7 +80,7 @@ an error naming the key rather than a report with a hole in it.
 
 ```console
 $ bestiario backfill
-backfill: 22 stored, 5 already known, 3 rejected
+backfill: 21 stored, 4 already known, 5 rejected
 ```
 
 `backfill` walks each relay's history backwards, from now down to
@@ -496,7 +496,7 @@ segment (`orders.ARS.created`), so a consumer can split on the dot.
 
 ```console
 $ bestiario rebuild
-rebuild: 22 events replayed (0 unreadable), 8 orders and 5 disputes projected
+rebuild: 21 events replayed (0 unreadable), 8 orders and 5 disputes projected
 ```
 
 Every table except the raw event archive is derived from it. `rebuild`
