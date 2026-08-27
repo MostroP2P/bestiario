@@ -58,7 +58,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@cargo-llvm-cov
       - name: cargo llvm-cov
-        # Reported, not enforced. The 80% gate of docs/SPEC.md §12 is turned on
-        # in roadmap PR 30, once the E2E test exists to make the number mean
-        # something.
-        run: cargo llvm-cov --workspace --all-features --summary-only
+        # The first coverage gate of docs/SPEC.md §12: 80% of lines, enforced
+        # from roadmap PR 30 onward, now that the E2E suite makes the number
+        # mean something. The second gate (95%, and 100% for the pure layers)
+        # is roadmap PR 45.
+        run: cargo llvm-cov --workspace --all-features --summary-only --fail-under-lines 80

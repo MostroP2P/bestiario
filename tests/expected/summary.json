@@ -1,0 +1,57 @@
+{
+  "generated_at": null,
+  "metrics": [
+    {
+      "kind": "observed",
+      "name": "summary.created",
+      "unit": "count",
+      "value": 8
+    },
+    {
+      "kind": "observed",
+      "name": "summary.completed",
+      "unit": "count",
+      "value": 1
+    },
+    {
+      "kind": "observed",
+      "name": "summary.completion_rate",
+      "unit": "ratio",
+      "value": 0.5
+    },
+    {
+      "kind": "observed",
+      "name": "summary.volume_sats",
+      "unit": "sats",
+      "value": 1361
+    },
+    {
+      "kind": "observed",
+      "name": "summary.active_instances",
+      "unit": "count",
+      "value": 4
+    },
+    {
+      "kind": "observed",
+      "name": "summary.top_fiat",
+      "unit": "text",
+      "value": "ARS (2), BRL (2), EUR (2)"
+    },
+    {
+      "kind": "observed",
+      "name": "summary.top_methods",
+      "unit": "text",
+      "value": "CBU (2), CVU (2), BBVA Efectivo Móvil (1)"
+    },
+    {
+      "kind": "observed",
+      "name": "summary.open_disputes",
+      "unit": "count",
+      "value": 2
+    }
+  ],
+  "range": {
+    "from": "2026-08-23T15:46:40+00:00",
+    "until": "2026-08-27T03:06:40+00:00"
+  }
+}
