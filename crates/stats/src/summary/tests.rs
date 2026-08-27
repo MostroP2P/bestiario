@@ -19,6 +19,7 @@ fn order(id: &str, pubkey: &str, fiat: &str, methods: &[&str], status: Status, s
         fiat_code: fiat.into(),
         payment_methods: methods.iter().map(|m| m.to_string()).collect(),
         amount_sats: sats,
+        fiat_amount: None,
         taken_at: None,
         success_at: (status == Status::Success).then_some(1_200),
         canceled_at: (status == Status::Canceled).then_some(1_200),

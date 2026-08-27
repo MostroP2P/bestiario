@@ -179,7 +179,7 @@ fn stats_families_have_the_documented_defaults() {
     assert!(matches!(
         cli.command,
         Command::Stats(StatsCommand::Volume {
-            by: VolumeDimension::Fiat,
+            by: None,
             convert_to: None
         })
     ));

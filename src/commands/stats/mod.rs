@@ -11,3 +11,4 @@
 pub mod dev_fees;
 pub mod disputes;
 pub mod orders;
+pub mod volume;

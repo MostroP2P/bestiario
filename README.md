@@ -233,6 +233,74 @@ A rate over nothing — no order completed or canceled, no previous month to
 grow from — is reported as `—` in a table and `null` in JSON, never as
 zero: zero is an answer, and this is the absence of one.
 
+### Volume
+
+```console
+$ bestiario stats volume --from 2026-08-23 --until 2026-08-27
+2026-08-23T00:00:00+00:00 — 2026-08-27T00:00:00+00:00
+┌────────────────────────────┬────────────┐
+│ metric                     ┆ value      │
+╞════════════════════════════╪════════════╡
+│ volume.sats                ┆ 1361 sats  │
+│ volume.completed           ┆ 1          │
+│ volume.ticket_avg          ┆ 1361 sats  │
+│ volume.ticket_p50          ┆ 1361 sats  │
+│ volume.ticket_p90          ┆ 1361 sats  │
+│ volume.largest             ┆ 1361 sats  │
+│ volume.size.lt_10k         ┆ 1          │
+│ volume.size.10k_50k        ┆ 0          │
+│ volume.size.50k_200k       ┆ 0          │
+│ volume.size.200k_1m        ┆ 0          │
+│ volume.size.gt_1m          ┆ 0          │
+│ volume.buy_sats            ┆ 0 sats     │
+│ volume.sell_sats           ┆ 1361 sats  │
+│ volume.fiat.CUP.total      ┆ 800.00 CUP │
+│ volume.fiat.CUP.orders     ┆ 1          │
+│ volume.fiat.CUP.ticket_avg ┆ 800.00 CUP │
+│ volume.fiat.CUP.ticket_p50 ┆ 800.00 CUP │
+│ volume.fiat.CUP.ticket_p90 ┆ 800.00 CUP │
+└────────────────────────────┴────────────┘
+```
+
+Sats and fiat traded by the orders that reached `success` in the window,
+dated by the moment they did: total, average and p50/p90 ticket, the
+largest order, the size buckets and the maker's side. Fiat figures are per
+currency and cover fixed-amount orders only — a range order names no single
+amount, so it has sats to add and no fiat to add. `--by` slices by `kind`,
+`fiat`, `instance` or `period`, one block per slice that completed
+something in the window — only completed orders are read, so the cost of
+a week's report is a week's orders, not the history:
+
+```console
+$ bestiario stats volume --by kind --from 2026-08-23 --until 2026-08-27
+2026-08-23T00:00:00+00:00 — 2026-08-27T00:00:00+00:00
+┌─────────────────────────────────┬────────────┐
+│ metric                          ┆ value      │
+╞═════════════════════════════════╪════════════╡
+│ volume.sell.sats                ┆ 1361 sats  │
+│ volume.sell.completed           ┆ 1          │
+│ volume.sell.ticket_avg          ┆ 1361 sats  │
+│ volume.sell.ticket_p50          ┆ 1361 sats  │
+│ volume.sell.ticket_p90          ┆ 1361 sats  │
+│ volume.sell.largest             ┆ 1361 sats  │
+│ volume.sell.size.lt_10k         ┆ 1          │
+│ volume.sell.size.10k_50k        ┆ 0          │
+│ volume.sell.size.50k_200k       ┆ 0          │
+│ volume.sell.size.200k_1m        ┆ 0          │
+│ volume.sell.size.gt_1m          ┆ 0          │
+│ volume.sell.buy_sats            ┆ 0 sats     │
+│ volume.sell.sell_sats           ┆ 1361 sats  │
+│ volume.sell.fiat.CUP.total      ┆ 800.00 CUP │
+│ volume.sell.fiat.CUP.orders     ┆ 1          │
+│ volume.sell.fiat.CUP.ticket_avg ┆ 800.00 CUP │
+│ volume.sell.fiat.CUP.ticket_p50 ┆ 800.00 CUP │
+│ volume.sell.fiat.CUP.ticket_p90 ┆ 800.00 CUP │
+└─────────────────────────────────┴────────────┘
+```
+
+`--in <CURRENCY>` — the conversion into a reference currency — is inferred
+and arrives with roadmap PR 35; until then the flag is refused.
+
 ### Dev fees
 
 ```console

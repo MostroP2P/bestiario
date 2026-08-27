@@ -24,6 +24,7 @@ fn order(id: &str, created_at: i64, status: Status) -> Order {
         fiat_code: "ARS".into(),
         payment_methods: vec!["cash".into()],
         amount_sats: 1_000,
+        fiat_amount: Some(50.0),
         taken_at: None,
         success_at: None,
         canceled_at: None,

@@ -22,10 +22,38 @@ pub async fn orders<'e, E>(executor: E, scope: &Scope) -> Result<Vec<Order>, sql
 where
     E: Executor<'e, Database = Sqlite>,
 {
+    fetch(executor, scope, None).await
+}
+
+/// The orders in `scope` that reached `success` at `from..until`, oldest
+/// first — what a volume report needs and no more, so that its cost grows
+/// with the window asked for and not with the history kept. Reads the
+/// `orders_success_at` index.
+pub async fn completed_in<'e, E>(
+    executor: E,
+    scope: &Scope,
+    from: i64,
+    until: i64,
+) -> Result<Vec<Order>, sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    fetch(executor, scope, Some((from, until))).await
+}
+
+async fn fetch<'e, E>(
+    executor: E,
+    scope: &Scope,
+    completed_in: Option<(i64, i64)>,
+) -> Result<Vec<Order>, sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
     let mut query = QueryBuilder::<Sqlite>::new(
         "SELECT o.order_id, o.pubkey, i.name AS instance_name,
                 o.first_seen_at AS created_at, o.final_status AS status, o.kind,
-                o.fiat_code, o.payment_methods, o.amount_sats, o.success_at, o.canceled_at,
+                o.fiat_code, o.payment_methods, o.amount_sats, o.fiat_amount, o.success_at,
+                o.canceled_at,
                 (SELECT MIN(v.created_at) FROM order_versions v
                   WHERE v.order_id = o.order_id AND v.status = 'in-progress') AS taken_at,
                 (SELECT v.expires_at FROM order_versions v
@@ -37,6 +65,13 @@ where
     );
 
     scope.apply(&mut query, "o");
+    if let Some((from, until)) = completed_in {
+        query
+            .push(" AND o.final_status = 'success' AND o.success_at >= ")
+            .push_bind(from)
+            .push(" AND o.success_at < ")
+            .push_bind(until);
+    }
     query.push(" ORDER BY o.first_seen_at, o.order_id");
 
     query
@@ -59,6 +94,7 @@ struct Row {
     fiat_code: String,
     payment_methods: String,
     amount_sats: i64,
+    fiat_amount: Option<f64>,
     success_at: Option<i64>,
     canceled_at: Option<i64>,
     taken_at: Option<i64>,
@@ -79,6 +115,7 @@ impl Row {
             fiat_code: self.fiat_code,
             payment_methods: csv::split(&self.payment_methods),
             amount_sats: self.amount_sats,
+            fiat_amount: self.fiat_amount,
             taken_at: self.taken_at,
             success_at: self.success_at,
             canceled_at: self.canceled_at,

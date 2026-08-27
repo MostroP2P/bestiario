@@ -91,6 +91,7 @@ async fn a_completed_order_carries_its_whole_lifecycle() {
             fiat_code: "VES".to_string(),
             payment_methods: vec!["face to face".to_string(), "bank".to_string()],
             amount_sats: 21_000,
+            fiat_amount: Some(100.0),
             taken_at: Some(T0 + 600),
             success_at: Some(T0 + 1_200),
             canceled_at: None,
@@ -177,4 +178,29 @@ async fn orders_come_back_oldest_first() {
 
     let ids: Vec<&str> = loaded.iter().map(|order| order.order_id.as_str()).collect();
     assert_eq!(ids, vec!["early", "late"]);
+}
+
+#[tokio::test]
+async fn completed_in_reads_only_the_orders_settled_inside_the_bounds() {
+    // Arrange: settled before, inside, and at the upper bound; one open.
+    let pool = migrated().await;
+    for (id, at) in [
+        ("before", T0 - 10),
+        ("inside", T0 + 10),
+        ("at_until", T0 + 100),
+    ] {
+        ingest(&pool, &version(id, ALPHA, at - 5, Status::Pending)).await;
+        ingest(&pool, &version(id, ALPHA, at, Status::Success)).await;
+    }
+    ingest(&pool, &version("open", ALPHA, T0 + 20, Status::Pending)).await;
+
+    // Act
+    let orders = completed_in(&pool, &mainnet(), T0, T0 + 100)
+        .await
+        .expect("load");
+
+    // Assert
+    let ids: Vec<&str> = orders.iter().map(|order| order.order_id.as_str()).collect();
+    assert_eq!(ids, ["inside"]);
+    assert_eq!(orders[0].success_at, Some(T0 + 10));
 }

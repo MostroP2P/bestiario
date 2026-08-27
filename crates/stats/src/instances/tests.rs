@@ -54,6 +54,7 @@ fn order(id: &str, pubkey: &str, created_at: i64, status: Status, sats: i64) -> 
         fiat_code: "ARS".into(),
         payment_methods: vec![],
         amount_sats: sats,
+        fiat_amount: None,
         taken_at: None,
         success_at: (status == Status::Success).then_some(created_at + 10),
         canceled_at: None,

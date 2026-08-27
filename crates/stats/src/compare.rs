@@ -68,7 +68,7 @@ pub fn report(
                 observed("completed", Value::Count(activity.completed as i64)),
                 observed(
                     "volume_sats",
-                    Value::Sats(volume::observed_sats(&own, window)),
+                    volume::observed_sats(&own, window).map_or(Value::Missing, Value::Sats),
                 ),
                 observed(
                     "completion_rate",
