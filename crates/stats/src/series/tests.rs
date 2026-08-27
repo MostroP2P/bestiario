@@ -749,3 +749,22 @@ fn a_dispute_series_splits_by_the_instance_that_published_it() {
         &Value::Count(1)
     );
 }
+
+#[test]
+fn a_conversion_prefix_with_no_currency_after_it_names_none() {
+    assert_eq!(priced_in("volume.in.USD.total"), Some("USD".to_string()));
+    assert_eq!(priced_in("volume.in."), None, "nothing follows the prefix");
+    assert_eq!(
+        priced_in("volume.in.usd.total"),
+        None,
+        "not a published code"
+    );
+    assert_eq!(priced_in("volume.sats"), None);
+    assert_eq!(priced_in("orders.in.USD.total"), None, "another family");
+}
+
+#[test]
+fn measuring_a_metric_of_no_family_finds_nothing() {
+    assert_eq!(measure(&data(), window(), NOW, "nonsense.metric"), None);
+    assert!(measure(&data(), window(), NOW, "volume.sats").is_some());
+}

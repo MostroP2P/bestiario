@@ -754,6 +754,26 @@ second shape for the same figures. See
   uncovered, which is why those two are held to 100% separately rather than
   averaged into a single number that can hide them.
 
+  Both gates are `scripts/coverage.sh`. Three things there are decisions
+  rather than plumbing, and each of them is a way this gate has already
+  passed while seeing nothing.
+
+  The per-layer gate counts **lines no test executed**, not a per-file
+  percentage. llvm's own two readings disagree: its per-file summary calls
+  several files one or two lines short while its own `--show-missing-lines`
+  names none of them, and a gate on a number that points at no line can
+  only ever block. The percentage stays as the workspace-wide figure of the
+  95% gate, where it is a total rather than an accusation.
+
+  That count is taken **twice, by different code**, and any difference
+  fails: `scripts/uncovered.py` walks the JSON segments — carrying each
+  count across its span, since a segment marks where the count *changes*
+  rather than describing a line — and llvm's own list is read back and
+  compared against it. One implementation cannot catch its own blindness.
+
+  And a layer that matches no measured file fails the gate: a directory
+  that moved would otherwise read as fully covered.
+
 ## 13. Phases
 
 High-level ordering only. The PR-by-PR breakdown lives in
