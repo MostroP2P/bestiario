@@ -24,6 +24,7 @@ use crate::activity::{self, Order};
 use crate::dev_fees::{self, DevFeeData};
 use crate::disputes::{self, DisputeData};
 use crate::metric::{Metric, Value};
+use crate::rates::RateBook;
 use crate::volume;
 use crate::window::{Period, Window};
 
@@ -37,6 +38,37 @@ pub struct Data {
     /// inferred §6.6 rows out: they rest on an assumption, and a series
     /// asked for without one would plot a number nothing supports.
     pub dev_fee_pct: Option<Assumption>,
+    /// What to price the orders in, for the converted §6.2 rows. `None`
+    /// leaves them out, exactly as `stats volume` does without `--in`.
+    pub priced: Option<Priced>,
+}
+
+/// The rate snapshots to price orders from, and the currency to price them
+/// in — what `volume.in.<CODE>.…` is computed from.
+///
+/// Owned rather than borrowed like [`crate::volume::Conversion`], because
+/// [`Data`] is what a caller hands over and holding a borrow would make the
+/// book the caller's problem to keep alive across the whole series.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Priced {
+    pub book: RateBook,
+    pub code: String,
+}
+
+/// The currency a `volume.in.<CODE>.…` metric asks to be priced in.
+///
+/// The name carries it, so nothing else has to be told: a series of a
+/// converted figure knows which book to load from the metric it was asked
+/// for. `None` for every other metric, and for a code that is not one — the
+/// three uppercase letters an instance publishes.
+pub fn priced_in(metric: &str) -> Option<String> {
+    let code = metric
+        .strip_prefix(&format!("{}.in.", Family::Volume.prefix()))?
+        .split('.')
+        .next()?;
+
+    let canonical = code.len() == 3 && code.bytes().all(|byte| byte.is_ascii_uppercase());
+    canonical.then(|| code.to_string())
 }
 
 /// The `dev_fee_percentage` assumption, as `dev_fees::implied` needs it:
@@ -94,7 +126,23 @@ impl Family {
                 &activity::summarise(&data.orders, window, now),
             ),
             Self::Volume => {
-                volume::metrics(self.prefix(), &volume::summarise(&data.orders, window))
+                let mut metrics =
+                    volume::metrics(self.prefix(), &volume::summarise(&data.orders, window));
+                // §6.2's converted rows, on the same terms as `stats volume
+                // --in`: present when there is a book and a currency to
+                // price in, and inferred when they are.
+                if let Some(priced) = &data.priced {
+                    metrics.extend(volume::converted::metrics(
+                        self.prefix(),
+                        &volume::converted::convert(
+                            &data.orders,
+                            window,
+                            &priced.book,
+                            &priced.code,
+                        ),
+                    ));
+                }
+                metrics
             }
             Self::DevFees => {
                 let mut metrics =
@@ -165,10 +213,10 @@ pub enum SeriesError {
     CannotSplit { metric: String, split: Split },
 
     #[error(
-        "{buckets} buckets is more than the {MAX_BUCKETS} a series prints; \
+        "that range holds more than the {MAX_BUCKETS} buckets a series prints; \
          ask for a wider `--by` or a shorter range"
     )]
-    TooManyBuckets { buckets: usize },
+    TooManyBuckets,
 }
 
 /// How many buckets one series may have.
@@ -179,12 +227,20 @@ pub enum SeriesError {
 /// two years of days.
 pub const MAX_BUCKETS: usize = 800;
 
-/// Every metric that can be plotted against `data`, in family order.
+/// Every metric that can be plotted against `data` over `window`, in family
+/// order.
 ///
 /// Derived from what the families actually report over it, so it grows
 /// with them — and shrinks when an assumption this run does not have would
 /// be needed.
-pub fn catalogue(data: &Data, now: i64) -> Vec<String> {
+///
+/// Over `window` rather than over a fixed instant because half of these
+/// names are the data's, not the code's: `volume.fiat.ARS.total` exists
+/// because some order completed in ARS, and which currencies those are is a
+/// question only a real window can answer. A catalogue taken over the epoch
+/// would list the metrics every archive has and none of the ones this
+/// archive is actually about.
+pub fn catalogue(data: &Data, window: Window, now: i64) -> Vec<String> {
     [
         Family::Activity,
         Family::Volume,
@@ -192,7 +248,7 @@ pub fn catalogue(data: &Data, now: i64) -> Vec<String> {
         Family::Disputes,
     ]
     .into_iter()
-    .flat_map(|family| family.metrics(data, Window::new(0, 1), now))
+    .flat_map(|family| family.metrics(data, window, now))
     .map(|metric| metric.name)
     .filter(|name| plottable(name).is_ok())
     .collect()
@@ -214,14 +270,24 @@ fn plottable(name: &str) -> Result<(), SeriesError> {
     Ok(())
 }
 
-/// The value of `metric` over `window`, or `None` when no family reports
-/// a metric by that name.
-pub fn value(data: &Data, window: Window, now: i64, metric: &str) -> Option<Value> {
+/// `metric` over `window` as its family reports it — value *and*
+/// provenance — or `None` when no family reports a metric by that name.
+///
+/// The whole metric rather than its number, because a series has to say
+/// what a report says: `dev_fees.implied_volume` rests on an assumed fee
+/// share, and a bucket of it that came back as a bare figure would be
+/// printed without its `(inf)` marker and serialised as an observation.
+pub fn measure(data: &Data, window: Window, now: i64, metric: &str) -> Option<Metric> {
     Family::of(metric)?
         .metrics(data, window, now)
         .into_iter()
         .find(|candidate| candidate.name == metric)
-        .map(|candidate| candidate.value)
+}
+
+/// The value of `metric` over `window`, or `None` when no family reports
+/// a metric by that name.
+pub fn value(data: &Data, window: Window, now: i64, metric: &str) -> Option<Value> {
+    measure(data, window, now, metric).map(|candidate| candidate.value)
 }
 
 /// The change from `previous` to `current`.
@@ -241,6 +307,29 @@ pub fn delta(previous: &Value, current: &Value) -> Value {
         (Value::Ratio(_), Value::Ratio(_)) => Value::ratio(after - before),
         _ if before == 0.0 => Value::Missing,
         _ => Value::ratio((after - before) / before.abs()),
+    }
+}
+
+/// `value` under `name`, inferred when any of `sources` is — carrying the
+/// first qualification they give.
+///
+/// A figure derived from an estimate is an estimate: §5's `(inf)` marker is
+/// about where a number came from, and renaming one into a bucket does not
+/// turn an assumption into an observation.
+fn qualified_as<'a>(
+    name: String,
+    value: Value,
+    sources: impl IntoIterator<Item = Option<&'a Metric>>,
+) -> Metric {
+    let qualification = sources
+        .into_iter()
+        .flatten()
+        .filter(|source| source.is_inferred())
+        .find_map(|source| source.error());
+
+    match qualification {
+        Some(error) => Metric::inferred(name, value, error),
+        None => Metric::observed(name, value),
     }
 }
 
@@ -274,6 +363,10 @@ fn split_data(data: &Data, family: Family, split: Split) -> BTreeMap<String, Dat
                         key,
                         Data {
                             orders,
+                            // The book prices every slice, not the whole
+                            // alone: dropping it here would answer a split
+                            // series of a converted metric with nothing.
+                            priced: data.priced.clone(),
                             ..Data::default()
                         },
                     )
@@ -326,7 +419,11 @@ pub fn report(
     })?;
     plottable(metric)?;
     // A name with the right prefix that no family reports is still unknown.
-    if value(data, Window::new(0, 1), now, metric).is_none() {
+    // Asked of the window being plotted, because a name like
+    // `volume.fiat.ARS.total` exists only where an ARS order completed: over
+    // a fixed instant every per-currency and per-instance metric this
+    // archive has would be turned away as unknown.
+    if value(data, window, now, metric).is_none() {
         return Err(SeriesError::UnknownMetric {
             metric: metric.to_string(),
         });
@@ -340,26 +437,41 @@ pub fn report(
         });
     }
 
-    let buckets = window.buckets(period);
-    if buckets.len() > MAX_BUCKETS {
-        return Err(SeriesError::TooManyBuckets {
-            buckets: buckets.len(),
-        });
-    }
+    // Capped as it is built, not counted afterwards: the range is as wide
+    // as the caller typed, and building a hundred trillion buckets to find
+    // out there are too many is the thing the limit is for.
+    let buckets = window
+        .buckets_upto(period, MAX_BUCKETS)
+        .ok_or(SeriesError::TooManyBuckets)?;
 
+    // A bucket is the source metric with a new name, provenance included:
+    // an inferred figure stays inferred, carrying what qualifies it, and so
+    // does a Δ taken between two of them — a change between two estimates is
+    // an estimate. A bucket the family does not report at all is missing,
+    // and a missing figure is nobody's inference.
     let plot = |prefix: &str, data: &Data| {
         let mut metrics = Vec::new();
-        let mut previous: Option<Value> = None;
+        let mut previous: Option<Metric> = None;
         for (key, bucket) in &buckets {
-            let current = value(data, *bucket, now, metric).unwrap_or(Value::Missing);
-            metrics.push(Metric::observed(format!("{prefix}.{key}"), current.clone()));
-            metrics.push(Metric::observed(
-                format!("{prefix}.{key}.delta"),
-                previous
-                    .as_ref()
-                    .map_or(Value::Missing, |previous| delta(previous, &current)),
+            let found = measure(data, *bucket, now, metric);
+            let current = found
+                .as_ref()
+                .map_or(Value::Missing, |metric| metric.value.clone());
+            let change = previous
+                .as_ref()
+                .map_or(Value::Missing, |previous| delta(&previous.value, &current));
+
+            metrics.push(qualified_as(
+                format!("{prefix}.{key}"),
+                current,
+                [found.as_ref()],
             ));
-            previous = Some(current);
+            metrics.push(qualified_as(
+                format!("{prefix}.{key}.delta"),
+                change,
+                [found.as_ref(), previous.as_ref()],
+            ));
+            previous = found;
         }
         metrics
     };
