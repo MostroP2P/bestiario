@@ -8,11 +8,29 @@
 //!
 //! # Which orders are in a currency's market
 //!
-//! Those standing in it: `fiat_code` is the currency of an order's latest
-//! version, which is what §6.3 counts a currency's orders by. The filter is
-//! applied once, here, and both halves of the view then see exactly the
-//! same orders — a view whose pressure and whose time-to-fill were taken
-//! over different sets would be two answers under one heading.
+//! Two cohorts, each the one its family already uses, because a figure
+//! that disagrees with the family it is quoted from is worse than a figure
+//! that needs a sentence of explanation.
+//!
+//! Market structure (§6.3) counts the orders *standing* in the currency:
+//! `fiat_code`, the currency of an order's latest version, which is what
+//! `stats market --by fiat` counts a currency's orders by. Timing (§6.4)
+//! counts the orders that *entered the book* in the currency:
+//! `origin.fiat_code`, which is what `stats timing --by fiat` slices on,
+//! because a time-to-fill is measured from the book entry and an order
+//! amended from ARS to USD waited in ARS.
+//!
+//! The two coincide for every order that was never amended into another
+//! currency, which is nearly all of them.
+//!
+//! # Which window a figure is counted over
+//!
+//! The same two populations §6.3 uses, and for the same reason: the orders
+//! created in the window are the book, the orders that reached `success`
+//! in it are the trades. The instance ranking by orders is a book figure
+//! and the one by volume is a trades figure, so neither reports an
+//! instance that has been silent all window on the strength of its
+//! history.
 
 use crate::activity::Order;
 use crate::metric::{Metric, Value};
@@ -21,11 +39,21 @@ use crate::{timing, volume};
 
 use super::{Market, ranking};
 
-/// The orders standing in `fiat`'s market.
+/// The orders standing in `fiat`'s market: the currency of their latest
+/// version is `fiat`.
 pub fn orders_in<'a>(orders: &'a [Order], fiat: &str) -> Vec<&'a Order> {
     orders
         .iter()
         .filter(|order| order.fiat_code == fiat)
+        .collect()
+}
+
+/// The orders that entered the book in `fiat`, whatever they were amended
+/// to afterwards. The cohort `stats timing --by fiat` slices out.
+pub fn orders_from<'a>(orders: &'a [Order], fiat: &str) -> Vec<&'a Order> {
+    orders
+        .iter()
+        .filter(|order| order.origin.fiat_code == fiat)
         .collect()
 }
 
@@ -36,6 +64,7 @@ pub fn orders_in<'a>(orders: &'a [Order], fiat: &str) -> Vec<&'a Order> {
 /// nothing at all.
 pub fn report(orders: &[Order], fiat: &str, window: Window, now: i64) -> Vec<Metric> {
     let in_market: Vec<Order> = orders_in(orders, fiat).into_iter().cloned().collect();
+    let from_fiat: Vec<Order> = orders_from(orders, fiat).into_iter().cloned().collect();
     let prefix = format!("market.{fiat}");
     let observed = |name: &str, value: Value| Metric::observed(format!("{prefix}.{name}"), value);
 
@@ -45,7 +74,7 @@ pub fn report(orders: &[Order], fiat: &str, window: Window, now: i64) -> Vec<Met
 
     // §6.4, the half of it this view is for: how long the book takes to
     // find a taker. The rest of the lifecycle is `stats timing`.
-    let timing = timing::summarise(&in_market, window, now);
+    let timing = timing::summarise(&from_fiat, window, now);
     metrics.push(observed(
         "time_to_fill_samples",
         Value::Count(timing.time_to_fill_samples as i64),
@@ -58,9 +87,14 @@ pub fn report(orders: &[Order], fiat: &str, window: Window, now: i64) -> Vec<Met
     }
     metrics.push(observed("book_size", Value::Count(timing.book_size as i64)));
 
-    // Who trades it: by orders put on the book, and by sats settled.
+    // Who trades it: by orders put on the book in the window, and by sats
+    // settled in it.
     let instance = |order: &Order| vec![order.instance.clone()];
-    let by_orders = ranking::tally(in_market.iter(), instance, |_| 1);
+    let book: Vec<&Order> = in_market
+        .iter()
+        .filter(|order| window.contains(order.created_at))
+        .collect();
+    let by_orders = ranking::tally(book.into_iter(), instance, |_| 1);
     let by_volume = ranking::tally(
         volume::completed(&in_market, window)
             .collect::<Vec<_>>()

@@ -788,9 +788,13 @@ Everything the reports know about one currency, in one place: which way its
 book leans and at what premium, how it is priced, which payment methods it
 is offered over, how long an order takes to find a taker, and which
 instances trade it at all. The figures are the ones `stats market` and
-`stats timing` report, over the orders standing in that currency — a
-currency is what an order's latest version says it is — so nothing here can
-drift from the family it came from. Ranking currencies inside a single
+`stats timing` report, each over the cohort its own family uses, so nothing
+here can drift from where it is quoted from: the structure rows count the
+orders *standing* in the currency — a currency is what an order's latest
+version says it is — and the timing rows count the orders that *entered the
+book* in it, because a time-to-fill is measured from the book entry and an
+order amended from ARS to USD waited in ARS. The two differ only for an
+order amended into another currency. Ranking currencies inside a single
 currency would say nothing, so those rows are absent.
 
 ### Comparison
