@@ -80,6 +80,10 @@ pub struct Order {
     pub direction: Direction,
     pub fiat_code: String,
     pub payment_methods: Vec<String>,
+    /// From the latest version. Not a §6.1 figure, but what a share of the
+    /// network's volume (§6.5) and the summary's sats volume (§6.10) are
+    /// summed from; see [`crate::volume`].
+    pub amount_sats: i64,
     /// `created_at` of the first `in-progress` version — when a taker arrived.
     pub taken_at: Option<i64>,
     /// `created_at` of the first `success` version.

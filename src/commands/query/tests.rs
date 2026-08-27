@@ -5,6 +5,7 @@ use sqlx::SqlitePool;
 
 use super::*;
 use crate::cli::Cli;
+use crate::commands::Context;
 use crate::config::Settings;
 use crate::db::connect_and_migrate;
 
