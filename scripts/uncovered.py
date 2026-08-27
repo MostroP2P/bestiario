@@ -70,8 +70,9 @@ def uncovered_lines(entry: dict) -> list[int]:
 def llvm_missing(path: str) -> dict[str, list[int]]:
     """The `Uncovered Lines:` section of a `--show-missing-lines` run.
 
-    Every line of it reads `<absolute path>: 12, 34, 56`; anything before
-    the heading is the per-file table, which this does not read.
+    Every line of it reads `<absolute path>: 12, 34-36, 56`, where a run of
+    consecutive lines is abbreviated to a range. Anything before the
+    heading is the per-file table, which this does not read.
     """
     missing: dict[str, list[int]] = {}
     with open(path, encoding="utf-8") as handle:
@@ -83,7 +84,12 @@ def llvm_missing(path: str) -> dict[str, list[int]]:
             filename, separator, lines = row.partition(": ")
             if not separator or not filename.startswith("/"):
                 continue
-            missing[filename] = [int(line) for line in lines.replace(",", "").split()]
+
+            found: list[int] = []
+            for span in lines.replace(",", " ").split():
+                first, dash, last = span.partition("-")
+                found.extend(range(int(first), int(last) + 1) if dash else [int(first)])
+            missing[filename] = found
 
     return missing
 
