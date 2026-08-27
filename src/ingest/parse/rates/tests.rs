@@ -297,3 +297,29 @@ fn a_currency_code_that_is_not_three_uppercase_letters_is_an_error() {
         );
     }
 }
+
+#[test]
+fn a_clock_beyond_a_signed_second_count_is_rejected_rather_than_narrowed() {
+    // Arrange: a clock past `i64::MAX`, which `as i64` would wrap into a
+    // negative second and every later subtraction would overflow on.
+    let event = rates_event_signed_at(
+        r#"{"BTC":{"USD":50000.0}}"#,
+        &[("d", "mostro-rates")],
+        u64::MAX,
+    );
+
+    // Act
+    let error = parse(&event).expect_err("no such second");
+
+    // Assert
+    assert!(
+        matches!(
+            error,
+            ParseError::OutOfRange {
+                tag: "created_at",
+                ..
+            }
+        ),
+        "{error}"
+    );
+}

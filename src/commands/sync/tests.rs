@@ -240,3 +240,76 @@ fn free_port() -> u16 {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
     listener.local_addr().expect("addr").port()
 }
+
+#[test]
+fn the_primed_kinds_are_the_indexed_ones_that_carry_a_platform_tag() {
+    // The two lists are what the split is derived from, so a kind added to
+    // either has to land on exactly one side of it.
+    for kind in TAGGED_KINDS {
+        assert!(filters::INDEXED_KINDS.contains(&kind));
+        assert!(!UNTAGGED_KINDS.contains(&kind), "kind {kind} is untagged");
+    }
+    assert_eq!(
+        TAGGED_KINDS.len() + UNTAGGED_KINDS.len(),
+        filters::INDEXED_KINDS.len(),
+        "every indexed kind is on one side or the other"
+    );
+}
+
+async fn stored_relays(pool: &SqlitePool) -> i64 {
+    sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM relays")
+        .fetch_one(pool)
+        .await
+        .expect("count")
+}
+
+#[tokio::test]
+async fn a_stored_relay_list_replayed_ahead_of_its_orders_is_still_taken() {
+    // Arrange: one relay holding both an instance's order and its relay
+    // list, the list stamped *later* — so a replay newest-first offers the
+    // untagged kind before the proof that vouches for it. Nobody is listed
+    // and unknown instances are accepted, which is the configuration where
+    // step 4b has only the archive to go on.
+    let pool = migrated().await;
+    let relay = MockRelay::run().await.expect("start the local relay");
+    let order = for_relay(&load(38383, "canceled")); // created_at 1787740613
+    let list = for_relay(&load(10002, "typical")); //  created_at 1787740760
+    assert_eq!(
+        order.pubkey, list.pubkey,
+        "the same instance publishes both"
+    );
+    assert!(list.created_at > order.created_at, "the list is the newer");
+    relay.add_event(order).await.expect("seed the order");
+    relay.add_event(list).await.expect("seed the list");
+
+    let mut client = RelayClient::connect(&[relay.url().await.to_string()])
+        .await
+        .expect("connect");
+    let pipeline = pipeline(&pool);
+    let mut sync = Sync::new(&mut client, &pipeline, &pool);
+
+    // Act: stop as soon as the relay list has been recorded, which is what
+    // taking it means — the run is otherwise happy to follow forever.
+    let (stop, stopped) = tokio::sync::oneshot::channel();
+    let watcher = async {
+        while stored_relays(&pool).await == 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let _ = stop.send(());
+    };
+    let follower = sync.follow(async {
+        let _ = stopped.await;
+    });
+    let (counts, ()) = tokio::time::timeout(PATIENCE, async { tokio::join!(follower, watcher) })
+        .await
+        .expect("the relay list is taken and sync stops");
+
+    // Assert: the order vouched for the list, and both are in the archive.
+    counts.expect("follow");
+    assert_eq!(stored_events(&pool).await, 2);
+    assert_eq!(
+        stored_relays(&pool).await,
+        2,
+        "the two relays the list names"
+    );
+}

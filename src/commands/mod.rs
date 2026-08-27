@@ -16,6 +16,7 @@ pub mod order;
 pub mod query;
 pub mod range;
 pub mod rebuild;
+mod relays;
 pub mod stats;
 pub mod summary;
 pub mod sync;
@@ -63,7 +64,7 @@ async fn dispatch(context: &Context<'_>) -> Result<()> {
         Command::Instances => instances::list(context, now()).await,
         Command::Instance { instance } => instances::profile(context, instance, now()).await,
         Command::Compare => compare::run(context, now()).await,
-        Command::Series { .. } => not_yet("series", 41),
+        Command::Series { .. } => not_yet("series", 42),
         Command::Market { fiat } => market::run(context, fiat, now()).await,
         Command::Orders { order_id } => order::run(context, order_id, now()).await,
         Command::Rebuild { from_raw } => rebuild::run(context, *from_raw).await,
@@ -76,7 +77,9 @@ async fn dispatch(context: &Context<'_>) -> Result<()> {
             StatsCommand::Timing { by } => stats::timing::run(context, *by, now()).await,
             StatsCommand::DevFees { by } => stats::dev_fees::run(context, *by, now()).await,
             StatsCommand::Disputes { by } => stats::disputes::run(context, *by, now()).await,
-            StatsCommand::Rates { .. } => not_yet("stats rates", 39),
+            StatsCommand::Rates { fiat } => {
+                stats::rates::run(context, fiat.as_deref(), now()).await
+            }
         },
     }
 }
