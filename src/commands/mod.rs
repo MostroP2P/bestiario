@@ -9,7 +9,9 @@ use chrono::Utc;
 use sqlx::SqlitePool;
 
 pub mod backfill;
+pub mod compare;
 pub mod instances;
+pub mod order;
 pub mod query;
 pub mod range;
 pub mod rebuild;
@@ -61,10 +63,10 @@ async fn dispatch(context: &Context<'_>) -> Result<()> {
         Command::Instance { instance } => {
             instances::profile(context, instance, Utc::now().timestamp()).await
         }
-        Command::Compare => not_yet("compare", 29),
+        Command::Compare => compare::run(context, Utc::now().timestamp()).await,
         Command::Series { .. } => not_yet("series", 41),
         Command::Market { .. } => not_yet("market", 42),
-        Command::Orders { .. } => not_yet("orders", 29),
+        Command::Orders { order_id } => order::run(context, order_id, Utc::now().timestamp()).await,
         Command::Rebuild { from_raw } => rebuild::run(context, *from_raw).await,
         Command::Stats(stats) => match stats {
             StatsCommand::Orders { by } => {

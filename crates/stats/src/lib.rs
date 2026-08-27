@@ -30,9 +30,11 @@
 //! hand-computed expected value.
 
 pub mod activity;
+pub mod compare;
 pub mod dev_fees;
 pub mod disputes;
 pub mod instances;
+pub mod lifecycle;
 pub mod metric;
 pub mod percentile;
 pub mod summary;
