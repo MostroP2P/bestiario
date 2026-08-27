@@ -9,7 +9,10 @@
 //! query so a network's worth of orders is one round trip, not one per row.
 //! The fees carry the same lookup — at the order's settlement, or at the
 //! payment itself when the order is unseen — since the volume implied by a
-//! fee (§5) is the fee divided by the rate that produced it.
+//! fee (§5) is the fee divided by the rate that produced it. They also
+//! carry the amount of the order they name, but only once it reached
+//! `success`: §6.6 sets the implied volume beside the settled one, and an
+//! order that was canceled after a fee was paid is not volume.
 
 use sqlx::{Executor, QueryBuilder, Sqlite};
 
@@ -48,7 +51,8 @@ where
                       CASE WHEN o.final_status = 'success' THEN o.success_at END,
                       f.created_at)
                   ORDER BY ii.created_at DESC, ii.event_id ASC LIMIT 1) AS fee_in_force,
-                o.amount_sats AS order_amount_sats
+                CASE WHEN o.final_status = 'success' THEN o.amount_sats END
+                  AS settled_amount_sats
          FROM dev_fees f
          LEFT JOIN instances i ON i.pubkey = f.pubkey
          LEFT JOIN orders o ON o.order_id = f.order_id
@@ -106,7 +110,7 @@ struct FeeRow {
     order_known: i64,
     settled_at: Option<i64>,
     fee_in_force: Option<f64>,
-    order_amount_sats: Option<i64>,
+    settled_amount_sats: Option<i64>,
 }
 
 impl FeeRow {
@@ -122,7 +126,7 @@ impl FeeRow {
             order_known: self.order_known != 0,
             settled_at: self.settled_at,
             fee_in_force: self.fee_in_force,
-            order_amount_sats: self.order_amount_sats,
+            settled_amount_sats: self.settled_amount_sats,
         }
     }
 }

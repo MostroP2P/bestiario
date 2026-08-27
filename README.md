@@ -66,7 +66,7 @@ cp settings.toml.example settings.toml
 | Key | What it does |
 |---|---|
 | `[nostr].relays` | Relays to read from. `wss://relay.mostro.network` carries every instance. |
-| `[indexer].instances` | Pubkeys to follow, in hex. |
+| `[indexer].instances` | Pubkeys to follow, as hex or `npub1…`. |
 | `[indexer].accept_unknown_instances` | `true` to index every pubkey that publishes Mostro events, whether listed or not. Events from other platforms on the same relays (they exist) are turned away either way. |
 | `[indexer].networks` | Which networks count: `mainnet` alone by default. |
 | `[indexer].backfill_from` | How far back the first `backfill` reaches, as a unix timestamp. |
@@ -80,7 +80,7 @@ an error naming the key rather than a report with a hole in it.
 
 ```console
 $ bestiario backfill
-backfill: 22 stored, 5 already known, 3 rejected
+backfill: 21 stored, 4 already known, 5 rejected
 ```
 
 `backfill` walks each relay's history backwards, from now down to
@@ -90,6 +90,12 @@ away, and it is safe to run again: nothing is written twice. Relays keep
 dev fees for about a year and orders for about a fortnight, so on a fresh
 archive expect fees for orders you will never see; the reports call those
 *orphans*.
+
+Every report needs this step: over a database that holds no events yet,
+a report refuses to run and says so, rather than printing a table of
+zeros that reads like an answer. The database path in `settings.toml` is
+relative to the directory you run from, so a backfill and a report have
+to be run from the same place.
 
 To keep the archive current afterwards:
 
@@ -309,32 +315,32 @@ are left out of the sum:
 ```console
 $ bestiario stats volume --in USD --from 2026-08-23 --until 2026-08-27
 2026-08-23T00:00:00+00:00 — 2026-08-27T00:00:00+00:00
-┌───────────────────────────────────┬────────────┬───────────────────────────────────────────────────────────────────────────────┐
-│ metric                            ┆ value      ┆ error                                                                         │
-╞═══════════════════════════════════╪════════════╪═══════════════════════════════════════════════════════════════════════════════╡
-│ volume.sats                       ┆ 1361 sats  ┆                                                                               │
-│ volume.completed                  ┆ 1          ┆                                                                               │
-│ volume.ticket_avg                 ┆ 1361 sats  ┆                                                                               │
-│ volume.ticket_p50                 ┆ 1361 sats  ┆                                                                               │
-│ volume.ticket_p90                 ┆ 1361 sats  ┆                                                                               │
-│ volume.largest                    ┆ 1361 sats  ┆                                                                               │
-│ volume.size.lt_10k                ┆ 1          ┆                                                                               │
-│ volume.size.10k_50k               ┆ 0          ┆                                                                               │
-│ volume.size.50k_200k              ┆ 0          ┆                                                                               │
-│ volume.size.200k_1m               ┆ 0          ┆                                                                               │
-│ volume.size.gt_1m                 ┆ 0          ┆                                                                               │
-│ volume.buy_sats                   ┆ 0 sats     ┆                                                                               │
-│ volume.sell_sats                  ┆ 1361 sats  ┆                                                                               │
-│ volume.fiat.CUP.total             ┆ 800.00 CUP ┆                                                                               │
-│ volume.fiat.CUP.orders            ┆ 1          ┆                                                                               │
-│ volume.fiat.CUP.ticket_avg        ┆ 800.00 CUP ┆                                                                               │
-│ volume.fiat.CUP.ticket_p50        ┆ 800.00 CUP ┆                                                                               │
-│ volume.fiat.CUP.ticket_p90        ┆ 800.00 CUP ┆                                                                               │
-│ volume.in.USD.total (inf)         ┆ —          ┆ no rate used; 1 unpriced (1361 sats excluded)                                 │
-│ volume.in.USD.orders (inf)        ┆ 0          ┆ orders with a rate published at or before success_at                          │
-│ volume.in.USD.unpriced_sats (inf) ┆ 1361 sats  ┆ sats of the orders no instance had a rate for by success_at; not in the total │
-│ volume.in.USD.rate_age_max (inf)  ┆ —          ┆ age of the oldest snapshot used                                               │
-└───────────────────────────────────┴────────────┴───────────────────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────┬────────────┬────────────────────────────────────────────────────────────────────────┐
+│ metric                            ┆ value      ┆ error                                                                  │
+╞═══════════════════════════════════╪════════════╪════════════════════════════════════════════════════════════════════════╡
+│ volume.sats                       ┆ 1361 sats  ┆                                                                        │
+│ volume.completed                  ┆ 1          ┆                                                                        │
+│ volume.ticket_avg                 ┆ 1361 sats  ┆                                                                        │
+│ volume.ticket_p50                 ┆ 1361 sats  ┆                                                                        │
+│ volume.ticket_p90                 ┆ 1361 sats  ┆                                                                        │
+│ volume.largest                    ┆ 1361 sats  ┆                                                                        │
+│ volume.size.lt_10k                ┆ 1          ┆                                                                        │
+│ volume.size.10k_50k               ┆ 0          ┆                                                                        │
+│ volume.size.50k_200k              ┆ 0          ┆                                                                        │
+│ volume.size.200k_1m               ┆ 0          ┆                                                                        │
+│ volume.size.gt_1m                 ┆ 0          ┆                                                                        │
+│ volume.buy_sats                   ┆ 0 sats     ┆                                                                        │
+│ volume.sell_sats                  ┆ 1361 sats  ┆                                                                        │
+│ volume.fiat.CUP.total             ┆ 800.00 CUP ┆                                                                        │
+│ volume.fiat.CUP.orders            ┆ 1          ┆                                                                        │
+│ volume.fiat.CUP.ticket_avg        ┆ 800.00 CUP ┆                                                                        │
+│ volume.fiat.CUP.ticket_p50        ┆ 800.00 CUP ┆                                                                        │
+│ volume.fiat.CUP.ticket_p90        ┆ 800.00 CUP ┆                                                                        │
+│ volume.in.USD.total (inf)         ┆ —          ┆ no rate used; 1 with no usable rate within 300s (1361 sats excluded)   │
+│ volume.in.USD.orders (inf)        ┆ 0          ┆ orders with a rate published at or before success_at                   │
+│ volume.in.USD.unpriced_sats (inf) ┆ 1361 sats  ┆ sats of the orders with no usable rate at success_at; not in the total │
+│ volume.in.USD.rate_age_max (inf)  ┆ —          ┆ age of the oldest snapshot used                                        │
+└───────────────────────────────────┴────────────┴────────────────────────────────────────────────────────────────────────┘
 ```
 
 Here the one completed order settled hours before the first rate snapshot
@@ -392,20 +398,20 @@ says nothing about one currency.
 ```console
 $ bestiario stats dev-fees --from 2026-08-23 --until 2026-08-27
 2026-08-23T00:00:00+00:00 — 2026-08-27T00:00:00+00:00
-┌────────────────────────────────────┬──────────┬──────────────────────────────────────────────────────────┐
-│ metric                             ┆ value    ┆ error                                                    │
-╞════════════════════════════════════╪══════════╪══════════════════════════════════════════════════════════╡
-│ dev_fees.total_sats                ┆ 117 sats ┆                                                          │
-│ dev_fees.paid                      ┆ 2        ┆                                                          │
-│ dev_fees.coverage                  ┆ —        ┆                                                          │
-│ dev_fees.latency_p50               ┆ —        ┆                                                          │
-│ dev_fees.latency_p90               ┆ —        ┆                                                          │
-│ dev_fees.duplicates                ┆ 0        ┆                                                          │
-│ dev_fees.orphans                   ┆ 2        ┆                                                          │
-│ dev_fees.implied_volume (inf)      ┆ —        ┆ no fee inverted; 2 fees not invertible (no fee in force) │
-│ dev_fees.with_fee_volume           ┆ 0 sats   ┆                                                          │
-│ dev_fees.implied_vs_observed (inf) ┆ —        ┆ no inverted fee names a known order                      │
-└────────────────────────────────────┴──────────┴──────────────────────────────────────────────────────────┘
+┌────────────────────────────────────┬──────────┬──────────────────────────────────────────────┐
+│ metric                             ┆ value    ┆ error                                        │
+╞════════════════════════════════════╪══════════╪══════════════════════════════════════════════╡
+│ dev_fees.total_sats                ┆ 117 sats ┆                                              │
+│ dev_fees.paid                      ┆ 2        ┆                                              │
+│ dev_fees.coverage                  ┆ —        ┆                                              │
+│ dev_fees.latency_p50               ┆ —        ┆                                              │
+│ dev_fees.latency_p90               ┆ —        ┆                                              │
+│ dev_fees.duplicates                ┆ 0        ┆                                              │
+│ dev_fees.orphans                   ┆ 2        ┆                                              │
+│ dev_fees.implied_volume (inf)      ┆ —        ┆ no fee inverted; 2 fees with no fee in force │
+│ dev_fees.with_fee_volume           ┆ —        ┆                                              │
+│ dev_fees.implied_vs_observed (inf) ┆ —        ┆ no fee names a settled order                 │
+└────────────────────────────────────┴──────────┴──────────────────────────────────────────────┘
 ```
 
 An order paid for twice — a known daemon bug — counts once towards the
@@ -421,12 +427,34 @@ having. It is inferred twice over, and the `error` column says how: one
 sat of rounding on a fee is `1 ÷ (fee × pct)` sats of volume, and `pct` —
 the share of its fee an instance forwards — is not published by anyone, so
 it is the `[assumptions]` of `settings.toml` (`0.30`, the daemon default,
-unless overridden per instance). `with_fee_volume` is the observed sats of
-the orders that are still known, and `implied_vs_observed` is
-`implied ÷ observed − 1` over those same orders: a positive figure means
-the instance forwards more than assumed. Here every fee names an order the
-relays no longer have and the instance's fee at the time is unknown, so
-nothing can be inverted and the rows say so.
+unless overridden per instance).
+
+A third qualification outweighs both in a backfill: a fee whose instance
+never published a `fee` the projection still has cannot be inverted at
+all. Those fees are not in the sum and no rounding bound covers them, so
+whenever there is one the `error` column says `lower bound: n of m fees
+inverted` and the figure is to be read as the floor it is.
+
+`with_fee_volume` is the observed side: `∑ amount_sats` of the orders that
+a fee names **and** that reached `success` — a fee paid against an order
+the relays no longer have, or one that was later canceled, has no observed
+volume to show, and the row is `—` rather than `0` when none of them does.
+It is observed in the strict sense: it does not move with what could be
+inverted. `implied_vs_observed` is `implied ÷ observed − 1` over the
+intersection — the fees that were inverted *and* name a settled order of a
+positive amount — so a positive figure means the instance forwards more
+than assumed. Orders still known at `amt = 0` (market price, never
+amended: SPEC §3) are out of the ratio, which would otherwise divide by
+nothing, and the column says how many.
+
+The two sides are dated differently on purpose: a fee counts in the window
+its own event falls in, while the order it names may have settled in the
+previous one. `with_fee_volume` for a month is therefore not the same set
+as `volume.total` for that month, and the two are not meant to reconcile.
+
+Here every fee names an order the relays no longer have and the instance's
+fee at the time is unknown, so nothing can be inverted and the rows say
+so.
 
 ### Disputes
 
@@ -668,7 +696,7 @@ segment (`orders.ARS.created`), so a consumer can split on the dot.
 
 ```console
 $ bestiario rebuild
-rebuild: 22 events replayed (0 unreadable), 8 orders and 5 disputes projected
+rebuild: 21 events replayed (0 unreadable), 8 orders and 5 disputes projected
 ```
 
 Every table except the raw event archive is derived from it. `rebuild`

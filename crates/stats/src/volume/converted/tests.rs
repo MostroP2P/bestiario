@@ -72,11 +72,11 @@ fn the_total_is_each_order_at_the_rate_its_instance_knew_when_it_settled() {
     let converted = convert(&priced(), WINDOW, &book(), "USD");
 
     // Assert
-    assert_eq!(converted.total, 2.5 + 15.0 + 75.0 + 1_000.0);
+    assert_eq!(converted.total, Some(2.5 + 15.0 + 75.0 + 1_000.0));
     assert_eq!(converted.priced, 4);
     assert_eq!(converted.unpriced, 0);
-    assert_eq!(converted.unpriced_sats, 0);
-    assert_eq!(converted.fallbacks, 0);
+    assert_eq!(converted.unpriced_sats, Some(0));
+    assert_eq!(converted.fallbacks(), 0);
 }
 
 #[test]
@@ -101,7 +101,7 @@ fn only_the_orders_completed_in_the_window_are_converted() {
     let converted = convert(&orders, WINDOW, &book(), "USD");
 
     assert_eq!(converted.priced, 4);
-    assert_eq!(converted.total, 1_092.5);
+    assert_eq!(converted.total, Some(1_092.5));
 }
 
 #[test]
@@ -111,8 +111,8 @@ fn an_order_priced_on_another_instance_s_snapshot_is_counted_as_a_fallback() {
 
     let converted = convert(&orders, WINDOW, &book(), "USD");
 
-    assert_eq!(converted.total, 51.0);
-    assert_eq!(converted.fallbacks, 1);
+    assert_eq!(converted.total, Some(51.0));
+    assert_eq!(converted.fallbacks(), 1);
     assert_eq!(converted.rate_age_max_secs, Some(100));
 }
 
@@ -126,10 +126,10 @@ fn an_order_settled_before_any_rate_is_excluded_and_its_sats_reported() {
 
     let converted = convert(&orders, WINDOW, &book, "USD");
 
-    assert_eq!(converted.total, 2.5);
+    assert_eq!(converted.total, Some(2.5));
     assert_eq!(converted.priced, 1);
     assert_eq!(converted.unpriced, 1);
-    assert_eq!(converted.unpriced_sats, 7_000);
+    assert_eq!(converted.unpriced_sats, Some(7_000));
 }
 
 #[test]
@@ -138,7 +138,7 @@ fn a_currency_nobody_quotes_leaves_everything_unpriced() {
 
     assert_eq!(converted.priced, 0);
     assert_eq!(converted.unpriced, 4);
-    assert_eq!(converted.unpriced_sats, 2_185_000);
+    assert_eq!(converted.unpriced_sats, Some(2_185_000));
     assert_eq!(converted.rate_age_max_secs, None);
 }
 
@@ -198,7 +198,7 @@ fn fallbacks_and_unpriced_orders_are_named_in_the_error_of_the_total() {
     let error = metrics[0].error().expect("error");
 
     assert!(error.contains("1 at another instance's rate"), "{error}");
-    assert!(error.contains("1 unpriced"), "{error}");
+    assert!(error.contains("1 with no usable rate"), "{error}");
 }
 
 #[test]
@@ -215,4 +215,127 @@ fn everything_unpriced_is_a_missing_total_not_a_zero() {
 
     assert_eq!(metrics[0].value, Value::Missing);
     assert_eq!(metrics[2].value, Value::Sats(2_185_000));
+}
+
+/// A price so large that a big order overflows the conversion: `f64::MAX`
+/// times anything above one is infinite.
+#[test]
+fn an_order_whose_conversion_is_not_finite_is_a_numeric_failure_not_a_price() {
+    // Arrange
+    let book = RateBook::new(vec![snapshot("alpha", 1_000, f64::MAX)]);
+    let orders = vec![order("huge", "alpha", 1_100, i64::MAX)];
+
+    // Act
+    let converted = convert(&orders, WINDOW, &book, "USD");
+
+    // Assert: it is not priced, and it is not silently absent either.
+    assert_eq!(converted.priced, 0);
+    assert_eq!(converted.unusable, 1);
+    assert_eq!(converted.unusable_sats, Some(i64::MAX));
+    assert_eq!(converted.total, Some(0.0), "nothing was added to the sum");
+}
+
+#[test]
+fn a_numeric_failure_is_named_in_the_qualification() {
+    let book = RateBook::new(vec![snapshot("alpha", 1_000, f64::MAX)]);
+    let orders = vec![order("huge", "alpha", 1_100, i64::MAX)];
+
+    let metrics = metrics("volume", &convert(&orders, WINDOW, &book, "USD"));
+    let total = &metrics[0];
+
+    assert_eq!(total.value, Value::Missing);
+    assert!(
+        total.error().unwrap_or_default().contains("1 unusable"),
+        "{:?}",
+        total.error()
+    );
+}
+
+#[test]
+fn a_total_that_stops_being_finite_while_summing_is_reported_as_missing() {
+    // Two orders each convertible on their own, whose sum is not.
+    let book = RateBook::new(vec![snapshot("alpha", 1_000, 1e308)]);
+    let orders = vec![
+        order("a", "alpha", 1_100, 100_000_000),
+        order("b", "alpha", 1_200, 100_000_000),
+    ];
+
+    let converted = convert(&orders, WINDOW, &book, "USD");
+
+    assert_eq!(converted.priced, 2);
+    assert_eq!(converted.total_of_priced(), None, "the sum left f64");
+    assert_eq!(metrics("volume", &converted)[0].value, Value::Missing);
+}
+
+#[test]
+fn excluded_sats_beyond_i64_are_reported_as_missing_rather_than_wrapped() {
+    // No rate at all, so both orders are excluded and their sats add up to
+    // more than i64 can hold.
+    let book = RateBook::new(vec![]);
+    let orders = vec![
+        order("a", "alpha", 1_100, i64::MAX - 1),
+        order("b", "alpha", 1_200, 2),
+    ];
+
+    let converted = convert(&orders, WINDOW, &book, "USD");
+
+    assert_eq!(converted.unpriced, 2);
+    assert_eq!(converted.unpriced_sats, None);
+    let unpriced = &metrics("volume", &converted)[2];
+    assert_eq!(unpriced.value, Value::Missing);
+}
+
+#[test]
+fn every_instance_whose_rate_was_borrowed_is_named() {
+    // Arrange: two orders of an instance that never published, priced from
+    // two different publishers. A bare count would hide that the figure
+    // mixes sources.
+    let book = RateBook::new(vec![
+        snapshot("aaaaaaaa1111", 1_000, 50_000.0),
+        snapshot("bbbbbbbb2222", 1_500, 60_000.0),
+    ]);
+    let orders = vec![
+        order("a", "silent", 1_100, 100_000_000),
+        order("b", "silent", 1_600, 100_000_000),
+    ];
+
+    // Act
+    let converted = convert(&orders, WINDOW, &book, "USD");
+    let qualification = metrics("volume", &converted)[0]
+        .error()
+        .unwrap_or_default()
+        .to_string();
+
+    // Assert
+    assert_eq!(converted.fallbacks(), 2);
+    assert_eq!(
+        converted.fallback_sources(),
+        vec![
+            ("aaaaaaaa1111".to_string(), 1, 100_000_000),
+            ("bbbbbbbb2222".to_string(), 1, 100_000_000),
+        ]
+    );
+    assert!(qualification.contains("aaaaaaaa"), "{qualification}");
+    assert!(qualification.contains("bbbbbbbb"), "{qualification}");
+}
+
+#[test]
+fn an_order_whose_only_quotes_are_stale_is_not_described_as_never_quoted() {
+    // A snapshot exists for the currency, just too old to price with. The
+    // reader has to be able to tell a dead feed from an unquoted currency.
+    let book = RateBook::new(vec![snapshot("alpha", 1_000, 50_000.0)]);
+    let orders = vec![order("late", "alpha", 1_900, 5_000)];
+
+    let converted = convert(&orders, WINDOW, &book, "USD");
+    let qualification = metrics("volume", &converted)[0]
+        .error()
+        .unwrap_or_default()
+        .to_string();
+
+    assert_eq!(converted.unpriced, 1);
+    assert!(
+        !qualification.contains("no instance had a rate"),
+        "{qualification}"
+    );
+    assert!(qualification.contains("no usable rate"), "{qualification}");
 }

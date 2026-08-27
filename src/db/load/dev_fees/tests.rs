@@ -134,7 +134,7 @@ async fn a_fee_carries_what_the_projection_knows_about_its_order() {
                 order_known: true,
                 settled_at: Some(T0),
                 fee_in_force: None,
-                order_amount_sats: Some(21_000),
+                settled_amount_sats: Some(21_000),
             },
             Fee {
                 event_id: "f2".into(),
@@ -147,7 +147,7 @@ async fn a_fee_carries_what_the_projection_knows_about_its_order() {
                 order_known: false,
                 settled_at: None,
                 fee_in_force: None,
-                order_amount_sats: None,
+                settled_amount_sats: None,
             },
         ]
     );
@@ -270,4 +270,23 @@ async fn a_fee_carries_the_fee_in_force_when_its_order_settled_or_when_it_was_pa
     // Assert
     assert_eq!(data.fees[0].fee_in_force, Some(0.006));
     assert_eq!(data.fees[1].fee_in_force, Some(0.01));
+}
+
+#[tokio::test]
+async fn a_fee_against_an_order_that_never_settled_carries_no_observed_amount() {
+    // Arrange: SPEC §6.6 sets the implied volume beside the `success` one,
+    // so an order canceled after its fee was paid has nothing to compare.
+    let pool = migrated().await;
+    order(&pool, "settled", ALPHA, T0, Status::Success).await;
+    order(&pool, "canceled", ALPHA, T0, Status::Canceled).await;
+    fee(&pool, "f1", "settled", ALPHA, T0 + 60).await;
+    fee(&pool, "f2", "canceled", ALPHA, T0 + 120).await;
+
+    // Act
+    let data = load(&pool, &mainnet()).await.expect("load");
+
+    // Assert: both orders are known; only the settled one has an amount.
+    assert!(data.fees.iter().all(|fee| fee.order_known));
+    assert_eq!(data.fees[0].settled_amount_sats, Some(21_000));
+    assert_eq!(data.fees[1].settled_amount_sats, None);
 }

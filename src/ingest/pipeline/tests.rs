@@ -404,12 +404,14 @@ async fn a_duplicate_from_a_second_relay_advances_that_relay_s_cursor() {
 
 #[tokio::test]
 async fn a_rate_snapshot_is_stored_in_the_rates_table() {
-    // Arrange
+    // Arrange: rates are taken only from a listed publisher, so the fixture's
+    // own key is what this policy names.
     let pool = migrated().await;
     let event = load(30078, "typical");
+    let policy = Policy::new([event.pubkey.to_hex()], true, [Network::Mainnet]);
 
     // Act
-    let outcome = pipeline(&pool, open_policy())
+    let outcome = pipeline(&pool, policy)
         .ingest(&event, RELAY, NOW)
         .await
         .expect("ingest");
@@ -420,4 +422,137 @@ async fn a_rate_snapshot_is_stored_in_the_rates_table() {
     assert_eq!(snapshots.len(), 1);
     assert_eq!(snapshots[0].event_id, event.id.to_hex());
     assert!(snapshots[0].rates.contains_key("USD"));
+}
+
+/// A rate snapshot signed by `keys`, with both clocks on the same second.
+fn rate_snapshot(keys: &Keys) -> Event {
+    EventBuilder::new(
+        Kind::from_u16(parse::rates::KIND),
+        r#"{"BTC":{"USD":50000.0}}"#,
+    )
+    .tags([
+        Tag::parse(["d", "mostro-rates"]).expect("tag"),
+        Tag::parse(["published_at", &NOW.to_string()]).expect("tag"),
+        Tag::parse(["source", "yadio"]).expect("tag"),
+    ])
+    .custom_created_at(nostr_sdk::prelude::Timestamp::from_secs(NOW as u64))
+    .finalize(keys)
+    .expect("signing")
+}
+
+const RATES: &str = "SELECT COUNT(*) FROM rates";
+
+#[tokio::test]
+async fn a_rate_snapshot_from_an_unvouched_key_is_refused_even_in_unknown_instance_mode() {
+    // Arrange: 30078 carries no `y` tag, so the platform filter that makes
+    // `accept_unknown_instances` safe for the other kinds cannot vouch for
+    // it. An accepted snapshot would set the price every converted figure of
+    // phase 3 is multiplied by, so a key that has published nothing
+    // recognisably Mostro is turned away.
+    let pool = migrated().await;
+    let pipeline = pipeline(&pool, open_policy());
+    let event = rate_snapshot(&Keys::generate());
+
+    // Act
+    let outcome = pipeline.ingest(&event, RELAY, NOW).await.expect("ingest");
+
+    // Assert
+    assert!(
+        matches!(
+            outcome,
+            IngestOutcome::Rejected(Rejection::UnvouchedPublisher { .. })
+        ),
+        "{outcome:?}"
+    );
+    assert_eq!(count(&pool, EVENTS).await, 0);
+    assert_eq!(count(&pool, RATES).await, 0);
+    assert_eq!(count(&pool, INSTANCES).await, 0);
+}
+
+#[tokio::test]
+async fn a_rate_snapshot_from_a_configured_instance_is_stored() {
+    let pool = migrated().await;
+    let keys = Keys::generate();
+    let policy = Policy::new([keys.public_key().to_hex()], true, [Network::Mainnet]);
+    let pipeline = pipeline(&pool, policy);
+
+    let outcome = pipeline
+        .ingest(&rate_snapshot(&keys), RELAY, NOW)
+        .await
+        .expect("ingest");
+
+    assert_eq!(outcome, IngestOutcome::Stored);
+    assert_eq!(count(&pool, RATES).await, 1);
+}
+
+#[tokio::test]
+async fn a_rate_snapshot_is_taken_from_a_key_that_has_published_a_mostro_event() {
+    // Arrange: unknown-instance mode is meant to discover instances, so a
+    // publisher that has already been seen behind a `y = mostro` event is
+    // vouched for by that event rather than by the operator's file.
+    let pool = migrated().await;
+    let pipeline = pipeline(&pool, open_policy());
+    let keys = Keys::generate();
+    let order = EventBuilder::new(Kind::from_u16(parse::order::KIND), "")
+        .tags(
+            load(38383, "pending_range")
+                .tags
+                .iter()
+                .filter(|tag| tag.as_slice().first().map(String::as_str) != Some("d"))
+                .cloned()
+                .chain([Tag::parse(["d", "3b7e4a2c-5f61-4d0e-9c8a-1f2e3d4c5b6a"]).expect("tag")]),
+        )
+        .custom_created_at(nostr_sdk::prelude::Timestamp::from_secs(NOW as u64))
+        .finalize(&keys)
+        .expect("signing");
+
+    // Act
+    let admitted = pipeline.ingest(&order, RELAY, NOW).await.expect("order");
+    let outcome = pipeline
+        .ingest(&rate_snapshot(&keys), RELAY, NOW)
+        .await
+        .expect("rates");
+
+    // Assert
+    assert_eq!(admitted, IngestOutcome::Stored, "the vouching order");
+    assert_eq!(outcome, IngestOutcome::Stored);
+    assert_eq!(count(&pool, RATES).await, 1);
+}
+
+#[tokio::test]
+async fn an_instance_row_from_a_rate_snapshot_does_not_vouch_for_the_next_one() {
+    // The `instances` table grows from every indexed kind, so were it the
+    // proof, the first snapshot of an unknown key would let in the second.
+    let pool = migrated().await;
+    let keys = Keys::generate();
+    let listed = Policy::new([keys.public_key().to_hex()], true, [Network::Mainnet]);
+    pipeline(&pool, listed)
+        .ingest(&rate_snapshot(&keys), RELAY, NOW)
+        .await
+        .expect("first");
+    assert_eq!(count(&pool, INSTANCES).await, 1, "the row now exists");
+
+    // Act: the same key, now unlisted.
+    let event = EventBuilder::new(Kind::from_u16(parse::rates::KIND), r#"{"BTC":{"USD":1.0}}"#)
+        .tags([
+            Tag::parse(["d", "mostro-rates"]).expect("tag"),
+            Tag::parse(["published_at", &(NOW + 1).to_string()]).expect("tag"),
+        ])
+        .custom_created_at(nostr_sdk::prelude::Timestamp::from_secs((NOW + 1) as u64))
+        .finalize(&keys)
+        .expect("signing");
+    let outcome = pipeline(&pool, open_policy())
+        .ingest(&event, RELAY, NOW)
+        .await
+        .expect("second");
+
+    // Assert
+    assert!(
+        matches!(
+            outcome,
+            IngestOutcome::Rejected(Rejection::UnvouchedPublisher { .. })
+        ),
+        "{outcome:?}"
+    );
+    assert_eq!(count(&pool, RATES).await, 1, "no second snapshot");
 }

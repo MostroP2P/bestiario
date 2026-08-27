@@ -45,9 +45,12 @@ pub struct Fee {
     /// orphan, when the fee was paid. What [`implied`] divides by; `None`
     /// when no kind 38385 in force said.
     pub fee_in_force: Option<f64>,
-    /// `amount_sats` of the order, when it is known: the observed figure
-    /// the implied one is set beside.
-    pub order_amount_sats: Option<i64>,
+    /// `amount_sats` of the order, when it is known **and** reached
+    /// `success`: the observed figure the implied one is set beside
+    /// (`docs/SPEC.md` §6.6 counts the settled ones). `None` for an order
+    /// the relays no longer have, and for one that never settled — a fee
+    /// against a canceled order says nothing about volume.
+    pub settled_amount_sats: Option<i64>,
 }
 
 /// One completed order, seen from the coverage side.
