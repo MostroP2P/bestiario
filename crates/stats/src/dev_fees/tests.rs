@@ -127,7 +127,10 @@ fn coverage_counts_only_the_settlements_that_owed_a_fee() {
 }
 
 #[test]
-fn an_instance_that_never_published_a_fee_is_assumed_to_charge_one() {
+fn an_instance_whose_fee_policy_is_unknown_is_left_out_of_coverage() {
+    // Whether it owed a fee is not observable, and coverage is an observed
+    // figure: guessing would understate it during a backfill that has not
+    // yet reached the instance's 38385.
     let data = DevFeeData {
         fees: Vec::new(),
         settlements: vec![Settlement {
@@ -136,7 +139,27 @@ fn an_instance_that_never_published_a_fee_is_assumed_to_charge_one() {
         }],
     };
 
-    assert_eq!(summarise(&data, WINDOW).coverage, Some(0.0));
+    assert_eq!(summarise(&data, WINDOW).coverage, None);
+}
+
+#[test]
+fn coverage_counts_a_settlement_only_when_its_instance_is_known_to_charge() {
+    let data = DevFeeData {
+        fees: Vec::new(),
+        settlements: vec![
+            settlement("known", 1_500, true),
+            Settlement {
+                charges_fee: None,
+                ..settlement("unknown", 1_600, false)
+            },
+            Settlement {
+                charges_fee: Some(false),
+                ..settlement("free", 1_700, false)
+            },
+        ],
+    };
+
+    assert_eq!(summarise(&data, WINDOW).coverage, Some(1.0));
 }
 
 #[test]
