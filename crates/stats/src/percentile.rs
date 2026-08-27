@@ -18,17 +18,16 @@ pub fn percentile<T: Copy + PartialOrd>(samples: &[T], p: f64) -> Option<T> {
         return None;
     }
 
-    let mut sorted = samples.to_vec();
-    let mut ordered = true;
-    sorted.sort_by(|a, b| {
-        a.partial_cmp(b).unwrap_or_else(|| {
-            ordered = false;
-            std::cmp::Ordering::Equal
-        })
-    });
-    if !ordered {
+    // A sample that does not compare to itself (a NaN) has no rank.
+    if samples
+        .iter()
+        .any(|sample| sample.partial_cmp(sample).is_none())
+    {
         return None;
     }
+
+    let mut sorted = samples.to_vec();
+    sorted.sort_by(|a, b| a.partial_cmp(b).expect("every sample compares"));
 
     // Nearest rank: the smallest index k such that at least p of the
     // samples are at or below sorted[k]. `ceil(p × n)`, one-based, clamped

@@ -177,7 +177,16 @@ fn an_empty_window_is_zero_volume_with_no_tickets() {
     assert_eq!(volume.ticket_avg, None);
     assert_eq!(volume.largest, None);
     assert!(volume.fiat.is_empty());
-    assert_eq!(volume, Volume::default());
+    assert_eq!(
+        volume,
+        Volume {
+            sats: Some(0),
+            buy_sats: Some(0),
+            sell_sats: Some(0),
+            ..Volume::default()
+        },
+        "nothing completed is zero volume, not an absent one"
+    );
 }
 
 #[test]
