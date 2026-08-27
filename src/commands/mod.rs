@@ -56,34 +56,40 @@ pub async fn run(cli: &Cli) -> Result<()> {
 
 async fn dispatch(context: &Context<'_>) -> Result<()> {
     match &context.cli.command {
-        Command::Backfill { kind } => backfill::run(context, *kind, Utc::now().timestamp()).await,
+        Command::Backfill { kind } => backfill::run(context, *kind, now()).await,
         Command::Sync => sync::run(context).await,
-        Command::Summary => summary::run(context, Utc::now().timestamp()).await,
-        Command::Instances => instances::list(context, Utc::now().timestamp()).await,
-        Command::Instance { instance } => {
-            instances::profile(context, instance, Utc::now().timestamp()).await
-        }
-        Command::Compare => compare::run(context, Utc::now().timestamp()).await,
+        Command::Summary => summary::run(context, now()).await,
+        Command::Instances => instances::list(context, now()).await,
+        Command::Instance { instance } => instances::profile(context, instance, now()).await,
+        Command::Compare => compare::run(context, now()).await,
         Command::Series { .. } => not_yet("series", 41),
         Command::Market { .. } => not_yet("market", 42),
-        Command::Orders { order_id } => order::run(context, order_id, Utc::now().timestamp()).await,
+        Command::Orders { order_id } => order::run(context, order_id, now()).await,
         Command::Rebuild { from_raw } => rebuild::run(context, *from_raw).await,
         Command::Stats(stats) => match stats {
-            StatsCommand::Orders { by } => {
-                stats::orders::run(context, *by, Utc::now().timestamp()).await
-            }
+            StatsCommand::Orders { by } => stats::orders::run(context, *by, now()).await,
             StatsCommand::Volume { .. } => not_yet("stats volume", 33),
             StatsCommand::Market { .. } => not_yet("stats market", 36),
             StatsCommand::Timing { .. } => not_yet("stats timing", 37),
-            StatsCommand::DevFees { by } => {
-                stats::dev_fees::run(context, *by, Utc::now().timestamp()).await
-            }
-            StatsCommand::Disputes { by } => {
-                stats::disputes::run(context, *by, Utc::now().timestamp()).await
-            }
+            StatsCommand::DevFees { by } => stats::dev_fees::run(context, *by, now()).await,
+            StatsCommand::Disputes { by } => stats::disputes::run(context, *by, now()).await,
             StatsCommand::Rates { .. } => not_yet("stats rates", 38),
         },
     }
+}
+
+/// The wall clock every command reports against.
+///
+/// `BESTIARIO_NOW`, a unix timestamp, overrides it. A testing hook, and
+/// documented as one: the end-to-end suite runs the real binary and pins
+/// its output, and figures such as "open now" or "silent for" are
+/// functions of the clock — without a fixed one, the same corpus would
+/// print a different report every day and nothing could be pinned.
+fn now() -> i64 {
+    std::env::var("BESTIARIO_NOW")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or_else(|| Utc::now().timestamp())
 }
 
 /// The CLI surface is complete from the first release so that the shape of the

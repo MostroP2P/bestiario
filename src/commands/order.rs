@@ -2,8 +2,9 @@
 //! version, and the dev fee it produced.
 //!
 //! Not windowed: an order is asked for by id, and every version it ever
-//! had is the answer. The report therefore carries the unbounded range
-//! rather than the default thirty days, which would say the wrong thing.
+//! had is the answer. The report's range is therefore the order's own span
+//! — first version to last — rather than the default thirty days, which
+//! would say the wrong thing.
 
 use anyhow::{Context as _, Result};
 use sqlx::SqlitePool;
@@ -49,8 +50,13 @@ pub async fn report(pool: &SqlitePool, order_id: &str, now: i64) -> Result<Repor
         })
         .collect();
 
+    // Half-open, so the last version is inside it.
+    let first = versions.first().map(|version| version.at);
+    let last = versions.last().map(|version| version.at + 1);
+    let span = Range::resolve(first, last, now)?;
+
     Ok(Report::new(
-        Range::unbounded(),
+        span,
         lifecycle::report(order_id, &versions, &fees),
         now,
     ))

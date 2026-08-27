@@ -30,8 +30,14 @@ pub async fn run(context: &Context<'_>, now: i64) -> Result<()> {
 }
 
 pub async fn report(pool: &SqlitePool, query: &Query, now: i64) -> Result<Report> {
-    let profiles = load::instances::profiles(pool, &query.scope).await?;
     let orders = load::activity::orders(pool, &query.scope).await?;
+    let mut profiles = load::instances::profiles(pool, &query.scope).await?;
+    // An instance is not on a network, its orders are: under `--network`
+    // the comparison is between the instances that have traded on it, and
+    // a row of zeros for every other instance would say nothing.
+    if query.network_narrowed {
+        profiles.retain(|profile| orders.iter().any(|order| order.pubkey == profile.pubkey));
+    }
     let fees = load::dev_fees::load(pool, &query.scope).await?;
     // Disputes carry no network tag: under `--network` the rate is missing.
     let disputes = if query.network_narrowed {
