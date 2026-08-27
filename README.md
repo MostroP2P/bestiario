@@ -309,32 +309,32 @@ are left out of the sum:
 ```console
 $ bestiario stats volume --in USD --from 2026-08-23 --until 2026-08-27
 2026-08-23T00:00:00+00:00 — 2026-08-27T00:00:00+00:00
-┌───────────────────────────────────┬────────────┬───────────────────────────────────────────────────────────────────────────────┐
-│ metric                            ┆ value      ┆ error                                                                         │
-╞═══════════════════════════════════╪════════════╪═══════════════════════════════════════════════════════════════════════════════╡
-│ volume.sats                       ┆ 1361 sats  ┆                                                                               │
-│ volume.completed                  ┆ 1          ┆                                                                               │
-│ volume.ticket_avg                 ┆ 1361 sats  ┆                                                                               │
-│ volume.ticket_p50                 ┆ 1361 sats  ┆                                                                               │
-│ volume.ticket_p90                 ┆ 1361 sats  ┆                                                                               │
-│ volume.largest                    ┆ 1361 sats  ┆                                                                               │
-│ volume.size.lt_10k                ┆ 1          ┆                                                                               │
-│ volume.size.10k_50k               ┆ 0          ┆                                                                               │
-│ volume.size.50k_200k              ┆ 0          ┆                                                                               │
-│ volume.size.200k_1m               ┆ 0          ┆                                                                               │
-│ volume.size.gt_1m                 ┆ 0          ┆                                                                               │
-│ volume.buy_sats                   ┆ 0 sats     ┆                                                                               │
-│ volume.sell_sats                  ┆ 1361 sats  ┆                                                                               │
-│ volume.fiat.CUP.total             ┆ 800.00 CUP ┆                                                                               │
-│ volume.fiat.CUP.orders            ┆ 1          ┆                                                                               │
-│ volume.fiat.CUP.ticket_avg        ┆ 800.00 CUP ┆                                                                               │
-│ volume.fiat.CUP.ticket_p50        ┆ 800.00 CUP ┆                                                                               │
-│ volume.fiat.CUP.ticket_p90        ┆ 800.00 CUP ┆                                                                               │
-│ volume.in.USD.total (inf)         ┆ —          ┆ no rate used; 1 unpriced (1361 sats excluded)                                 │
-│ volume.in.USD.orders (inf)        ┆ 0          ┆ orders with a rate published at or before success_at                          │
-│ volume.in.USD.unpriced_sats (inf) ┆ 1361 sats  ┆ sats of the orders no instance had a rate for by success_at; not in the total │
-│ volume.in.USD.rate_age_max (inf)  ┆ —          ┆ age of the oldest snapshot used                                               │
-└───────────────────────────────────┴────────────┴───────────────────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────┬────────────┬────────────────────────────────────────────────────────────────────────┐
+│ metric                            ┆ value      ┆ error                                                                  │
+╞═══════════════════════════════════╪════════════╪════════════════════════════════════════════════════════════════════════╡
+│ volume.sats                       ┆ 1361 sats  ┆                                                                        │
+│ volume.completed                  ┆ 1          ┆                                                                        │
+│ volume.ticket_avg                 ┆ 1361 sats  ┆                                                                        │
+│ volume.ticket_p50                 ┆ 1361 sats  ┆                                                                        │
+│ volume.ticket_p90                 ┆ 1361 sats  ┆                                                                        │
+│ volume.largest                    ┆ 1361 sats  ┆                                                                        │
+│ volume.size.lt_10k                ┆ 1          ┆                                                                        │
+│ volume.size.10k_50k               ┆ 0          ┆                                                                        │
+│ volume.size.50k_200k              ┆ 0          ┆                                                                        │
+│ volume.size.200k_1m               ┆ 0          ┆                                                                        │
+│ volume.size.gt_1m                 ┆ 0          ┆                                                                        │
+│ volume.buy_sats                   ┆ 0 sats     ┆                                                                        │
+│ volume.sell_sats                  ┆ 1361 sats  ┆                                                                        │
+│ volume.fiat.CUP.total             ┆ 800.00 CUP ┆                                                                        │
+│ volume.fiat.CUP.orders            ┆ 1          ┆                                                                        │
+│ volume.fiat.CUP.ticket_avg        ┆ 800.00 CUP ┆                                                                        │
+│ volume.fiat.CUP.ticket_p50        ┆ 800.00 CUP ┆                                                                        │
+│ volume.fiat.CUP.ticket_p90        ┆ 800.00 CUP ┆                                                                        │
+│ volume.in.USD.total (inf)         ┆ —          ┆ no rate used; 1 with no usable rate within 300s (1361 sats excluded)   │
+│ volume.in.USD.orders (inf)        ┆ 0          ┆ orders with a rate published at or before success_at                   │
+│ volume.in.USD.unpriced_sats (inf) ┆ 1361 sats  ┆ sats of the orders with no usable rate at success_at; not in the total │
+│ volume.in.USD.rate_age_max (inf)  ┆ —          ┆ age of the oldest snapshot used                                        │
+└───────────────────────────────────┴────────────┴────────────────────────────────────────────────────────────────────────┘
 ```
 
 Here the one completed order settled hours before the first rate snapshot
