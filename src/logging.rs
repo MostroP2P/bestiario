@@ -15,9 +15,14 @@ pub fn init(verbose: u8) {
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new(default_filter(verbose)));
 
+    // Logs go to stderr, always. Stdout is the report: `summary --json`
+    // piped into `jq` has to be JSON and nothing else, and a log line in
+    // front of it — as `tracing_subscriber` writes by default — makes every
+    // `--json` output unparseable the moment anything is logged.
     tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_target(false)
+        .with_writer(std::io::stderr)
         .init();
 }
 
