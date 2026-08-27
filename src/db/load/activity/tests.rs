@@ -9,6 +9,7 @@ use crate::db::repo::events::{self, EventRecord};
 use crate::db::repo::{instances, orders};
 use crate::ingest::parse::order::{FiatAmount, OrderVersion};
 use crate::network::Network;
+use crate::stats::activity::Origin;
 
 const MEMORY: &str = "sqlite::memory:";
 const ALPHA: &str = "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390";
@@ -90,12 +91,17 @@ async fn a_completed_order_carries_its_whole_lifecycle() {
             direction: activity::Direction::Sell,
             fiat_code: "VES".to_string(),
             payment_methods: vec!["face to face".to_string(), "bank".to_string()],
-            created_payment_methods: vec!["face to face".to_string(), "bank".to_string()],
             amount_sats: 21_000,
             fiat_amount: Some(100.0),
             premium: 5.0,
             is_market_price: false,
             fiat_range: None,
+            pending_at: Some(T0),
+            origin: Origin {
+                fiat_code: "VES".to_string(),
+                payment_methods: vec!["face to face".to_string(), "bank".to_string()],
+                direction: crate::stats::activity::Direction::Sell,
+            },
             taken_at: Some(T0 + 600),
             success_at: Some(T0 + 1_200),
             canceled_at: None,
@@ -249,6 +255,57 @@ async fn price_type_and_range_come_from_the_first_version() {
 }
 
 #[tokio::test]
+async fn an_order_first_seen_mid_flight_has_no_pending_anchor_and_its_origin_is_that_version() {
+    // Caught already in progress: no pending version to date the book entry.
+    let pool = migrated().await;
+    ingest(&pool, &version("o1", ALPHA, T0, Status::InProgress)).await;
+    ingest(&pool, &version("o1", ALPHA, T0 + 60, Status::Success)).await;
+
+    let orders = orders(&pool, &mainnet()).await.expect("load");
+
+    assert_eq!(orders[0].pending_at, None);
+    assert_eq!(orders[0].taken_at, Some(T0));
+    assert_eq!(orders[0].origin.fiat_code, "VES");
+}
+
+#[tokio::test]
+async fn lifecycle_in_reads_what_moved_in_the_window_and_the_live_book() {
+    // Arrange: `before` settled before the window; `moved` was created
+    // before and settled inside; `live` is pending from before and still
+    // open; `stale` is pending from before and expired.
+    let pool = migrated().await;
+    ingest(&pool, &version("before", ALPHA, T0 - 100, Status::Pending)).await;
+    ingest(&pool, &version("before", ALPHA, T0 - 50, Status::Success)).await;
+    ingest(&pool, &version("moved", ALPHA, T0 - 100, Status::Pending)).await;
+    ingest(&pool, &version("moved", ALPHA, T0 + 50, Status::Success)).await;
+    ingest(
+        &pool,
+        &OrderVersion {
+            expires_at: T0 + 10_000,
+            ..version("live", ALPHA, T0 - 100, Status::Pending)
+        },
+    )
+    .await;
+    ingest(
+        &pool,
+        &OrderVersion {
+            expires_at: T0 - 10,
+            ..version("stale", ALPHA, T0 - 100, Status::Pending)
+        },
+    )
+    .await;
+
+    // Act
+    let orders = lifecycle_in(&pool, &mainnet(), T0, T0 + 100, T0 + 200)
+        .await
+        .expect("load");
+
+    // Assert
+    let mut ids: Vec<&str> = orders.iter().map(|order| order.order_id.as_str()).collect();
+    ids.sort_unstable();
+    assert_eq!(ids, ["live", "moved"]);
+}
+#[tokio::test]
 async fn the_payment_methods_of_the_book_come_from_the_first_version() {
     // Arrange: an order published with `cash` that later advertises `pix`
     // as well. §6.3 counts what was on the book, §6.1 what it says now.
@@ -274,7 +331,7 @@ async fn the_payment_methods_of_the_book_come_from_the_first_version() {
     let orders = orders(&pool, &mainnet()).await.expect("load");
 
     // Assert
-    assert_eq!(orders[0].created_payment_methods, vec!["cash".to_string()]);
+    assert_eq!(orders[0].origin.payment_methods, vec!["cash".to_string()]);
     assert_eq!(
         orders[0].payment_methods,
         vec!["cash".to_string(), "pix".to_string()]

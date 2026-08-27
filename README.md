@@ -347,6 +347,68 @@ Here the one completed order settled hours before the first rate snapshot
 was captured, so there is nothing to price it with: the total is `—`, not
 `0.00 USD`, and the excluded sats are counted.
 
+### Timing
+
+```console
+$ bestiario stats timing --from 2026-08-23 --until 2026-08-27
+2026-08-23T00:00:00+00:00 — 2026-08-27T00:00:00+00:00
+┌──────────────────────────────────────┬───────┐
+│ metric                               ┆ value │
+╞══════════════════════════════════════╪═══════╡
+│ timing.time_to_fill_samples          ┆ 0     │
+│ timing.time_to_fill_p50              ┆ —     │
+│ timing.time_to_fill_p90              ┆ —     │
+│ timing.time_to_complete_samples      ┆ 0     │
+│ timing.time_to_complete_p50          ┆ —     │
+│ timing.time_to_complete_p90          ┆ —     │
+│ timing.full_cycle_samples            ┆ 0     │
+│ timing.full_cycle_p50                ┆ —     │
+│ timing.full_cycle_p90                ┆ —     │
+│ timing.time_to_cancel_samples        ┆ 0     │
+│ timing.time_to_cancel_p50            ┆ —     │
+│ timing.time_to_cancel_p90            ┆ —     │
+│ timing.book_size                     ┆ 4     │
+│ timing.book_age_avg                  ┆ 16.9h │
+│ timing.funnel.created                ┆ 5     │
+│ timing.funnel.taken                  ┆ 0     │
+│ timing.funnel.taken_share            ┆ 0.0%  │
+│ timing.funnel.completed              ┆ 0     │
+│ timing.funnel.canceled_taken         ┆ 0     │
+│ timing.funnel.canceled_untaken       ┆ 0     │
+│ timing.funnel.canceled_untaken_share ┆ 0.0%  │
+│ timing.funnel.expired_untaken        ┆ 1     │
+│ timing.funnel.open                   ┆ 4     │
+│ timing.unknown_origin                ┆ 3     │
+│ timing.regressed                     ┆ 0     │
+└──────────────────────────────────────┴───────┘
+```
+
+Every duration is the gap between two *observed* versions of the same
+order: time to fill (`in-progress − pending`), time to complete
+(`success − in-progress`), the full cycle (`success − pending`) and time
+to cancel (`canceled − pending`), as nearest-rank p50/p90 over the orders
+whose gap *ended* in the window, each with the number of samples it is
+taken over — the populations differ, since each gap needs its own two
+versions. `book_size` and `book_age_avg` are about now: the `pending`
+orders seen from their book entry, not taken, not ended, not expired.
+
+The funnel is over the orders whose `pending` version was seen in the
+window: how many found a taker (an `in-progress` version, or a success,
+which the protocol cannot reach without one), how many completed, how many
+were canceled after a taker or with none seen, how many sat past their
+expiry with no ending seen (`expired_untaken`), and how many are still
+open. `unknown_origin` counts the orders first seen at a later stage —
+usual in a backfill, since a relay keeps only an order's latest version —
+which belong to no cohort and anchor no duration; `regressed` counts
+orders carrying both a success and a cancellation, of which only the
+earlier is counted. Slices — `--by fiat`, `--by method`, `--by kind`,
+`--by instance` — go by the order's first version seen, so a later
+republication cannot move an entry to another slice.
+
+In this corpus every order was captured in a single version: the five seen
+at `pending` form the cohort, the three seen already in progress or ended
+are of unknown origin, and no duration can be measured.
+
 ### Market
 
 ```console

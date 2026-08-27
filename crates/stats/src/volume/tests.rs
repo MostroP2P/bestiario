@@ -1,6 +1,7 @@
 //! A hand-built dataset and hand-computed expected values (`docs/SPEC.md` §12).
 
 use super::*;
+use crate::activity::Origin;
 
 const WINDOW: Window = Window {
     from: 1_000,
@@ -17,12 +18,13 @@ fn order(id: &str, status: Status, success_at: Option<i64>, sats: i64) -> Order 
         direction: Direction::Buy,
         fiat_code: "ARS".into(),
         payment_methods: vec![],
-        created_payment_methods: vec![],
         amount_sats: sats,
         fiat_amount: Some(sats as f64 / 100.0),
         premium: 0.0,
         is_market_price: false,
         fiat_range: None,
+        pending_at: None,
+        origin: Origin::default(),
         taken_at: None,
         success_at,
         canceled_at: None,

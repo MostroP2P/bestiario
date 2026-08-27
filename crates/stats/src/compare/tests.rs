@@ -1,5 +1,5 @@
 use super::*;
-use crate::activity::{Direction, Status};
+use crate::activity::{Direction, Origin, Status};
 use crate::dev_fees::Fee;
 use crate::disputes::{Dispute, Taken};
 
@@ -37,12 +37,13 @@ fn order(id: &str, instance: &str, status: Status, sats: i64) -> Order {
         direction: Direction::Buy,
         fiat_code: "ARS".into(),
         payment_methods: vec![],
-        created_payment_methods: vec![],
         amount_sats: sats,
         fiat_amount: None,
         premium: 0.0,
         is_market_price: false,
         fiat_range: None,
+        pending_at: None,
+        origin: Origin::default(),
         taken_at: Some(1_150),
         success_at: (status == Status::Success).then_some(1_200),
         canceled_at: (status == Status::Canceled).then_some(1_200),

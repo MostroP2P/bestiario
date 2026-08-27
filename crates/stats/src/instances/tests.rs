@@ -1,5 +1,5 @@
 use super::*;
-use crate::activity::{Direction, Status};
+use crate::activity::{Direction, Origin, Status};
 
 const WINDOW: Window = Window {
     from: 1_000,
@@ -53,12 +53,13 @@ fn order(id: &str, pubkey: &str, created_at: i64, status: Status, sats: i64) -> 
         direction: Direction::Buy,
         fiat_code: "ARS".into(),
         payment_methods: vec![],
-        created_payment_methods: vec![],
         amount_sats: sats,
         fiat_amount: None,
         premium: 0.0,
         is_market_price: false,
         fiat_range: None,
+        pending_at: None,
+        origin: Origin::default(),
         taken_at: None,
         success_at: (status == Status::Success).then_some(created_at + 10),
         canceled_at: None,

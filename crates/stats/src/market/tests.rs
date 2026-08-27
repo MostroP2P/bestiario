@@ -2,6 +2,7 @@
 //! §12) for the market structure figures of §6.3.
 
 use super::*;
+use crate::activity::Origin;
 use crate::activity::Status;
 
 const WINDOW: Window = Window {
@@ -19,16 +20,32 @@ fn order(id: &str, direction: Direction, fiat: &str, created_at: i64, sats: i64)
         direction,
         fiat_code: fiat.into(),
         payment_methods: vec!["cash".into()],
-        created_payment_methods: vec!["cash".into()],
         amount_sats: sats,
         fiat_amount: Some(1.0),
         premium: 0.0,
         is_market_price: false,
         fiat_range: None,
+        pending_at: Some(created_at),
+        origin: Origin {
+            fiat_code: fiat.into(),
+            payment_methods: vec!["cash".into()],
+            direction,
+        },
         taken_at: None,
         success_at: None,
         canceled_at: None,
         expires_at: None,
+    }
+}
+
+/// `order` as published with `methods` on the book.
+fn on_book(methods: &[&str], order: Order) -> Order {
+    Order {
+        origin: Origin {
+            payment_methods: methods.iter().map(|m| m.to_string()).collect(),
+            ..order.origin.clone()
+        },
+        ..order
     }
 }
 
@@ -66,24 +83,28 @@ fn dataset() -> Vec<Order> {
             5.0,
             order("b", Direction::Sell, "ARS", 1_060, 30_000),
         ),
-        Order {
-            is_market_price: true,
-            payment_methods: vec!["zelle".into()],
-            created_payment_methods: vec!["zelle".into()],
-            ..completed(1_300, 1.0, order("c", Direction::Buy, "USD", 1_250, 20_000))
-        },
+        on_book(
+            &["zelle"],
+            Order {
+                is_market_price: true,
+                payment_methods: vec!["zelle".into()],
+                ..completed(1_300, 1.0, order("c", Direction::Buy, "USD", 1_250, 20_000))
+            },
+        ),
         Order {
             fiat_range: Some((10.0, 100.0)),
             fiat_amount: None,
             ..order("d", Direction::Sell, "USD", 1_300, 40_000)
         },
-        Order {
-            status: Status::Canceled,
-            canceled_at: Some(1_450),
-            payment_methods: vec!["pix".into()],
-            created_payment_methods: vec!["pix".into()],
-            ..order("e", Direction::Buy, "BRL", 1_400, 5_000)
-        },
+        on_book(
+            &["pix"],
+            Order {
+                status: Status::Canceled,
+                canceled_at: Some(1_450),
+                payment_methods: vec!["pix".into()],
+                ..order("e", Direction::Buy, "BRL", 1_400, 5_000)
+            },
+        ),
         completed(
             1_500,
             4.0,
@@ -310,9 +331,11 @@ fn kind_and_instance_slices_keep_every_row() {
 fn a_long_list_names_the_first_few_and_counts_the_rest() {
     // Ten methods first seen in the window, one order each.
     let orders: Vec<Order> = (0..10)
-        .map(|i| Order {
-            created_payment_methods: vec![format!("method-{i:02}")],
-            ..order(&format!("o{i}"), Direction::Buy, "ARS", 1_100 + i, 1_000)
+        .map(|i| {
+            on_book(
+                &[&format!("method-{i:02}")],
+                order(&format!("o{i}"), Direction::Buy, "ARS", 1_100 + i, 1_000),
+            )
         })
         .collect();
 
@@ -338,7 +361,6 @@ fn the_method_ranking_counts_what_was_on_the_book_not_a_later_amendment() {
     // too. The book held `cash` alone.
     let amended = Order {
         payment_methods: vec!["cash".into(), "zelle".into()],
-        created_payment_methods: vec!["cash".into()],
         ..order("amended", Direction::Buy, "ARS", 1_100, 10_000)
     };
 
@@ -359,14 +381,15 @@ fn a_method_added_to_an_old_order_does_not_backdate_its_first_sighting() {
     // `pix` by the old order would hide a genuine first sighting.
     let old = Order {
         payment_methods: vec!["cash".into(), "pix".into()],
-        created_payment_methods: vec!["cash".into()],
         ..order("old", Direction::Buy, "ARS", 500, 10_000)
     };
-    let fresh = Order {
-        payment_methods: vec!["pix".into()],
-        created_payment_methods: vec!["pix".into()],
-        ..order("fresh", Direction::Buy, "ARS", 1_100, 10_000)
-    };
+    let fresh = on_book(
+        &["pix"],
+        Order {
+            payment_methods: vec!["pix".into()],
+            ..order("fresh", Direction::Buy, "ARS", 1_100, 10_000)
+        },
+    );
 
     // Act
     let market = summarise(&[old, fresh], WINDOW);
@@ -478,16 +501,20 @@ fn a_slice_dates_its_first_sightings_against_its_own_orders() {
     // buyer names it for the first time inside it. Globally that is not a
     // first sighting; in the `buy` block it is.
     let orders = vec![
-        Order {
-            payment_methods: vec!["pix".into()],
-            created_payment_methods: vec!["pix".into()],
-            ..order("old-sell", Direction::Sell, "BRL", 500, 1_000)
-        },
-        Order {
-            payment_methods: vec!["pix".into()],
-            created_payment_methods: vec!["pix".into()],
-            ..order("new-buy", Direction::Buy, "BRL", 1_100, 1_000)
-        },
+        on_book(
+            &["pix"],
+            Order {
+                payment_methods: vec!["pix".into()],
+                ..order("old-sell", Direction::Sell, "BRL", 500, 1_000)
+            },
+        ),
+        on_book(
+            &["pix"],
+            Order {
+                payment_methods: vec!["pix".into()],
+                ..order("new-buy", Direction::Buy, "BRL", 1_100, 1_000)
+            },
+        ),
     ];
 
     assert!(summarise(&orders, WINDOW).new_methods.is_empty());
@@ -510,15 +537,17 @@ fn an_order_is_credited_to_every_method_it_names() {
     // One completed order of 1 361 sats offered over two methods shows
     // 1 361 against each: the sats are attributed, not split, so the
     // method ranking adds up to more than the volume traded.
-    let orders = vec![Order {
-        payment_methods: vec!["Efectivo".into(), "EnZona".into()],
-        created_payment_methods: vec!["Efectivo".into(), "EnZona".into()],
-        ..completed(
-            1_100,
-            0.0,
-            order("one", Direction::Sell, "CUP", 1_050, 1_361),
-        )
-    }];
+    let orders = vec![on_book(
+        &["Efectivo", "EnZona"],
+        Order {
+            payment_methods: vec!["Efectivo".into(), "EnZona".into()],
+            ..completed(
+                1_100,
+                0.0,
+                order("one", Direction::Sell, "CUP", 1_050, 1_361),
+            )
+        },
+    )];
 
     let market = summarise(&orders, WINDOW);
 

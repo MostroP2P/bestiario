@@ -48,9 +48,22 @@ impl Status {
     }
 }
 
+/// The dimensions of an order's first version — see [`Order::origin`]:
+/// what the maker put on the book. The §6.3 rankings and first sightings
+/// and the §6.4 slices count these, since a method added to an order days
+/// later was not on offer when the order was created — and, dated by the
+/// order, would fake an earlier first sighting.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Origin {
+    pub fiat_code: String,
+    pub payment_methods: Vec<String>,
+    pub direction: Direction,
+}
+
 /// Which side the maker is on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Direction {
+    #[default]
     Buy,
     Sell,
 }
@@ -82,11 +95,6 @@ pub struct Order {
     /// From the latest version: what the order advertises now, which is
     /// what a `--by method` slice of §6.1 asks about.
     pub payment_methods: Vec<String>,
-    /// From the first version: what the maker put on the book. The §6.3
-    /// rankings and first sightings count these, since a method added to
-    /// an order days later was not on offer when the order was created —
-    /// and, dated by the order, would fake an earlier first sighting.
-    pub created_payment_methods: Vec<String>,
     /// From the latest version. Not a §6.1 figure, but what a share of the
     /// network's volume (§6.5) and the summary's sats volume (§6.10) are
     /// summed from; see [`crate::volume`].
@@ -101,6 +109,16 @@ pub struct Order {
     pub is_market_price: bool,
     /// `[min, max]` of the first version, for a range order (§4 `range`).
     pub fiat_range: Option<(f64, f64)>,
+    /// `created_at` of the first `pending` version *seen*. `None` when the
+    /// first version bestiario caught was already later in the lifecycle
+    /// — usual in a backfill, since kind 38383 is replaceable and a relay
+    /// keeps only the latest state — and then nothing anchored on the
+    /// book entry can be measured (see [`crate::timing`]).
+    pub pending_at: Option<i64>,
+    /// The dimensions of the first version seen: what the order *was* when
+    /// it entered the book, for the figures that date from then. The
+    /// fields above are the latest version's.
+    pub origin: Origin,
     /// `created_at` of the first `in-progress` version — when a taker arrived.
     pub taken_at: Option<i64>,
     /// `created_at` of the first `success` version.

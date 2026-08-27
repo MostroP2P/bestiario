@@ -154,7 +154,7 @@ pub fn summarise(orders: &[Order], window: Window) -> Market {
     };
 
     let fiat = |order: &Order| vec![order.fiat_code.clone()];
-    let methods = |order: &Order| order.created_payment_methods.clone();
+    let methods = |order: &Order| order.origin.payment_methods.clone();
     let one = |_: &Order| 1;
     let amount = |order: &Order| order.amount_sats;
 

@@ -1,5 +1,5 @@
 use super::*;
-use crate::activity::{Direction, Status};
+use crate::activity::{Direction, Origin, Status};
 use crate::disputes::{Dispute, Initiator};
 
 const WINDOW: Window = Window {
@@ -18,12 +18,13 @@ fn order(id: &str, pubkey: &str, fiat: &str, methods: &[&str], status: Status, s
         direction: Direction::Buy,
         fiat_code: fiat.into(),
         payment_methods: methods.iter().map(|m| m.to_string()).collect(),
-        created_payment_methods: methods.iter().map(|m| m.to_string()).collect(),
         amount_sats: sats,
         fiat_amount: None,
         premium: 0.0,
         is_market_price: false,
         fiat_range: None,
+        pending_at: None,
+        origin: Origin::default(),
         taken_at: None,
         success_at: (status == Status::Success).then_some(1_200),
         canceled_at: (status == Status::Canceled).then_some(1_200),

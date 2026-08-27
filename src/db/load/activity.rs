@@ -40,7 +40,30 @@ pub async fn orders<'e, E>(executor: E, scope: &Scope) -> Result<Vec<Order>, sql
 where
     E: Executor<'e, Database = Sqlite>,
 {
-    fetch(executor, scope, None).await
+    fetch(executor, scope, Filter::All).await
+}
+
+/// The orders in `scope` with any version published at `from..until`, plus
+/// the `pending` ones still live at `now` — what a timing report needs:
+/// every transition that ends in the window, and the current book.
+pub async fn lifecycle_in<'e, E>(
+    executor: E,
+    scope: &Scope,
+    from: i64,
+    until: i64,
+    now: i64,
+) -> Result<Vec<Order>, sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    fetch(executor, scope, Filter::TouchedIn { from, until, now }).await
+}
+
+/// Which orders a read returns.
+enum Filter {
+    All,
+    CompletedIn { from: i64, until: i64 },
+    TouchedIn { from: i64, until: i64, now: i64 },
 }
 
 /// The orders in `scope` that reached `success` at `from..until`, oldest
@@ -56,14 +79,10 @@ pub async fn completed_in<'e, E>(
 where
     E: Executor<'e, Database = Sqlite>,
 {
-    fetch(executor, scope, Some((from, until))).await
+    fetch(executor, scope, Filter::CompletedIn { from, until }).await
 }
 
-async fn fetch<'e, E>(
-    executor: E,
-    scope: &Scope,
-    completed_in: Option<(i64, i64)>,
-) -> Result<Vec<Order>, sqlx::Error>
+async fn fetch<'e, E>(executor: E, scope: &Scope, filter: Filter) -> Result<Vec<Order>, sqlx::Error>
 where
     E: Executor<'e, Database = Sqlite>,
 {
@@ -76,6 +95,10 @@ where
                 first.payment_methods AS first_payment_methods,
                 first.fiat_min AS first_fiat_min,
                 first.fiat_max AS first_fiat_max,
+                first.fiat_code AS first_fiat_code,
+                first.kind AS first_kind,
+                (SELECT MIN(v.created_at) FROM order_versions v
+                  WHERE v.order_id = o.order_id AND v.status = 'pending') AS pending_at,
                 (SELECT MIN(v.created_at) FROM order_versions v
                   WHERE v.order_id = o.order_id AND v.status = 'in-progress') AS taken_at,
                 (SELECT v.expires_at FROM order_versions v
@@ -85,6 +108,7 @@ where
          LEFT JOIN instances i ON i.pubkey = o.pubkey
          LEFT JOIN (
              SELECT order_id, amount_sats, payment_methods, fiat_min, fiat_max,
+                    fiat_code, kind,
                     ROW_NUMBER() OVER (
                         PARTITION BY order_id ORDER BY created_at ASC, event_id ASC
                     ) AS rank
@@ -94,12 +118,27 @@ where
     );
 
     scope.apply(&mut query, "o");
-    if let Some((from, until)) = completed_in {
-        query
-            .push(" AND o.final_status = 'success' AND o.success_at >= ")
-            .push_bind(from)
-            .push(" AND o.success_at < ")
-            .push_bind(until);
+    match filter {
+        Filter::All => {}
+        Filter::CompletedIn { from, until } => {
+            query
+                .push(" AND o.final_status = 'success' AND o.success_at >= ")
+                .push_bind(from)
+                .push(" AND o.success_at < ")
+                .push_bind(until);
+        }
+        Filter::TouchedIn { from, until, now } => {
+            query
+                .push(" AND (EXISTS (SELECT 1 FROM order_versions v WHERE v.order_id = o.order_id")
+                .push(" AND v.created_at >= ")
+                .push_bind(from)
+                .push(" AND v.created_at < ")
+                .push_bind(until)
+                .push(") OR (o.final_status = 'pending' AND (SELECT v.expires_at FROM order_versions v")
+                .push(" WHERE v.order_id = o.order_id ORDER BY v.created_at DESC, v.event_id ASC LIMIT 1) > ")
+                .push_bind(now)
+                .push("))");
+        }
     }
     query.push(" ORDER BY o.first_seen_at, o.order_id");
 
@@ -129,6 +168,9 @@ struct Row {
     first_amount_sats: Option<i64>,
     first_fiat_min: Option<f64>,
     first_fiat_max: Option<f64>,
+    first_fiat_code: Option<String>,
+    first_kind: Option<String>,
+    pending_at: Option<i64>,
     success_at: Option<i64>,
     canceled_at: Option<i64>,
     taken_at: Option<i64>,
@@ -148,6 +190,23 @@ impl Row {
     fn into_order(self) -> Result<Order, sqlx::Error> {
         let instance = instance_label(&self.pubkey, self.instance_name.as_deref());
 
+        // Every order has at least one version, so the first-version reads
+        // are never NULL; the fallbacks keep a torn row honest.
+        let origin = activity::Origin {
+            fiat_code: self
+                .first_fiat_code
+                .unwrap_or_else(|| self.fiat_code.clone()),
+            payment_methods: csv::split(
+                self.first_payment_methods
+                    .as_deref()
+                    .unwrap_or(&self.payment_methods),
+            ),
+            direction: match self.first_kind {
+                Some(kind) => direction(decode("kind", Direction::parse(&kind))?),
+                None => direction(decode("kind", Direction::parse(&self.kind))?),
+            },
+        };
+
         Ok(Order {
             order_id: self.order_id,
             pubkey: self.pubkey,
@@ -157,16 +216,13 @@ impl Row {
             direction: direction(decode("kind", Direction::parse(&self.kind))?),
             fiat_code: self.fiat_code,
             payment_methods: csv::split(&self.payment_methods),
-            created_payment_methods: csv::split(
-                self.first_payment_methods
-                    .as_deref()
-                    .unwrap_or(&self.payment_methods),
-            ),
             amount_sats: self.amount_sats,
             fiat_amount: self.fiat_amount,
             premium: self.premium,
             is_market_price: self.first_amount_sats == Some(0),
             fiat_range: self.first_fiat_min.zip(self.first_fiat_max),
+            pending_at: self.pending_at,
+            origin,
             taken_at: self.taken_at,
             success_at: self.success_at,
             canceled_at: self.canceled_at,
