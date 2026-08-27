@@ -105,11 +105,9 @@ async fn the_lifecycle_lists_every_version_oldest_first_and_the_fee() {
         &Value::Text("success".into())
     );
     assert_eq!(value(&report, "dev_fee.1.amount"), &Value::Sats(63));
-    assert!(
-        report.range.from.starts_with("1970-01-01"),
-        "{}",
-        report.range.from
-    );
+    // The range is the order's own span: first version to one past the last.
+    assert_eq!(report.range.from, "2026-08-25T23:20:00+00:00");
+    assert_eq!(report.range.until, "2026-08-25T23:23:21+00:00");
 }
 
 #[tokio::test]

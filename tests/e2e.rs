@@ -161,14 +161,41 @@ async fn backfill_then_every_report_against_the_local_relay() {
 
     let dir = TempDir::new().expect("tempdir");
     let settings = write_settings(dir.path(), &relay.url().await.to_string());
+    let dump_dir = std::env::var_os("E2E_DUMP_DIR").map(PathBuf::from);
+    if let Some(dir) = &dump_dir {
+        fs::create_dir_all(dir).expect("dump dir");
+    }
 
-    // Act: the walk.
+    // Act: every command the README shows, in the README's order, against
+    // this corpus — its `backfill` is the first walk, on an empty archive,
+    // which is what the README's example has to show. A README that has
+    // drifted from the binary fails here rather than misleading a reader.
+    // The outputs are dumped as `readme-<n>.txt` so the examples in the
+    // README can be pasted from the same run.
+    for (index, command) in readme_commands().iter().enumerate() {
+        let args: Vec<&str> = command.split_whitespace().collect();
+        let stdout = bestiario(&settings, &args);
+        if args.contains(&"--json") {
+            envelope(&stdout, command);
+        }
+        if let Some(dir) = &dump_dir {
+            fs::write(
+                dir.join(format!("readme-{index:02}.txt")),
+                format!("$ bestiario {command}\n{stdout}"),
+            )
+            .expect("dump");
+        }
+    }
+
+    // Act: a second walk, from the binary's own JSON report.
     let backfill = bestiario(&settings, &["backfill", "--json"]);
     let backfill: serde_json::Value = serde_json::from_str(&backfill).expect("backfill json");
 
-    // Assert: everything Mostro was stored, everything else turned away.
+    // Assert: nothing new to store — the README's walk stored it all — the
+    // whole corpus already known, and the other platforms turned away again.
+    assert_eq!(backfill["events"]["stored"], 0, "{backfill}");
     assert!(
-        backfill["events"]["stored"].as_u64().unwrap() > 0,
+        backfill["events"]["duplicate"].as_u64().unwrap() > 0,
         "{backfill}"
     );
     assert!(
@@ -190,7 +217,6 @@ async fn backfill_then_every_report_against_the_local_relay() {
         vec!["stats", "disputes"],
         vec!["orders", &order_id],
     ];
-    let dump_dir = std::env::var_os("E2E_DUMP_DIR").map(PathBuf::from);
     let mut summary = None;
     for report in reports {
         let mut args = report.clone();
@@ -204,7 +230,6 @@ async fn backfill_then_every_report_against_the_local_relay() {
         if let Some(dir) = &dump_dir {
             let table = bestiario(&settings, &args[..args.len() - 1]);
             let name = report.join("-").replace(['/', ' '], "_");
-            fs::create_dir_all(dir).expect("dump dir");
             fs::write(dir.join(format!("{name}.txt")), table).expect("dump");
         }
     }
@@ -237,4 +262,29 @@ async fn backfill_then_every_report_against_the_local_relay() {
     let mut again: serde_json::Value = serde_json::from_str(&again).expect("json");
     again["generated_at"] = serde_json::Value::Null;
     assert_eq!(again, summary, "rebuild changed the summary");
+}
+
+/// Every `$ bestiario …` line inside a fenced code block of `README.md`,
+/// without the prompt and the binary name.
+///
+/// `sync` is left out: it runs until interrupted, which is the one thing a
+/// test cannot wait for. The README shows it in a block without a prompt.
+fn readme_commands() -> Vec<String> {
+    let readme = fs::read_to_string(manifest_dir().join("README.md")).expect("README.md");
+    let mut commands = Vec::new();
+    let mut fenced = false;
+    for line in readme.lines() {
+        if line.starts_with("```") {
+            fenced = !fenced;
+            continue;
+        }
+        if let Some(command) = line.strip_prefix("$ bestiario ").filter(|_| fenced) {
+            commands.push(command.trim().to_string());
+        }
+    }
+    assert!(
+        !commands.is_empty(),
+        "README.md shows no `$ bestiario` commands"
+    );
+    commands
 }
