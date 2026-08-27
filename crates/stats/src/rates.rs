@@ -149,5 +149,7 @@ impl RateBook {
     }
 }
 
+pub mod feeds;
+
 #[cfg(test)]
 mod tests;

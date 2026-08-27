@@ -72,7 +72,7 @@ pub fn parse(event: &Event) -> Result<RateSnapshot, ParseError> {
         });
     }
 
-    let created_at = event.created_at.as_secs() as i64;
+    let created_at = signed_at(event)?;
     let published_at = match optional(event, "published_at")? {
         Some(value) => {
             let claimed = non_negative(
@@ -128,6 +128,22 @@ fn near(created_at: i64, published_at: i64) -> Result<i64, ParseError> {
         });
     }
     Ok(published_at)
+}
+
+/// The event's own clock as a signed second count.
+///
+/// Nostr times a `u64`, and every timestamp downstream — the archive, the
+/// freshness of a feed, the distance between two quotes — is an `i64` that
+/// gets subtracted from another. A narrowing `as i64` would turn a clock
+/// past `i64::MAX` into a negative second, and a negative second into
+/// arithmetic that overflows rather than a rejected event. A time nobody
+/// can represent is not a time.
+fn signed_at(event: &Event) -> Result<i64, ParseError> {
+    i64::try_from(event.created_at.as_secs()).map_err(|_| ParseError::OutOfRange {
+        tag: "created_at",
+        value: event.created_at.as_secs().to_string(),
+        expected: "a unix timestamp that fits a signed 64-bit second count",
+    })
 }
 
 /// The `{"BTC": {code: price}}` object of the content, checked entry by

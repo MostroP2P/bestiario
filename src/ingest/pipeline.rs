@@ -51,16 +51,23 @@ const PLATFORM_TAGGED: [u16; 4] = [
 /// `accept_unknown_instances` is safe for the tagged kinds because the tag
 /// is what makes an unlisted publisher recognisably Mostro's. A rate
 /// snapshot carries no such tag, while being the number every converted
-/// figure of phase 3 is multiplied by — so for these kinds the toggle alone
-/// is not enough: the publisher is either listed in `[indexer].instances` or
-/// has already been seen publishing a platform-tagged event
-/// (`repo::instances::is_platform_proven`).
+/// figure of phase 3 is multiplied by; a relay list carries none either,
+/// while naming the relays bestiario would then dial — so for these kinds
+/// the toggle alone is not enough: the publisher is either listed in
+/// `[indexer].instances` or has already been seen publishing a
+/// platform-tagged event (`repo::instances::is_platform_proven`).
 ///
-/// Ordering works out in practice because [`INDEXED_KINDS`] walks rates last,
-/// so an instance's orders are archived before its snapshot is judged.
+/// Which makes the *order* events are read part of the rule rather than an
+/// accident of it: an instance's tagged events have to be archived before
+/// its untagged ones are judged, or a snapshot arriving first is turned away
+/// for want of a proof that was one event behind it. `backfill` gets that
+/// from [`INDEXED_KINDS`], which walks these two last; `sync` cannot, since
+/// a relay answers one subscription in whatever order it likes, so it asks
+/// for these kinds only once the tagged ones have been replayed to their
+/// end.
 ///
 /// [`INDEXED_KINDS`]: crate::nostr::filters::INDEXED_KINDS
-const UNTAGGED_KINDS: [u16; 1] = [parse::rates::KIND];
+pub const UNTAGGED_KINDS: [u16; 2] = [parse::rates::KIND, parse::relay_list::KIND];
 
 /// The kinds that carry a `network` tag and so pass the filter of step 5.
 const NETWORK_TAGGED: [u16; 2] = [parse::order::KIND, parse::dev_fee::KIND];
@@ -231,6 +238,7 @@ enum Parsed {
     Dispute(Box<parse::dispute::DisputeVersion>),
     Info(Box<parse::info::InstanceInfo>),
     Rates(Box<parse::rates::RateSnapshot>),
+    RelayList(Box<parse::relay_list::RelayList>),
 }
 
 /// The pipeline itself: a database and the policy to admit events by.
@@ -434,6 +442,9 @@ impl Pipeline {
             parse::dispute::KIND => Ok(Parsed::Dispute(Box::new(parse::dispute::parse(event)?))),
             parse::info::KIND => Ok(Parsed::Info(Box::new(parse::info::parse(event)?))),
             parse::rates::KIND => Ok(Parsed::Rates(Box::new(parse::rates::parse(event)?))),
+            parse::relay_list::KIND => Ok(Parsed::RelayList(Box::new(parse::relay_list::parse(
+                event,
+            )?))),
             kind => Err(Rejection::UnsupportedKind { kind }),
         }
     }
@@ -480,6 +491,20 @@ impl Pipeline {
             Parsed::Rates(snapshot) => {
                 repo::rates::insert(&mut **tx, snapshot).await?;
             }
+            Parsed::RelayList(list) => {
+                // The relays themselves, not the list: a 10002 is
+                // replaceable, so the event is a snapshot of where the
+                // instance publishes *now*, while the table is the set of
+                // relays bestiario has ever been told about. A relay that
+                // drops off an instance's list is not a relay that stopped
+                // existing, and the connection set survives a bad edit.
+                let source = repo::relays::Source::Nip65 {
+                    pubkey: list.pubkey.clone(),
+                };
+                for url in &list.relays {
+                    repo::relays::upsert(&mut **tx, url, &source, list.created_at).await?;
+                }
+            }
         }
 
         Ok(())
@@ -511,6 +536,7 @@ pub(crate) async fn seed_fixtures(pool: &SqlitePool, now: i64) {
         parse::dispute::KIND,
         parse::info::KIND,
         parse::rates::KIND,
+        parse::relay_list::KIND,
     ] {
         for event in corpus(kind) {
             pipeline
