@@ -57,14 +57,29 @@ impl Window {
     /// The buckets of `period` this window touches, each clipped to it,
     /// oldest first — what a series is plotted over.
     pub fn buckets(&self, period: Period) -> Vec<(String, Window)> {
+        self.buckets_upto(period, usize::MAX)
+            .expect("a window a date can represent has fewer buckets than `usize::MAX`")
+    }
+
+    /// The same, refusing rather than building more than `limit` of them.
+    ///
+    /// A window is as wide as the caller typed, and `--from 0 --until
+    /// 9223372036854775807 --by day` asks for a hundred trillion buckets.
+    /// Building them all to discover there are too many spends the memory
+    /// the limit exists to protect, and walks the cursor past the last date
+    /// `chrono` can represent on the way. So the walk stops one bucket past
+    /// the limit: enough to know it was exceeded, and no more.
+    pub fn buckets_upto(&self, period: Period, limit: usize) -> Option<Vec<(String, Window)>> {
         match period {
-            Period::Day => self.walk(period, "%Y-%m-%d", |at| at + Days::new(1)),
-            Period::Week => self.walk(period, "%G-W%V", |at| at + Days::new(7)),
-            Period::Month => self.walk(period, "%Y-%m", next_month),
-            Period::Year => self.walk(period, "%Y", |at| {
-                Utc.with_ymd_and_hms(at.year() + 1, 1, 1, 0, 0, 0)
-                    .single()
-                    .expect("new year's midnight exists")
+            Period::Day => self.walk(period, "%Y-%m-%d", limit, |at| {
+                at.checked_add_days(Days::new(1))
+            }),
+            Period::Week => self.walk(period, "%G-W%V", limit, |at| {
+                at.checked_add_days(Days::new(7))
+            }),
+            Period::Month => self.walk(period, "%Y-%m", limit, next_month),
+            Period::Year => self.walk(period, "%Y", limit, |at| {
+                Utc.with_ymd_and_hms(at.year() + 1, 1, 1, 0, 0, 0).single()
             }),
         }
     }
@@ -126,7 +141,7 @@ impl Window {
     /// Clipped rather than whole, so a window opening on the 15th does not
     /// report the first half of that month as if it had been counted.
     pub fn months(&self) -> Vec<(String, Window)> {
-        self.walk(Period::Month, "%Y-%m", next_month)
+        self.buckets(Period::Month)
     }
 }
 
@@ -153,30 +168,39 @@ impl Window {
     /// Walks whole buckets from `opening`, clipping each to this window and
     /// keying it by `format`. A bucket the window does not actually reach
     /// into — the part of the first one before it opens — is not a bucket.
+    ///
+    /// `None` once more than `limit` buckets have been built, and once the
+    /// cursor steps past the last instant a date can represent: a window
+    /// that wide has more buckets than any caller asked for, and the two
+    /// are the same answer.
     fn walk(
         &self,
         period: Period,
         format: &str,
-        next: impl Fn(DateTime<Utc>) -> DateTime<Utc>,
-    ) -> Vec<(String, Window)> {
+        limit: usize,
+        next: impl Fn(DateTime<Utc>) -> Option<DateTime<Utc>>,
+    ) -> Option<Vec<(String, Window)>> {
         let mut buckets = Vec::new();
         let Some(mut cursor) = self.opening(period) else {
-            return buckets;
+            return Some(buckets);
         };
 
         while cursor.timestamp() < self.until {
-            let following = next(cursor);
+            let following = next(cursor)?;
             let clipped = Window::new(
                 cursor.timestamp().max(self.from),
                 following.timestamp().min(self.until),
             );
             if clipped.from < clipped.until {
+                if buckets.len() == limit {
+                    return None;
+                }
                 buckets.push((cursor.format(format).to_string(), clipped));
             }
             cursor = following;
         }
 
-        buckets
+        Some(buckets)
     }
 }
 
@@ -200,16 +224,16 @@ impl Period {
     }
 }
 
-fn next_month(at: DateTime<Utc>) -> DateTime<Utc> {
+/// The first of the month after `at`, or `None` past the last year a date
+/// can represent.
+fn next_month(at: DateTime<Utc>) -> Option<DateTime<Utc>> {
     let (year, month) = if at.month() == 12 {
         (at.year() + 1, 1)
     } else {
         (at.year(), at.month() + 1)
     };
 
-    Utc.with_ymd_and_hms(year, month, 1, 0, 0, 0)
-        .single()
-        .expect("the first of a month at midnight exists")
+    Utc.with_ymd_and_hms(year, month, 1, 0, 0, 0).single()
 }
 
 #[cfg(test)]

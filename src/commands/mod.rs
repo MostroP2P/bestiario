@@ -11,10 +11,12 @@ use sqlx::SqlitePool;
 pub mod backfill;
 pub mod compare;
 pub mod instances;
+pub mod market;
 pub mod order;
 pub mod query;
 pub mod range;
 pub mod rebuild;
+mod relays;
 pub mod series;
 pub mod stats;
 pub mod summary;
@@ -68,7 +70,7 @@ async fn dispatch(context: &Context<'_>) -> Result<()> {
         Command::Series { metric, by, split } => {
             series::run(context, metric, *by, *split, now()).await
         }
-        Command::Market { .. } => not_yet("market", 42),
+        Command::Market { fiat } => market::run(context, fiat, now()).await,
         Command::Orders { order_id } => order::run(context, order_id, now()).await,
         Command::Rebuild { from_raw } => rebuild::run(context, *from_raw).await,
         Command::Stats(stats) => match stats {
@@ -80,7 +82,9 @@ async fn dispatch(context: &Context<'_>) -> Result<()> {
             StatsCommand::Timing { by } => stats::timing::run(context, *by, now()).await,
             StatsCommand::DevFees { by } => stats::dev_fees::run(context, *by, now()).await,
             StatsCommand::Disputes { by } => stats::disputes::run(context, *by, now()).await,
-            StatsCommand::Rates { .. } => not_yet("stats rates", 39),
+            StatsCommand::Rates { fiat } => {
+                stats::rates::run(context, fiat.as_deref(), now()).await
+            }
         },
     }
 }
@@ -113,12 +117,4 @@ fn now() -> i64 {
         .ok()
         .and_then(|value| value.parse().ok())
         .unwrap_or_else(|| Utc::now().timestamp())
-}
-
-/// The CLI surface is complete from the first release so that the shape of the
-/// tool is reviewable as a whole, but the commands arrive over several phases.
-/// An unimplemented one says which roadmap entry will bring it rather than
-/// panicking or, worse, printing an empty report.
-fn not_yet(command: &str, roadmap_pr: u16) -> Result<()> {
-    anyhow::bail!("`{command}` is not implemented yet; it arrives in roadmap PR {roadmap_pr}")
 }

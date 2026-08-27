@@ -37,6 +37,7 @@ async fn count(pool: &SqlitePool, sql: &'static str) -> i64 {
 }
 
 const EVENTS: &str = "SELECT COUNT(*) FROM events";
+const RELAYS: &str = "SELECT COUNT(*) FROM relays";
 const ORDER_VERSIONS: &str = "SELECT COUNT(*) FROM order_versions";
 const INSTANCES: &str = "SELECT COUNT(*) FROM instances";
 const INSTANCE_INFO: &str = "SELECT COUNT(*) FROM instance_info";
@@ -152,6 +153,54 @@ async fn a_listed_pubkey_is_accepted_when_unknown_instances_are_not() {
 
     // Assert
     assert_eq!(outcome, IngestOutcome::Stored);
+}
+
+#[tokio::test]
+async fn an_unlisted_pubkey_is_stored_and_registered_when_unknown_instances_are_accepted() {
+    // Arrange: nobody is listed, and the flag is on. The `y` tag is what
+    // makes this publisher recognisably Mostro's (SPEC §8.1 step 4), and
+    // that is the whole of the evidence the flag asks for.
+    let pool = migrated().await;
+    let event = load(38383, "pending_range");
+    let policy = Policy::new(Vec::<String>::new(), true, [Network::Mainnet]);
+
+    // Act
+    let outcome = pipeline(&pool, policy)
+        .ingest(&event, RELAY, NOW)
+        .await
+        .expect("ingest");
+
+    // Assert: stored, and the bestiary grew a member nobody configured.
+    assert_eq!(outcome, IngestOutcome::Stored);
+    assert_eq!(count(&pool, EVENTS).await, 1);
+    assert_eq!(count(&pool, ORDER_VERSIONS).await, 1);
+    let registered = repo::instances::find(&pool, &event.pubkey.to_hex())
+        .await
+        .expect("read")
+        .expect("auto-registered");
+    assert_eq!(registered.pubkey, event.pubkey.to_hex());
+}
+
+#[tokio::test]
+async fn the_flag_admits_a_publisher_it_does_not_vouch_for() {
+    // The two questions are separate: `accept_unknown_instances` decides
+    // whether an unlisted publisher may be indexed at all, and the `y` tag
+    // decides whether what it published is Mostro's. An unlisted pubkey
+    // publishing another platform's order is turned away with the flag on.
+    let pool = migrated().await;
+    let event = load(38383, "other_platform_hodlhodl");
+    let policy = Policy::new(Vec::<String>::new(), true, [Network::Mainnet]);
+
+    let outcome = pipeline(&pool, policy)
+        .ingest(&event, RELAY, NOW)
+        .await
+        .expect("ingest");
+
+    assert!(matches!(
+        outcome,
+        IngestOutcome::Rejected(Rejection::OtherPlatform { .. })
+    ));
+    assert_eq!(count(&pool, INSTANCES).await, 0, "and joins no bestiary");
 }
 
 #[tokio::test]
@@ -284,9 +333,12 @@ async fn instance_info_lands_and_names_the_instance() {
 
 #[tokio::test]
 async fn a_kind_with_no_parser_is_rejected_but_stays_in_the_archive() {
-    // Arrange
+    // Arrange: a plain note. A relay can send anything; nothing here reads
+    // a kind 1.
     let pool = migrated().await;
-    let event = load(10002, "typical");
+    let event = EventBuilder::new(Kind::from_u16(1), "hello")
+        .finalize(&Keys::generate())
+        .expect("signing");
 
     // Act
     let outcome = pipeline(&pool, open_policy())
@@ -297,13 +349,60 @@ async fn a_kind_with_no_parser_is_rejected_but_stays_in_the_archive() {
     // Assert
     assert_eq!(
         outcome,
-        IngestOutcome::Rejected(Rejection::UnsupportedKind { kind: 10002 })
+        IngestOutcome::Rejected(Rejection::UnsupportedKind { kind: 1 })
     );
-    // Archived on purpose: 30078 and 10002 are part of the corpus, they just
-    // have no parser yet. Keeping the raw event is what lets a later
-    // `rebuild --from-raw` read them without going back to the relays.
+    // Archived on purpose: keeping the raw event is what lets a later
+    // `rebuild --from-raw` read it if a parser ever lands.
     assert_eq!(count(&pool, EVENTS).await, 1);
     assert_eq!(count(&pool, ORDER_VERSIONS).await, 0);
+}
+
+#[tokio::test]
+async fn a_relay_list_from_a_vouched_instance_records_where_it_publishes() {
+    // Arrange: the instance is listed, so its untagged 10002 is taken.
+    let pool = migrated().await;
+    let event = load(10002, "typical");
+    let policy = Policy::new(vec![event.pubkey.to_hex()], false, [Network::Mainnet]);
+
+    // Act
+    let outcome = pipeline(&pool, policy)
+        .ingest(&event, RELAY, NOW)
+        .await
+        .expect("ingest");
+
+    // Assert
+    assert_eq!(outcome, IngestOutcome::Stored);
+    let relays = repo::relays::all(&pool).await.expect("relays");
+    assert_eq!(
+        relays
+            .iter()
+            .map(|relay| relay.url.as_str())
+            .collect::<Vec<_>>(),
+        ["wss://nos.lol", "wss://relay.mostro.network"]
+    );
+    assert!(relays.iter().all(|relay| relay.source
+        == repo::relays::Source::Nip65 {
+            pubkey: event.pubkey.to_hex()
+        }));
+}
+
+#[tokio::test]
+async fn a_relay_list_from_a_publisher_nobody_vouches_for_is_refused() {
+    // A 10002 carries no `y` tag, so an unlisted, unproven publisher could
+    // otherwise name any relay for bestiario to dial.
+    let pool = migrated().await;
+    let event = load(10002, "typical");
+
+    let outcome = pipeline(&pool, open_policy())
+        .ingest(&event, RELAY, NOW)
+        .await
+        .expect("ingest");
+
+    assert!(matches!(
+        outcome,
+        IngestOutcome::Rejected(Rejection::UnvouchedPublisher { kind: 10002, .. })
+    ));
+    assert_eq!(count(&pool, RELAYS).await, 0);
 }
 
 #[tokio::test]

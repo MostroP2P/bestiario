@@ -66,6 +66,7 @@ cp settings.toml.example settings.toml
 | Key | What it does |
 |---|---|
 | `[nostr].relays` | Relays to read from. `wss://relay.mostro.network` carries every instance. |
+| `[nostr].discover_relays` | `true` to also dial the relays the instances say they publish to (NIP-65, kind 10002). Off by default. |
 | `[indexer].instances` | Pubkeys to follow, as hex or `npub1…`. |
 | `[indexer].accept_unknown_instances` | `true` to index every pubkey that publishes Mostro events, whether listed or not. Events from other platforms on the same relays (they exist) are turned away either way. |
 | `[indexer].networks` | Which networks count: `mainnet` alone by default. |
@@ -75,6 +76,32 @@ cp settings.toml.example settings.toml
 `bestiario` reads `settings.toml` from the current directory; `--config`
 points it elsewhere. Every value is validated at startup, and a bad one is
 an error naming the key rather than a report with a hole in it.
+
+### Relay discovery
+
+Each instance publishes a NIP-65 relay list saying where it reads and where
+it writes. bestiario records the relays it *writes* to — an instance's
+events are only fetchable where it publishes them, and a relay it merely
+reads from holds nothing of its own — and, with `discover_relays = true`,
+dials them alongside the configured ones.
+
+Discovery is additive and never subtractive: the configured relays always
+come first and are never dropped, since they are the operator's decision
+while a discovered relay is a third party's claim. Only the relays an
+instance says it *writes* to are taken, which NIP-65 spells as an `r` tag
+with no marker or with `write`; an entry marked anything else carries no
+such claim and is dropped, like a URL that cannot be dialled. With the flag
+off the connection set is exactly what `settings.toml` lists, whatever the
+instances have advertised. A relay list carries no `y` tag, so bestiario
+takes one only from a pubkey it already knows as an instance — the same
+rule that guards rate snapshots.
+
+The connection set is not fixed at startup. A relay list read during a
+`backfill` is followed by that same invocation — the run walks the relays it
+discovers rather than leaving them for a second one — and a `sync` that
+stores one rebuilds its subscription over the wider set there and then, so a
+process meant to run for months does not go on dialling only the relays it
+happened to know about on the day it started.
 
 ## First backfill
 
@@ -528,6 +555,63 @@ seller has offered for a year is new to the `buy` block the day a buyer
 first names it, and `market.<instance>.new_fiats` names what is new to
 that instance.
 
+### Exchange rates
+
+```console
+$ bestiario stats rates --fiat USD --instance Mostro
+2026-07-28T03:06:40+00:00 — 2026-08-27T03:06:40+00:00
+┌────────────────────────────────────┬──────────────┐
+│ metric                             ┆ value        │
+╞════════════════════════════════════╪══════════════╡
+│ rates.feeds                        ┆ 1            │
+│ rates.fresh                        ┆ 0            │
+│ rates.stale                        ┆ 0            │
+│ rates.dead                         ┆ 1            │
+│ rates.silent                       ┆ 0            │
+│ rates.skewed                       ┆ 0            │
+│ rates.currencies                   ┆ 141          │
+│ rates.USD.quoted_by                ┆ 1            │
+│ rates.USD.comparable               ┆ 0            │
+│ rates.USD.low                      ┆ —            │
+│ rates.USD.high                     ┆ —            │
+│ rates.USD.disparity                ┆ —            │
+│ rates.USD.Mostro (6320ee5e)        ┆ 78614.25 USD │
+│ rates.Mostro (6320ee5e).age        ┆ 16.5h        │
+│ rates.Mostro (6320ee5e).status     ┆ dead         │
+│ rates.Mostro (6320ee5e).currencies ┆ 141          │
+└────────────────────────────────────┴──────────────┘
+```
+
+What each instance quotes right now, and how alive its feed is. These are
+the only figures in the tool that are not taken over the window: a feed is
+a live thing, and §6.8 asks what it says *now* — the window still heads the
+report, as everywhere.
+
+A feed is `fresh` while its latest snapshot is under five minutes old, the
+bound a rate has to price a trade; `stale` past that but within the ten
+minutes a kind 30078 event declares itself valid for through its NIP-40
+`expiration`; `dead` past that expiry, with nothing since; `silent` when
+the instance has published no rate at all; and `skewed` when its latest
+snapshot is dated in the future, which is a clock nobody shares rather than
+an age. Every instance falls in exactly one of the five, and the counts add
+up to the statuses listed below them. Rate snapshots carry no `y` tag, so
+bestiario stores one only from a pubkey it has already seen publishing as
+an instance — an unvouched feed is not a feed, and a stored snapshot whose
+publisher is missing from the bestiary fails the report rather than being
+quietly readmitted to it.
+
+`--fiat <CURRENCY>` adds the currency's block: who quotes it, the cheapest
+and dearest quote, and the disparity between them. The disparity is about
+*now*: only the quotes that are still fresh set `low`, `high` and the
+ratio, because two prices an hour apart differ by the market moving — which
+is not a disagreement between instances — and a price whose own event has
+expired is not what the feed quotes today. Everyone quoting the currency is
+still counted under `quoted_by`, so a currency nobody quotes live says `—`
+rather than reporting the disagreement of two dead snapshots; one
+comparable quote disagrees with nobody, and that row says `—` too. Without
+`--instance` the report covers every instance in the bestiary, one block
+each.
+
 ### Series
 
 ```console
@@ -586,11 +670,24 @@ examples above.
 
 The metric name is whatever the reports call it, and nothing keeps a
 separate list: a metric a family gains is one `series` can plot the day it
-lands. A name that does not exist is answered with the ones that do. Two
-kinds of figure are refused rather than plotted: those about *now*
+lands. That includes the names the data gives rather than the code —
+`volume.fiat.ARS.total` exists because an ARS order completed — so which
+names are plottable depends on the window, and a name that does not exist
+in it is answered with the ones that do. A converted figure names its own
+currency and is priced from the snapshots exactly as `stats volume --in
+USD` is: `series volume.in.USD.total` needs no flag of its own.
+
+An inferred figure stays inferred once it is a bucket: `(inf)` in the
+table, `"kind": "inferred"` in the JSON, with the qualification the report
+gives it — and so does a Δ between two of them, since a change between two
+estimates is an estimate.
+
+Two kinds of figure are refused rather than plotted: those about *now*
 (`orders.open_now`), which would be the same number in every bucket, and
 those that are already a change against a previous period
-(`orders.created_delta`), since a Δ of a Δ answers nothing.
+(`orders.created_delta`), since a Δ of a Δ answers nothing. So is a range
+with more buckets than a table anybody reads — before the buckets are
+built, not after.
 
 ### Dev fees
 
@@ -780,6 +877,52 @@ $ bestiario instance Mostro --from 2026-08-23 --until 2026-08-27
 │ share.volume                     ┆ 0.0%                                                             │
 └──────────────────────────────────┴──────────────────────────────────────────────────────────────────┘
 ```
+
+### One currency's market
+
+```console
+$ bestiario market ARS --from 2026-08-23 --until 2026-08-27
+2026-08-23T00:00:00+00:00 — 2026-08-27T00:00:00+00:00
+┌─────────────────────────────────────┬───────────────────────────────────────────┐
+│ metric                              ┆ value                                     │
+╞═════════════════════════════════════╪═══════════════════════════════════════════╡
+│ market.ARS.orders                   ┆ 2                                         │
+│ market.ARS.buy_orders_share         ┆ 50.0%                                     │
+│ market.ARS.buy_volume_share         ┆ —                                         │
+│ market.ARS.premium_avg              ┆ —                                         │
+│ market.ARS.premium_p50              ┆ —                                         │
+│ market.ARS.premium_p50_buy          ┆ —                                         │
+│ market.ARS.premium_p50_sell         ┆ —                                         │
+│ market.ARS.premium_spread           ┆ —                                         │
+│ market.ARS.market_price_share       ┆ 50.0%                                     │
+│ market.ARS.range_share              ┆ 50.0%                                     │
+│ market.ARS.range_width_avg          ┆ 66.7%                                     │
+│ market.ARS.range_width_fiat_avg     ┆ 50000.00 ARS                              │
+│ market.ARS.method_top3_by_orders    ┆ CBU 2, CVU 2, Belo 1                      │
+│ market.ARS.method_top3_by_volume    ┆ —                                         │
+│ market.ARS.new_methods              ┆ Belo, CBU, CVU, Lemon, MODO, Mercado Pago │
+│ market.ARS.time_to_fill_samples     ┆ 0                                         │
+│ market.ARS.time_to_fill_p50         ┆ —                                         │
+│ market.ARS.time_to_fill_p90         ┆ —                                         │
+│ market.ARS.book_size                ┆ 1                                         │
+│ market.ARS.instances                ┆ 1                                         │
+│ market.ARS.instances_top3_by_orders ┆ Mostro (6320ee5e) 2                       │
+│ market.ARS.instances_top3_by_volume ┆ —                                         │
+└─────────────────────────────────────┴───────────────────────────────────────────┘
+```
+
+Everything the reports know about one currency, in one place: which way its
+book leans and at what premium, how it is priced, which payment methods it
+is offered over, how long an order takes to find a taker, and which
+instances trade it at all. The figures are the ones `stats market` and
+`stats timing` report, each over the cohort its own family uses, so nothing
+here can drift from where it is quoted from: the structure rows count the
+orders *standing* in the currency — a currency is what an order's latest
+version says it is — and the timing rows count the orders that *entered the
+book* in it, because a time-to-fill is measured from the book entry and an
+order amended from ARS to USD waited in ARS. The two differ only for an
+order amended into another currency. Ranking currencies inside a single
+currency would say nothing, so those rows are absent.
 
 ### Comparison
 
