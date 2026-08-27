@@ -201,6 +201,7 @@ enum Parsed {
     DevFee(Box<parse::dev_fee::DevFee>),
     Dispute(Box<parse::dispute::DisputeVersion>),
     Info(Box<parse::info::InstanceInfo>),
+    Rates(Box<parse::rates::RateSnapshot>),
 }
 
 /// The pipeline itself: a database and the policy to admit events by.
@@ -374,6 +375,7 @@ impl Pipeline {
             parse::dev_fee::KIND => Ok(Parsed::DevFee(Box::new(parse::dev_fee::parse(event)?))),
             parse::dispute::KIND => Ok(Parsed::Dispute(Box::new(parse::dispute::parse(event)?))),
             parse::info::KIND => Ok(Parsed::Info(Box::new(parse::info::parse(event)?))),
+            parse::rates::KIND => Ok(Parsed::Rates(Box::new(parse::rates::parse(event)?))),
             kind => Err(Rejection::UnsupportedKind { kind }),
         }
     }
@@ -417,6 +419,9 @@ impl Pipeline {
             Parsed::Info(info) => {
                 repo::instance_info::insert_version(&mut **tx, info).await?;
             }
+            Parsed::Rates(snapshot) => {
+                repo::rates::insert(&mut **tx, snapshot).await?;
+            }
         }
 
         Ok(())
@@ -447,6 +452,7 @@ pub(crate) async fn seed_fixtures(pool: &SqlitePool, now: i64) {
         parse::dev_fee::KIND,
         parse::dispute::KIND,
         parse::info::KIND,
+        parse::rates::KIND,
     ] {
         for event in corpus(kind) {
             pipeline

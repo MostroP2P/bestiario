@@ -80,7 +80,7 @@ an error naming the key rather than a report with a hole in it.
 
 ```console
 $ bestiario backfill
-backfill: 20 stored, 4 already known, 3 rejected
+backfill: 22 stored, 5 already known, 3 rejected
 ```
 
 `backfill` walks each relay's history backwards, from now down to
@@ -339,7 +339,7 @@ $ bestiario instance Mostro --from 2026-08-23 --until 2026-08-27
 │ instance.ln_networks             ┆ —                                                                │
 │ instance.bond                    ┆ —                                                                │
 │ instance.first_seen              ┆ 2026-08-25T01:24:38+00:00                                        │
-│ instance.last_seen               ┆ 2026-08-26T10:39:05+00:00                                        │
+│ instance.last_seen               ┆ 2026-08-26T10:39:33+00:00                                        │
 │ instance.silent_for              ┆ 16.5h                                                            │
 │ instance.silent                  ┆ no                                                               │
 │ orders.created                   ┆ 4                                                                │
@@ -496,7 +496,7 @@ segment (`orders.ARS.created`), so a consumer can split on the dot.
 
 ```console
 $ bestiario rebuild
-rebuild: 20 events replayed (0 unreadable), 8 orders and 5 disputes projected
+rebuild: 22 events replayed (0 unreadable), 8 orders and 5 disputes projected
 ```
 
 Every table except the raw event archive is derived from it. `rebuild`

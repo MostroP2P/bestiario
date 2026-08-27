@@ -286,7 +286,7 @@ async fn instance_info_lands_and_names_the_instance() {
 async fn a_kind_with_no_parser_is_rejected_but_stays_in_the_archive() {
     // Arrange
     let pool = migrated().await;
-    let event = load(30078, "typical");
+    let event = load(10002, "typical");
 
     // Act
     let outcome = pipeline(&pool, open_policy())
@@ -297,7 +297,7 @@ async fn a_kind_with_no_parser_is_rejected_but_stays_in_the_archive() {
     // Assert
     assert_eq!(
         outcome,
-        IngestOutcome::Rejected(Rejection::UnsupportedKind { kind: 30078 })
+        IngestOutcome::Rejected(Rejection::UnsupportedKind { kind: 10002 })
     );
     // Archived on purpose: 30078 and 10002 are part of the corpus, they just
     // have no parser yet. Keeping the raw event is what lets a later
@@ -400,4 +400,24 @@ async fn a_duplicate_from_a_second_relay_advances_that_relay_s_cursor() {
         .expect("read")
         .expect("cursor advanced");
     assert_eq!(cursor.last_created_at, event.created_at.as_secs() as i64);
+}
+
+#[tokio::test]
+async fn a_rate_snapshot_is_stored_in_the_rates_table() {
+    // Arrange
+    let pool = migrated().await;
+    let event = load(30078, "typical");
+
+    // Act
+    let outcome = pipeline(&pool, open_policy())
+        .ingest(&event, RELAY, NOW)
+        .await
+        .expect("ingest");
+
+    // Assert
+    assert_eq!(outcome, IngestOutcome::Stored);
+    let snapshots = crate::db::repo::rates::all(&pool).await.expect("rates");
+    assert_eq!(snapshots.len(), 1);
+    assert_eq!(snapshots[0].event_id, event.id.to_hex());
+    assert!(snapshots[0].rates.contains_key("USD"));
 }

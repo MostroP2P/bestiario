@@ -34,8 +34,8 @@ use nostr_sdk::prelude::{
 use tempfile::TempDir;
 
 /// The kinds the backfill walks, in the fixture directories of the same
-/// name. Rates and relay lists are phase 3 and 4.
-const KINDS: [u16; 4] = [38383, 8383, 38386, 38385];
+/// name. Relay lists (10002) are discovery, not indexing.
+const KINDS: [u16; 5] = [38383, 8383, 38386, 38385, 30078];
 
 /// A window around the capture date of the fixtures (2026-08-26).
 const FROM: &str = "1787500000";

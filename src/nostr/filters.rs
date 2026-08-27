@@ -16,7 +16,7 @@
 use nostr_sdk::prelude::{Filter, Kind, PublicKey, Timestamp};
 
 use crate::commands::range::Range;
-use crate::ingest::parse::{dev_fee, dispute, info, order};
+use crate::ingest::parse::{dev_fee, dispute, info, order, rates};
 
 /// The kinds the pipeline can parse today (`docs/SPEC.md` §2.1–§2.4).
 ///
@@ -24,7 +24,13 @@ use crate::ingest::parse::{dev_fee, dispute, info, order};
 /// deliberately absent: subscribing to events nothing can read would spend a
 /// relay's bandwidth to fill the rejected counter. [`for_kind`] takes any
 /// kind, so they cost one line each when their parsers land.
-pub const INDEXED_KINDS: [u16; 4] = [order::KIND, dev_fee::KIND, dispute::KIND, info::KIND];
+pub const INDEXED_KINDS: [u16; 5] = [
+    order::KIND,
+    dev_fee::KIND,
+    dispute::KIND,
+    info::KIND,
+    rates::KIND,
+];
 
 /// A filter for one kind, optionally narrowed to `authors` and to `range`.
 ///

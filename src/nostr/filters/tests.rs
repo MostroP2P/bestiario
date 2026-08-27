@@ -142,19 +142,25 @@ fn there_is_one_filter_per_indexed_kind_in_order() {
             json!([38383]),
             json!([8383]),
             json!([38386]),
-            json!([38385])
+            json!([38385]),
+            json!([30078])
         ]
     );
 }
 
 #[test]
 fn the_indexed_kinds_are_the_ones_with_a_parser() {
-    // Kinds 30078 and 10002 are in the spec but have no parser yet.
+    // Kind 10002 is in the spec but is relay discovery, not indexing (PR 40).
     assert_eq!(
         INDEXED_KINDS,
-        [order::KIND, dev_fee::KIND, dispute::KIND, info::KIND]
+        [
+            order::KIND,
+            dev_fee::KIND,
+            dispute::KIND,
+            info::KIND,
+            rates::KIND
+        ]
     );
-    assert!(!INDEXED_KINDS.contains(&30078));
     assert!(!INDEXED_KINDS.contains(&10002));
 }
 
