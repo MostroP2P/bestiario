@@ -28,3 +28,7 @@
 //! Aggregations therefore take plain structs and return plain structs, which
 //! is also what makes them testable against a hand-built dataset and a
 //! hand-computed expected value.
+
+pub mod metric;
+
+pub use metric::{Metric, MetricKind, Value};
