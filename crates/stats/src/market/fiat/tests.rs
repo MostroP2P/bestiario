@@ -153,6 +153,54 @@ fn a_currency_nobody_traded_is_zeros_and_dashes_not_an_empty_report() {
     assert_eq!(value("time_to_fill_p50"), &Value::Missing);
 }
 
+/// An order first published in ARS and later amended to USD: its market
+/// structure belongs to USD, its time-to-fill to ARS.
+fn amended() -> Vec<Order> {
+    let mut order = completed(1_700, 1_800, order("m1", "Alpha", "USD", 1_100, 7_000));
+    order.origin.fiat_code = "ARS".into();
+    vec![order]
+}
+
+#[test]
+fn an_amended_order_is_timed_where_it_entered_the_book() {
+    // Arrange / Act
+    let ars = report(&amended(), "ARS", WINDOW, NOW);
+    let usd = report(&amended(), "USD", WINDOW, NOW);
+    let value = |metrics: &[Metric], name: &str| {
+        metrics
+            .iter()
+            .find(|metric| metric.name == format!("market.{name}"))
+            .expect("present")
+            .value
+            .clone()
+    };
+
+    // Assert: taken 600 s after it was published, under the currency it
+    // waited in, which is what `stats timing --by fiat` would say.
+    assert_eq!(value(&ars, "ARS.time_to_fill_p50"), Value::Seconds(600));
+    assert_eq!(value(&usd, "USD.time_to_fill_p50"), Value::Missing);
+    // Its structure, though, is counted where it now stands.
+    assert_eq!(value(&usd, "USD.orders"), Value::Count(1));
+    assert_eq!(value(&ars, "ARS.orders"), Value::Count(0));
+}
+
+#[test]
+fn an_instance_silent_all_window_is_not_ranked_by_orders() {
+    // Arrange: Gamma's only ARS order predates the window.
+    let mut book = book();
+    book.push(order("g1", "Gamma", "ARS", 500, 1_000));
+
+    // Act
+    let metrics = report(&book, "ARS", WINDOW, NOW);
+
+    // Assert
+    assert_eq!(value(&metrics, "instances"), &Value::Count(2));
+    assert_eq!(
+        value(&metrics, "instances_top3_by_orders"),
+        &Value::Text("Alpha 2, Beta 1".into()),
+    );
+}
+
 #[test]
 fn every_figure_of_the_view_is_observed() {
     assert!(
