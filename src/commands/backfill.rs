@@ -277,7 +277,19 @@ pub async fn run(context: &Context<'_>, kind: Option<u16>, now: i64) -> Result<(
     // failed run would keep the relays holding a subscription nobody reads.
     client.shutdown().await;
 
-    report(context, &counts?, range);
+    let counts = counts?;
+
+    // What was asked for, recorded whether or not it brought anything back.
+    // A kind that came back empty is a fact about the network only if
+    // something went and looked; `--kind` makes that a per-kind question,
+    // and `db::repo::events::earliest_created_at` reads the answer here.
+    for &kind in &kinds {
+        crate::db::repo::indexed_kinds::record(context.pool, kind, range.from(), now)
+            .await
+            .with_context(|| format!("recording that kind {kind} was indexed"))?;
+    }
+
+    report(context, &counts, range);
 
     Ok(())
 }

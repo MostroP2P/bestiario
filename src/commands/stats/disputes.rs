@@ -40,7 +40,14 @@ pub async fn report(
         window,
         now,
         dimension,
-        super::super::coverage(pool, &[parse::dispute::KIND]).await?,
+        super::super::coverage(
+            pool,
+            // The rate divides disputes by the orders that left pending, so
+            // a bucket is only answerable when both histories reach it.
+            &[parse::dispute::KIND, parse::order::KIND],
+            &query.scope,
+        )
+        .await?,
     );
 
     Ok(Report::new(query.range, metrics, now))

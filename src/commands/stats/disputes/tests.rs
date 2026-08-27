@@ -235,3 +235,60 @@ async fn a_daily_report_names_each_day_and_keeps_the_quiet_ones() {
     );
     assert_eq!(dimension(DisputeDimension::Day), Dimension::Day);
 }
+
+#[tokio::test]
+async fn a_day_the_order_history_does_not_reach_is_missing_rather_than_a_rate() {
+    // Arrange: disputes reach a day further back than the orders do, and
+    // `disputes.rate` divides the two. A bucket with only half of that is
+    // not a rate, however confident the numerator looks.
+    let pool = seeded().await;
+    event(&pool, "old-dispute", 38386, FROM - 86_400).await;
+    let query = Query {
+        range: Range::resolve(Some(FROM - 86_400), Some(UNTIL), NOW).expect("window"),
+        ..query()
+    };
+
+    // Act
+    let report = report(&pool, &query, Some(Dimension::Day), NOW)
+        .await
+        .expect("report");
+
+    // Assert
+    assert_eq!(
+        value(&report, "disputes.2026-08-24.opened"),
+        &Value::Missing
+    );
+    assert_eq!(
+        value(&report, "disputes.2026-08-25.opened"),
+        &Value::Count(2),
+        "the day the orders reach is answered"
+    );
+}
+
+#[tokio::test]
+async fn a_kind_nobody_asked_for_leaves_the_whole_report_missing() {
+    // Arrange: an archive holding orders only — `backfill --kind 38383`.
+    // Nothing ever looked for a dispute, so no day is a confirmed zero.
+    let pool = connect_and_migrate("sqlite::memory:")
+        .await
+        .expect("migrate");
+    settled(&pool, "o1", FROM + 100).await;
+    crate::db::repo::indexed_kinds::record(&pool, order::KIND, 0, NOW)
+        .await
+        .expect("record");
+
+    // Act
+    let report = report(&pool, &query(), Some(Dimension::Day), NOW)
+        .await
+        .expect("report");
+
+    // Assert
+    assert!(
+        report
+            .metrics
+            .iter()
+            .filter(|metric| metric.name.ends_with(".opened"))
+            .all(|metric| metric.value == Value::Missing),
+        "unknown history is not zero disputes"
+    );
+}

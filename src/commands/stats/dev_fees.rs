@@ -52,7 +52,12 @@ pub async fn report(
         window,
         dimension,
         &pct,
-        super::super::coverage(pool, &[parse::dev_fee::KIND, parse::order::KIND]).await?,
+        super::super::coverage(
+            pool,
+            &[parse::dev_fee::KIND, parse::order::KIND],
+            &query.scope,
+        )
+        .await?,
     );
 
     Ok(Report::new(query.range, metrics, now))

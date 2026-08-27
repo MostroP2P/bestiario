@@ -280,6 +280,15 @@ bestiario was not there. Those days keep their rows and report `—`, and a Δ
 against one of them is `—` too. Relays hold orders for about a fortnight,
 so any window reaching back past your first `backfill` will show them.
 
+The same applies to a kind nothing ever asked for. `backfill --kind 38383`
+indexes orders and leaves disputes untouched; a later `stats disputes --by
+day` then has no dispute history to speak from, and reports `—` throughout
+rather than a month of confident zeros. Run `backfill` without `--kind`, or
+`sync`, and the days it covered become answerable — zeros included, because
+a day nobody disputed anything is a fact. A report combining families needs
+all of them: the dispute rate divides disputes by orders, so a day is
+answerable only when both reach it.
+
 ### Volume
 
 ```console

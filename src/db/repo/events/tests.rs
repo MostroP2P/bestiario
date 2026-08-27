@@ -153,10 +153,38 @@ async fn two_versions_of_the_same_order_are_two_rows() {
 const JANUARY: i64 = 1_767_225_600;
 const AUGUST: i64 = 1_787_702_400;
 
+const ALPHA: &str = "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390";
+const BETA: &str = "6320ee5e2b6f0e0e0a5d3f5f8e8a3c2b1d0f9e8d7c6b5a4938271605f4e3d2c1";
+
+/// Every instance, every network: what a report with no `--instance` asks.
+const EVERYTHING: Scope = Scope {
+    pubkey: None,
+    networks: Vec::new(),
+};
+
+fn only(pubkey: &str) -> Scope {
+    Scope {
+        pubkey: Some(pubkey.to_string()),
+        networks: Vec::new(),
+    }
+}
+
+/// Records that `kind` was asked for from the beginning, which is what a
+/// full backfill or a first `sync` does.
+async fn asked_for(pool: &SqlitePool, kind: u16) {
+    crate::db::repo::indexed_kinds::record(pool, kind, 0, AUGUST)
+        .await
+        .expect("record");
+}
+
 async fn stored(pool: &SqlitePool, id: &str, kind: i64, created_at: i64) {
+    stored_by(pool, id, kind, created_at, ALPHA).await;
+}
+
+async fn stored_by(pool: &SqlitePool, id: &str, kind: i64, created_at: i64, pubkey: &str) {
     let record = EventRecord {
         id: id.to_string(),
-        pubkey: "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390".to_string(),
+        pubkey: pubkey.to_string(),
         kind,
         created_at,
         d_tag: None,
@@ -177,12 +205,16 @@ async fn a_kind_the_relays_expired_earlier_has_a_later_floor_than_the_archive() 
 
     // Act / Assert
     assert_eq!(
-        earliest_created_at(&pool, &[38383]).await.expect("read"),
+        earliest_created_at(&pool, &[38383], &EVERYTHING)
+            .await
+            .expect("read"),
         Some(AUGUST),
         "January's order-days were never indexed"
     );
     assert_eq!(
-        earliest_created_at(&pool, &[8383]).await.expect("read"),
+        earliest_created_at(&pool, &[8383], &EVERYTHING)
+            .await
+            .expect("read"),
         Some(JANUARY)
     );
 }
@@ -193,7 +225,7 @@ async fn a_report_reading_several_kinds_can_only_speak_for_what_it_has_all_of() 
     stored(&pool, "fee", 8383, JANUARY).await;
     stored(&pool, "order", 38383, AUGUST).await;
 
-    let both = earliest_created_at(&pool, &[8383, 38383])
+    let both = earliest_created_at(&pool, &[8383, 38383], &EVERYTHING)
         .await
         .expect("read");
 
@@ -201,15 +233,91 @@ async fn a_report_reading_several_kinds_can_only_speak_for_what_it_has_all_of() 
 }
 
 #[tokio::test]
-async fn a_kind_the_archive_holds_none_of_falls_back_to_when_indexing_began() {
-    // bestiario was there from January and saw no disputes: that is a
-    // fact about the network, not a hole in the archive.
+async fn a_kind_that_was_asked_for_and_never_seen_is_covered_from_when_indexing_began() {
+    // Arrange: bestiario asked for disputes from the beginning and saw
+    // none. That is a fact about the network, not a hole in the archive.
     let pool = migrated().await;
     stored(&pool, "fee", 8383, JANUARY).await;
+    asked_for(&pool, 38386).await;
 
-    let disputes = earliest_created_at(&pool, &[38386]).await.expect("read");
+    // Act
+    let disputes = earliest_created_at(&pool, &[38386], &EVERYTHING)
+        .await
+        .expect("read");
 
+    // Assert
     assert_eq!(disputes, Some(JANUARY));
+}
+
+#[tokio::test]
+async fn a_kind_nobody_ever_asked_for_is_not_a_confirmed_zero() {
+    // Arrange: `backfill --kind 8383` populated the archive and left
+    // disputes untouched. Their history is unknown, not empty.
+    let pool = migrated().await;
+    stored(&pool, "fee", 8383, JANUARY).await;
+    asked_for(&pool, 8383).await;
+
+    // Act
+    let disputes = earliest_created_at(&pool, &[38386], &EVERYTHING)
+        .await
+        .expect("read");
+
+    // Assert
+    assert_eq!(
+        disputes, None,
+        "the report can speak for none of the window"
+    );
+}
+
+#[tokio::test]
+async fn a_report_reading_two_kinds_speaks_for_neither_when_one_was_never_asked_for() {
+    let pool = migrated().await;
+    stored(&pool, "fee", 8383, JANUARY).await;
+    asked_for(&pool, 8383).await;
+
+    let both = earliest_created_at(&pool, &[8383, 38386], &EVERYTHING)
+        .await
+        .expect("read");
+
+    assert_eq!(both, None);
+}
+
+#[tokio::test]
+async fn an_instance_scoped_floor_is_that_instance_s_own() {
+    // Arrange: Alpha has been indexed since January; Beta was added in
+    // August, by which time its older orders had expired off the relays.
+    let pool = migrated().await;
+    stored_by(&pool, "alpha", 38383, JANUARY, ALPHA).await;
+    stored_by(&pool, "beta", 38383, AUGUST, BETA).await;
+
+    // Act / Assert
+    assert_eq!(
+        earliest_created_at(&pool, &[38383], &only(BETA))
+            .await
+            .expect("read"),
+        Some(AUGUST),
+        "Beta's earlier days were never indexed; Alpha's reach is not Beta's"
+    );
+    assert_eq!(
+        earliest_created_at(&pool, &[38383], &only(ALPHA))
+            .await
+            .expect("read"),
+        Some(JANUARY)
+    );
+}
+
+#[tokio::test]
+async fn an_instance_the_archive_holds_nothing_of_can_speak_for_nothing() {
+    let pool = migrated().await;
+    stored_by(&pool, "alpha", 38383, JANUARY, ALPHA).await;
+    asked_for(&pool, 38383).await;
+
+    assert_eq!(
+        earliest_created_at(&pool, &[38383], &only(BETA))
+            .await
+            .expect("read"),
+        None
+    );
 }
 
 #[tokio::test]
@@ -217,7 +325,9 @@ async fn an_empty_archive_can_speak_for_nothing() {
     let pool = migrated().await;
 
     assert_eq!(
-        earliest_created_at(&pool, &[38383]).await.expect("read"),
+        earliest_created_at(&pool, &[38383], &EVERYTHING)
+            .await
+            .expect("read"),
         None
     );
 }

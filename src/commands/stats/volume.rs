@@ -72,7 +72,7 @@ pub async fn report(
             window,
             dimension,
             conversion,
-            super::super::coverage(pool, &[parse::order::KIND]).await?,
+            super::super::coverage(pool, &[parse::order::KIND], &query.scope).await?,
         ),
         now,
     ))

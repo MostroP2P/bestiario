@@ -6,11 +6,12 @@ use super::*;
 
 /// The tables of `docs/SPEC.md` §4. Listed explicitly rather than counted, so
 /// that a migration which drops one fails with the name of what went missing.
-const EXPECTED_TABLES: [&str; 12] = [
+const EXPECTED_TABLES: [&str; 13] = [
     "dev_fees",
     "dispute_versions",
     "disputes",
     "events",
+    "indexed_kinds",
     "instance_info",
     "instance_names",
     "instances",
