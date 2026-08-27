@@ -655,11 +655,24 @@ examples above.
 
 The metric name is whatever the reports call it, and nothing keeps a
 separate list: a metric a family gains is one `series` can plot the day it
-lands. A name that does not exist is answered with the ones that do. Two
-kinds of figure are refused rather than plotted: those about *now*
+lands. That includes the names the data gives rather than the code —
+`volume.fiat.ARS.total` exists because an ARS order completed — so which
+names are plottable depends on the window, and a name that does not exist
+in it is answered with the ones that do. A converted figure names its own
+currency and is priced from the snapshots exactly as `stats volume --in
+USD` is: `series volume.in.USD.total` needs no flag of its own.
+
+An inferred figure stays inferred once it is a bucket: `(inf)` in the
+table, `"kind": "inferred"` in the JSON, with the qualification the report
+gives it — and so does a Δ between two of them, since a change between two
+estimates is an estimate.
+
+Two kinds of figure are refused rather than plotted: those about *now*
 (`orders.open_now`), which would be the same number in every bucket, and
 those that are already a change against a previous period
-(`orders.created_delta`), since a Δ of a Δ answers nothing.
+(`orders.created_delta`), since a Δ of a Δ answers nothing. So is a range
+with more buckets than a table anybody reads — before the buckets are
+built, not after.
 
 ### Dev fees
 
