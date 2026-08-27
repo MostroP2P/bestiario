@@ -35,12 +35,12 @@ number that is zero. The events carry no more than they carry:
 - **The intermediate states.** `fiat-sent` and `dispute` are published as
   `in-progress`; only `pending`, `in-progress`, `success` and `canceled`
   reach the wire.
-- **Volume in a reference currency, and the share of an instance's fee that
-  becomes the dev fee** — not in this release. They are *inferred* figures,
-  arriving in a later phase, and when they do they will be marked `(inf)`
-  in every table and `"kind": "inferred"` in every JSON record, with the
-  assumption they rest on beside them. Nothing in this release is inferred:
-  every figure below is a count of published events.
+- **Anything that needs a price, exactly.** Volume in a reference currency
+  rests on the rate an instance published minutes before a trade, and the
+  volume implied by dev fees rests on an assumed fee share. Those are
+  *inferred* figures: marked `(inf)` in every table and `"kind": "inferred"`
+  in every JSON record, with what qualifies them in an `error` column
+  beside them. Everything else below is a count of published events.
 
 ## Install
 
@@ -309,8 +309,48 @@ $ bestiario stats volume --by kind --from 2026-08-23 --until 2026-08-27
 └─────────────────────────────────┴────────────┘
 ```
 
-`--in <CURRENCY>` — the conversion into a reference currency — is inferred
-and arrives with roadmap PR 35; until then the flag is refused.
+`--in <CURRENCY>` adds the conversion into a reference currency: each
+completed order at the rate its instance had published by the moment it
+settled, summed. The figure is *inferred* — the rate is one instance's
+snapshot, minutes old — and every row of it says so, with what qualifies it
+in the `error` column: the age of the oldest rate used, how many orders were
+priced on another instance's snapshot, and how many had no rate at all and
+are left out of the sum:
+
+```console
+$ bestiario stats volume --in USD --from 2026-08-23 --until 2026-08-27
+2026-08-23T00:00:00+00:00 — 2026-08-27T00:00:00+00:00
+┌───────────────────────────────────┬────────────┬───────────────────────────────────────────────────────────────────────────────┐
+│ metric                            ┆ value      ┆ error                                                                         │
+╞═══════════════════════════════════╪════════════╪═══════════════════════════════════════════════════════════════════════════════╡
+│ volume.sats                       ┆ 1361 sats  ┆                                                                               │
+│ volume.completed                  ┆ 1          ┆                                                                               │
+│ volume.ticket_avg                 ┆ 1361 sats  ┆                                                                               │
+│ volume.ticket_p50                 ┆ 1361 sats  ┆                                                                               │
+│ volume.ticket_p90                 ┆ 1361 sats  ┆                                                                               │
+│ volume.largest                    ┆ 1361 sats  ┆                                                                               │
+│ volume.size.lt_10k                ┆ 1          ┆                                                                               │
+│ volume.size.10k_50k               ┆ 0          ┆                                                                               │
+│ volume.size.50k_200k              ┆ 0          ┆                                                                               │
+│ volume.size.200k_1m               ┆ 0          ┆                                                                               │
+│ volume.size.gt_1m                 ┆ 0          ┆                                                                               │
+│ volume.buy_sats                   ┆ 0 sats     ┆                                                                               │
+│ volume.sell_sats                  ┆ 1361 sats  ┆                                                                               │
+│ volume.fiat.CUP.total             ┆ 800.00 CUP ┆                                                                               │
+│ volume.fiat.CUP.orders            ┆ 1          ┆                                                                               │
+│ volume.fiat.CUP.ticket_avg        ┆ 800.00 CUP ┆                                                                               │
+│ volume.fiat.CUP.ticket_p50        ┆ 800.00 CUP ┆                                                                               │
+│ volume.fiat.CUP.ticket_p90        ┆ 800.00 CUP ┆                                                                               │
+│ volume.in.USD.total (inf)         ┆ —          ┆ no rate used; 1 unpriced (1361 sats excluded)                                 │
+│ volume.in.USD.orders (inf)        ┆ 0          ┆ orders with a rate published at or before success_at                          │
+│ volume.in.USD.unpriced_sats (inf) ┆ 1361 sats  ┆ sats of the orders no instance had a rate for by success_at; not in the total │
+│ volume.in.USD.rate_age_max (inf)  ┆ —          ┆ age of the oldest snapshot used                                               │
+└───────────────────────────────────┴────────────┴───────────────────────────────────────────────────────────────────────────────┘
+```
+
+Here the one completed order settled hours before the first rate snapshot
+was captured, so there is nothing to price it with: the total is `—`, not
+`0.00 USD`, and the excluded sats are counted.
 
 ### Dev fees
 

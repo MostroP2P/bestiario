@@ -134,7 +134,7 @@ fn no_completed_orders_is_zero_volume_not_a_missing_one() {
 
 #[test]
 fn the_global_report_names_the_figures_in_order() {
-    let names: Vec<String> = report(&dataset(), WINDOW, None)
+    let names: Vec<String> = report(&dataset(), WINDOW, None, None)
         .into_iter()
         .map(|metric| metric.name)
         .collect();
@@ -163,7 +163,7 @@ fn the_global_report_names_the_figures_in_order() {
 
 #[test]
 fn a_fiat_total_carries_its_currency() {
-    let metrics = report(&dataset(), WINDOW, None);
+    let metrics = report(&dataset(), WINDOW, None, None);
     let total = metrics
         .iter()
         .find(|metric| metric.name == "volume.fiat.USD.total")
@@ -180,14 +180,14 @@ fn a_fiat_total_carries_its_currency() {
 
 #[test]
 fn slices_put_the_key_in_the_name() {
-    let by_kind = report(&dataset(), WINDOW, Some(Dimension::Kind));
+    let by_kind = report(&dataset(), WINDOW, Some(Dimension::Kind), None);
     assert_eq!(by_kind[0].name, "volume.buy.sats");
     assert_eq!(by_kind[0].value, Value::Sats(155_000));
 
-    let by_fiat = report(&dataset(), WINDOW, Some(Dimension::Fiat));
+    let by_fiat = report(&dataset(), WINDOW, Some(Dimension::Fiat), None);
     assert_eq!(by_fiat[0].name, "volume.ARS.sats");
 
-    let by_instance = report(&dataset(), WINDOW, Some(Dimension::Instance));
+    let by_instance = report(&dataset(), WINDOW, Some(Dimension::Instance), None);
     assert_eq!(by_instance[0].name, "volume.Alpha (pk).sats");
 
     // 2026-07-01 to 2026-09-01: two months.
@@ -195,6 +195,7 @@ fn slices_put_the_key_in_the_name() {
         &dataset(),
         Window::new(1_782_864_000, 1_788_220_800),
         Some(Dimension::Month),
+        None,
     );
     assert_eq!(by_month[0].name, "volume.2026-07.sats");
     assert_eq!(by_month.len(), 2 * 13);
@@ -203,8 +204,65 @@ fn slices_put_the_key_in_the_name() {
 #[test]
 fn every_observed_volume_metric_is_observed() {
     assert!(
-        report(&dataset(), WINDOW, None)
+        report(&dataset(), WINDOW, None, None)
             .iter()
             .all(|metric| !metric.is_inferred())
     );
+}
+
+fn usd_book() -> crate::rates::RateBook {
+    crate::rates::RateBook::new(vec![crate::rates::Snapshot {
+        pubkey: "pk".into(),
+        published_at: 1_000,
+        rates: std::collections::BTreeMap::from([("USD".to_string(), 50_000.0)]),
+    }])
+}
+
+#[test]
+fn a_conversion_appends_its_inferred_rows_after_the_observed_ones() {
+    // Arrange
+    let book = usd_book();
+    let conversion = Conversion {
+        book: &book,
+        code: "USD",
+    };
+
+    // Act
+    let metrics = report(&dataset(), WINDOW, None, Some(conversion));
+
+    // Assert: the observed block is untouched, then the four inferred rows.
+    let observed = report(&dataset(), WINDOW, None, None);
+    assert_eq!(&metrics[..observed.len()], &observed[..]);
+    assert_eq!(metrics.len(), observed.len() + 4);
+    let total = &metrics[observed.len()];
+    assert_eq!(total.name, "volume.in.USD.total");
+    assert!(total.is_inferred());
+    // 5k + 30k + 150k + 2M sats at 50k USD/BTC.
+    assert_eq!(total.value, Value::fiat(1_092.5, "USD"));
+}
+
+#[test]
+fn a_conversion_is_reported_once_per_slice() {
+    let book = usd_book();
+    let conversion = Conversion {
+        book: &book,
+        code: "USD",
+    };
+
+    let by_kind = report(&dataset(), WINDOW, Some(Dimension::Kind), Some(conversion));
+
+    let names: Vec<&str> = by_kind
+        .iter()
+        .map(|metric| metric.name.as_str())
+        .filter(|name| name.contains(".in.USD.total"))
+        .collect();
+    assert_eq!(
+        names,
+        ["volume.buy.in.USD.total", "volume.sell.in.USD.total"]
+    );
+    let buy = by_kind
+        .iter()
+        .find(|metric| metric.name == "volume.buy.in.USD.total")
+        .expect("buy total");
+    assert_eq!(buy.value, Value::fiat(77.5, "USD"));
 }

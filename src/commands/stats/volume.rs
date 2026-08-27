@@ -1,7 +1,8 @@
 //! `bestiario stats volume [--by kind|fiat|instance|period] [--in CUR]`:
-//! the §6.2 figures. Wiring only, like [`super::orders`].
+//! the §6.2 figures. Wiring only, like [`super::orders`] — plus the one
+//! check the flags need, that `--in` names a currency code.
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use sqlx::SqlitePool;
 
 use crate::cli::VolumeDimension;
@@ -10,7 +11,7 @@ use crate::commands::query::Query;
 use crate::db::load;
 use crate::report::{Format, Report};
 use crate::stats::Window;
-use crate::stats::volume::{self, Dimension};
+use crate::stats::volume::{self, Conversion, Dimension};
 
 /// Resolves the flags, computes the report, prints it.
 pub async fn run(
@@ -19,33 +20,62 @@ pub async fn run(
     convert_to: Option<&str>,
     now: i64,
 ) -> Result<()> {
-    anyhow::ensure!(
-        convert_to.is_none(),
-        "`--in` is not implemented yet; it arrives in roadmap PR 35"
-    );
+    let code = convert_to.map(currency).transpose()?;
     let query = Query::resolve(context, now).await?;
-    let report = report(context.pool, &query, by.map(dimension), now).await?;
+    let report = report(
+        context.pool,
+        &query,
+        by.map(dimension),
+        code.as_deref(),
+        now,
+    )
+    .await?;
 
     print!("{}", report.render(Format::from_flag(context.cli.json)));
 
     Ok(())
 }
 
-/// The observed §6.2 metrics for `query`, globally or once per slice.
+/// The §6.2 metrics for `query`, globally or once per slice: the observed
+/// ones, and with `convert_to` the inferred conversion into that currency
+/// after them, priced from every rate snapshot the database holds.
 pub async fn report(
     pool: &SqlitePool,
     query: &Query,
     dimension: Option<Dimension>,
+    convert_to: Option<&str>,
     now: i64,
 ) -> Result<Report> {
     let orders = load::activity::orders(pool, &query.scope).await?;
     let window = Window::new(query.range.from(), query.range.until());
+    let book = match convert_to {
+        Some(_) => Some(
+            load::rates::book(pool)
+                .await
+                .context("loading the rate snapshots")?,
+        ),
+        None => None,
+    };
+    let conversion = book
+        .as_ref()
+        .zip(convert_to)
+        .map(|(book, code)| Conversion { book, code });
 
     Ok(Report::new(
         query.range,
-        volume::report(&orders, window, dimension),
+        volume::report(&orders, window, dimension, conversion),
         now,
     ))
+}
+
+/// `--in` as a currency code: three ASCII letters, upper-cased, the way
+/// the instances publish them in their snapshots and their orders.
+fn currency(flag: &str) -> Result<String> {
+    anyhow::ensure!(
+        flag.len() == 3 && flag.bytes().all(|byte| byte.is_ascii_alphabetic()),
+        "`--in {flag}`: a currency is a three-letter code such as USD"
+    );
+    Ok(flag.to_ascii_uppercase())
 }
 
 fn dimension(by: VolumeDimension) -> Dimension {

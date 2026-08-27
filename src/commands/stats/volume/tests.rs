@@ -5,8 +5,9 @@ use crate::commands::range::Range;
 use crate::db::connect_and_migrate;
 use crate::db::load::Scope;
 use crate::db::repo::events::{self, EventRecord};
-use crate::db::repo::{instances, orders};
+use crate::db::repo::{instances, orders, rates};
 use crate::ingest::parse::order::{Direction, FiatAmount, OrderVersion, Status};
+use crate::ingest::parse::rates::RateSnapshot;
 use crate::ingest::pipeline::seed_fixtures;
 use crate::network::Network;
 use crate::stats::Value;
@@ -97,7 +98,9 @@ async fn the_global_report_reads_the_seeded_orders() {
         .expect("alpha");
 
     // Act
-    let report = report(&pool, &query(), None, NOW).await.expect("report");
+    let report = report(&pool, &query(), None, None, NOW)
+        .await
+        .expect("report");
 
     // Assert
     assert_eq!(value(&report, "volume.sats"), &Value::Sats(2_035_000));
@@ -123,7 +126,7 @@ async fn slicing_by_instance_labels_the_slice() {
         .await
         .expect("alpha");
 
-    let report = report(&pool, &query(), Some(Dimension::Instance), NOW)
+    let report = report(&pool, &query(), Some(Dimension::Instance), None, NOW)
         .await
         .expect("report");
 
@@ -147,7 +150,9 @@ async fn the_volume_over_the_real_corpus_matches_the_hand_count() {
         ..query()
     };
 
-    let report = report(&pool, &query, None, now).await.expect("report");
+    let report = report(&pool, &query, None, None, now)
+        .await
+        .expect("report");
 
     assert_eq!(value(&report, "volume.completed"), &Value::Count(1));
     assert_eq!(value(&report, "volume.sats"), &Value::Sats(1_361));
@@ -165,4 +170,100 @@ async fn every_cli_dimension_maps_to_an_aggregation_dimension() {
     assert_eq!(dimension(VolumeDimension::Fiat), Dimension::Fiat);
     assert_eq!(dimension(VolumeDimension::Instance), Dimension::Instance);
     assert_eq!(dimension(VolumeDimension::Period), Dimension::Month);
+}
+
+async fn quoted(pool: &SqlitePool, pubkey: &str, at: i64, usd: f64) {
+    let event_id = format!("rate-{pubkey}-{at}");
+    events::insert_if_new(
+        pool,
+        &EventRecord {
+            id: event_id.clone(),
+            pubkey: pubkey.to_string(),
+            kind: 30078,
+            created_at: at,
+            d_tag: Some("mostro-rates".to_string()),
+            raw_json: "{}".to_string(),
+            relay_url: "wss://relay.mostro.network".to_string(),
+            seen_at: at,
+        },
+    )
+    .await
+    .expect("event");
+    rates::insert(
+        pool,
+        &RateSnapshot {
+            event_id,
+            pubkey: pubkey.to_string(),
+            published_at: at,
+            source: Some("yadio".to_string()),
+            rates: std::collections::BTreeMap::from([("USD".to_string(), usd)]),
+        },
+    )
+    .await
+    .expect("rate");
+}
+
+#[tokio::test]
+async fn converting_prices_each_order_at_the_rate_in_force_when_it_settled() {
+    // Arrange: 5k sats at 50k USD/BTC, then 30k sats after the rate moved
+    // to 60k. 2.5 + 18 USD.
+    let pool = connect_and_migrate("sqlite::memory:")
+        .await
+        .expect("migrate");
+    quoted(&pool, ALPHA, FROM, 50_000.0).await;
+    settled(&pool, "a", FROM + 100, 5_000, FiatAmount::Fixed(50.0)).await;
+    quoted(&pool, ALPHA, FROM + 150, 60_000.0).await;
+    settled(&pool, "b", FROM + 200, 30_000, FiatAmount::Fixed(300.0)).await;
+
+    // Act
+    let report = report(&pool, &query(), None, Some("USD"), NOW)
+        .await
+        .expect("report");
+
+    // Assert
+    let total = report
+        .metrics
+        .iter()
+        .find(|metric| metric.name == "volume.in.USD.total")
+        .expect("the total");
+    assert_eq!(total.value, Value::fiat(20.5, "USD"));
+    assert!(total.is_inferred());
+    assert_eq!(total.error(), Some("rate_age_secs ≤ 100"));
+    assert_eq!(value(&report, "volume.in.USD.orders"), &Value::Count(2));
+}
+
+#[tokio::test]
+async fn the_currency_flag_is_upper_cased_and_checked() {
+    assert_eq!(currency("usd").expect("valid"), "USD");
+    assert_eq!(currency("EUR").expect("valid"), "EUR");
+    assert!(currency("").is_err());
+    assert!(currency("us$").is_err());
+    assert!(currency("dollars").is_err());
+}
+
+/// Over the real corpus the one completed order settled hours before the
+/// first rate snapshot: nothing to price it with, and the report says so
+/// rather than printing a zero.
+#[tokio::test]
+async fn an_order_older_than_every_rate_leaves_the_converted_total_missing() {
+    let pool = connect_and_migrate("sqlite::memory:")
+        .await
+        .expect("migrate");
+    let now = 1_787_800_000;
+    seed_fixtures(&pool, now).await;
+    let query = Query {
+        range: Range::resolve(Some(1_787_500_000), Some(now), now).expect("window"),
+        ..query()
+    };
+
+    let report = report(&pool, &query, None, Some("USD"), now)
+        .await
+        .expect("report");
+
+    assert_eq!(value(&report, "volume.in.USD.total"), &Value::Missing);
+    assert_eq!(
+        value(&report, "volume.in.USD.unpriced_sats"),
+        &Value::Sats(1_361)
+    );
+    assert_eq!(value(&report, "volume.in.USD.orders"), &Value::Count(0));
 }
