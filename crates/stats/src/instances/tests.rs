@@ -53,6 +53,7 @@ fn order(id: &str, pubkey: &str, created_at: i64, status: Status, sats: i64) -> 
         direction: Direction::Buy,
         fiat_code: "ARS".into(),
         payment_methods: vec![],
+        created_payment_methods: vec![],
         amount_sats: sats,
         fiat_amount: None,
         premium: 0.0,

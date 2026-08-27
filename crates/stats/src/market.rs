@@ -15,9 +15,24 @@
 //! cleared at, and an open order's is only an ask — and the rankings by
 //! volume.
 //!
-//! Range width is relative, `(max − min) / max` — how much of the range's
-//! top is play, between 0 and 1 — so that a block mixing currencies still
-//! has a meaningful average.
+//! # Range width, twice
+//!
+//! A range order's width is `max − min` in its own currency, and averaging
+//! those across a book that holds ARS beside EUR averages nothing. So the
+//! figure every block carries is the *relative* width, `(max − min) / max`
+//! — how much of the range's top is play, between 0 and 1 — which is
+//! comparable across currencies. A `--by fiat` block is one currency, and
+//! there the absolute width is meaningful and is reported beside it: the
+//! relative form alone would say that `[10, 100]` is wider than
+//! `[900, 1000]`, which in ARS it is not.
+//!
+//! # Payment methods
+//!
+//! The rankings and first sightings count the methods of an order's
+//! *first* version, not of the projection. A `pm` list amended after
+//! creation is not what was on the book, and a method added to an old
+//! order would otherwise be dated by that order's creation and hide a
+//! genuine first sighting.
 
 use std::collections::BTreeSet;
 
@@ -61,8 +76,12 @@ pub struct Market {
     pub market_price_share: Option<f64>,
     /// Range orders over orders created.
     pub range_share: Option<f64>,
-    /// Mean `(max − min) / max` over the range orders created.
+    /// Mean `(max − min) / max` over the range orders created — the
+    /// comparable form, since a block may mix currencies.
     pub range_width_avg: Option<f64>,
+    /// Mean `max − min` over the same orders, in fiat. Only meaningful,
+    /// and only reported, when the block is a single currency.
+    pub range_width_fiat_avg: Option<f64>,
     pub fiats_by_orders: Ranking,
     pub fiats_by_volume: Ranking,
     pub methods_by_orders: Ranking,
@@ -106,15 +125,17 @@ pub fn summarise(orders: &[Order], window: Window) -> Market {
     let premium_p50_buy = percentile(&premiums(Some(Direction::Buy)), 0.5);
     let premium_p50_sell = percentile(&premiums(Some(Direction::Sell)), 0.5);
 
-    let widths: Vec<f64> = book
+    let ranges: Vec<(f64, f64)> = book
         .iter()
         .filter_map(|order| order.fiat_range)
         .filter(|(_, max)| *max > 0.0)
-        .map(|(min, max)| (max - min) / max)
         .collect();
+    let mean = |values: Vec<f64>| {
+        (!values.is_empty()).then(|| values.iter().sum::<f64>() / values.len() as f64)
+    };
 
     let fiat = |order: &Order| vec![order.fiat_code.clone()];
-    let methods = |order: &Order| order.payment_methods.clone();
+    let methods = |order: &Order| order.created_payment_methods.clone();
     let one = |_: &Order| 1;
     let amount = |order: &Order| order.amount_sats;
 
@@ -139,8 +160,8 @@ pub fn summarise(orders: &[Order], window: Window) -> Market {
                 .count(),
             book.len(),
         ),
-        range_width_avg: (!widths.is_empty())
-            .then(|| widths.iter().sum::<f64>() / widths.len() as f64),
+        range_width_avg: mean(ranges.iter().map(|(min, max)| (max - min) / max).collect()),
+        range_width_fiat_avg: mean(ranges.iter().map(|(min, max)| max - min).collect()),
         fiats_by_orders: ranking::tally(book.iter().copied(), fiat, one),
         fiats_by_volume: ranking::tally(trades.iter().copied(), fiat, amount),
         methods_by_orders: ranking::tally(book.iter().copied(), methods, one),
@@ -178,30 +199,35 @@ fn first_sightings(
 /// nothing about one currency.
 pub fn report(orders: &[Order], window: Window, dimension: Option<Dimension>) -> Vec<Metric> {
     let Some(dimension) = dimension else {
-        return metrics("market", &summarise(orders, window), true);
+        return metrics("market", &summarise(orders, window), None);
     };
 
-    let (by, across_fiats) = match dimension {
-        Dimension::Fiat => (activity::Dimension::Fiat, false),
-        Dimension::Kind => (activity::Dimension::Kind, true),
-        Dimension::Instance => (activity::Dimension::Instance, true),
+    let by = match dimension {
+        Dimension::Fiat => activity::Dimension::Fiat,
+        Dimension::Kind => activity::Dimension::Kind,
+        Dimension::Instance => activity::Dimension::Instance,
     };
     activity::slice(orders, by)
         .into_iter()
         .flat_map(|(key, group)| {
             let group: Vec<Order> = group.into_iter().cloned().collect();
+            // Only a fiat slice is one currency; a kind or instance block
+            // still spans them.
+            let fiat = matches!(dimension, Dimension::Fiat).then(|| key.clone());
             metrics(
                 &format!("market.{key}"),
                 &summarise(&group, window),
-                across_fiats,
+                fiat.as_deref(),
             )
         })
         .collect()
 }
 
-/// One [`Market`] as metrics, all observed. `across_fiats` is whether
-/// the block spans currencies, and so whether ranking them means anything.
-pub fn metrics(prefix: &str, market: &Market, across_fiats: bool) -> Vec<Metric> {
+/// One [`Market`] as metrics, all observed. `fiat` is the currency the
+/// block is confined to, if it is confined to one: ranking currencies
+/// means nothing inside a single one, and the absolute range width means
+/// nothing outside one.
+pub fn metrics(prefix: &str, market: &Market, fiat: Option<&str>) -> Vec<Metric> {
     let observed = |name: &str, value: Value| Metric::observed(format!("{prefix}.{name}"), value);
     let ratio = |value: Option<f64>| value.map_or(Value::Missing, Value::ratio);
     // A premium is published in percent; `Value::Ratio` renders as one.
@@ -254,7 +280,10 @@ pub fn metrics(prefix: &str, market: &Market, across_fiats: bool) -> Vec<Metric>
         observed("range_share", ratio(market.range_share)),
         observed("range_width_avg", ratio(market.range_width_avg)),
     ];
-    if across_fiats {
+    if let Some((code, width)) = fiat.zip(market.range_width_fiat_avg) {
+        metrics.push(observed("range_width_fiat_avg", Value::fiat(width, code)));
+    }
+    if fiat.is_none() {
         metrics.push(ranked("fiat_top3_by_orders", &market.fiats_by_orders, ""));
         metrics.extend(concentration("fiat", &market.fiats_by_orders, "orders"));
         metrics.push(ranked(
@@ -274,7 +303,7 @@ pub fn metrics(prefix: &str, market: &Market, across_fiats: bool) -> Vec<Metric>
         &market.methods_by_volume,
         " sats",
     ));
-    if across_fiats {
+    if fiat.is_none() {
         metrics.push(observed("new_fiats", text(&market.new_fiats)));
     }
     metrics.push(observed("new_methods", text(&market.new_methods)));

@@ -59,6 +59,10 @@ where
                 (SELECT v.amount_sats FROM order_versions v
                   WHERE v.order_id = o.order_id
                   ORDER BY v.created_at ASC, v.event_id ASC LIMIT 1) AS first_amount_sats,
+                (SELECT v.payment_methods FROM order_versions v
+                  WHERE v.order_id = o.order_id
+                  ORDER BY v.created_at ASC, v.event_id ASC LIMIT 1)
+                  AS first_payment_methods,
                 (SELECT v.fiat_min FROM order_versions v
                   WHERE v.order_id = o.order_id
                   ORDER BY v.created_at ASC, v.event_id ASC LIMIT 1) AS first_fiat_min,
@@ -104,6 +108,7 @@ struct Row {
     kind: String,
     fiat_code: String,
     payment_methods: String,
+    first_payment_methods: Option<String>,
     amount_sats: i64,
     fiat_amount: Option<f64>,
     premium: f64,
@@ -129,6 +134,11 @@ impl Row {
             direction: direction(decode("kind", Direction::parse(&self.kind))?),
             fiat_code: self.fiat_code,
             payment_methods: csv::split(&self.payment_methods),
+            created_payment_methods: csv::split(
+                self.first_payment_methods
+                    .as_deref()
+                    .unwrap_or(&self.payment_methods),
+            ),
             amount_sats: self.amount_sats,
             fiat_amount: self.fiat_amount,
             premium: self.premium,

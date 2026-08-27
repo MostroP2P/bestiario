@@ -46,6 +46,8 @@ impl Ranking {
         }
     }
 
+    /// Whether nothing was ranked — no key carried any weight, so the
+    /// concentration figures describe nothing and the cell is `—`.
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }

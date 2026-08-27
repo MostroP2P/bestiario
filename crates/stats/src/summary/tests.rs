@@ -18,6 +18,7 @@ fn order(id: &str, pubkey: &str, fiat: &str, methods: &[&str], status: Status, s
         direction: Direction::Buy,
         fiat_code: fiat.into(),
         payment_methods: methods.iter().map(|m| m.to_string()).collect(),
+        created_payment_methods: methods.iter().map(|m| m.to_string()).collect(),
         amount_sats: sats,
         fiat_amount: None,
         premium: 0.0,

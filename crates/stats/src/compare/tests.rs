@@ -37,6 +37,7 @@ fn order(id: &str, instance: &str, status: Status, sats: i64) -> Order {
         direction: Direction::Buy,
         fiat_code: "ARS".into(),
         payment_methods: vec![],
+        created_payment_methods: vec![],
         amount_sats: sats,
         fiat_amount: None,
         premium: 0.0,

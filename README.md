@@ -385,13 +385,21 @@ premiums are those of the completed orders — an open order's premium is
 only an ask — as average, median, median by side and the spread between
 the sides. `market_price_share` is the share of orders born with `amt = 0`,
 priced when taken; `range_share` the share published as `[min, max]`, with
-the mean relative width `(max − min) ÷ max`. Currencies and payment methods
-are ranked by orders created and by sats completed, with the top-three
-share and the Herfindahl–Hirschman index of each ranking, and `new_fiats`
-/ `new_methods` list what was seen for the first time in the window — the
-first eight, and a count of the rest. `--by fiat`, `--by kind` and
-`--by instance` slice it; a fiat slice drops the currency ranking, which
-says nothing about one currency.
+the mean *relative* width `(max − min) ÷ max` — a block that holds ARS
+beside EUR cannot average their widths, and the relative form compares.
+Currencies and payment methods are ranked by orders created and by sats
+completed, with the top-three share and the Herfindahl–Hirschman index of
+each ranking, and `new_fiats` / `new_methods` list what was seen for the
+first time in the window — the first eight, and a count of the rest. The
+methods counted are those of an order's first version, what the maker put
+on the book: a `pm` amended days later was not on offer at creation, and
+dated by that order it would hide a genuine first sighting.
+
+`--by fiat`, `--by kind` and `--by instance` slice it. A fiat slice drops
+the currency ranking, which says nothing about one currency, and gains
+`range_width_fiat_avg`: the mean `max − min` in that currency, which only
+a single-currency block can state — relative width alone would call
+`[10, 100]` wider than `[900, 1000]`.
 
 ### Dev fees
 
