@@ -26,3 +26,46 @@ pub struct Scope {
     pub pubkey: Option<String>,
     pub networks: Vec<Network>,
 }
+
+/// How many leading hex characters identify an instance in a label.
+///
+/// Eight is what people quote — `82fa8cb9…` — and is comfortably unique
+/// across a network of a few dozen pubkeys.
+const SHORT_PUBKEY_LEN: usize = 8;
+
+/// How a report names an instance (`docs/SPEC.md` §3): `name (short
+/// pubkey)` when it publishes a name, the bare pubkey otherwise.
+///
+/// The pubkey is always part of the label, because a name is not an
+/// identity: two instances can publish the same one, and a slice keyed by
+/// name alone would merge them into a bucket that belongs to neither.
+pub fn instance_label(pubkey: &str, name: Option<&str>) -> String {
+    match name {
+        Some(name) => {
+            let short: String = pubkey.chars().take(SHORT_PUBKEY_LEN).collect();
+            format!("{name} ({short})")
+        }
+        None => pubkey.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_named_instance_is_labelled_by_name_and_short_pubkey() {
+        assert_eq!(
+            instance_label("82fa8cb978b43c79b2156585bac2c011", Some("Alpha")),
+            "Alpha (82fa8cb9)"
+        );
+    }
+
+    #[test]
+    fn a_nameless_instance_is_labelled_by_its_whole_pubkey() {
+        assert_eq!(
+            instance_label("82fa8cb978b43c79b2156585bac2c011", None),
+            "82fa8cb978b43c79b2156585bac2c011"
+        );
+    }
+}

@@ -70,8 +70,9 @@ impl Direction {
 pub struct Order {
     pub order_id: String,
     pub pubkey: String,
-    /// How the instance is referred to in a slice: its name when it publishes
-    /// one, its pubkey otherwise.
+    /// How the instance is referred to in a slice — `name (short pubkey)`
+    /// when it publishes a name, the bare pubkey otherwise (`docs/SPEC.md`
+    /// §3). Chosen by the loader; unique per instance either way.
     pub instance: String,
     /// `created_at` of the first version seen.
     pub created_at: i64,
@@ -349,7 +350,7 @@ pub fn report(
             .into_iter()
             .flat_map(|(key, month)| {
                 let activity = summarise_against(orders, month, month.previous_month(), now);
-                metrics(&format!("orders.{key}"), &activity)
+                dated_metrics(&format!("orders.{key}"), &activity)
             })
             .collect(),
         Some(Dimension::Hour) => histogram_metrics("orders.hour", &by_hour(orders, window)),
@@ -368,27 +369,42 @@ pub fn report(
 
 /// One [`Activity`] as the nine metrics of §6.1, all observed.
 pub fn metrics(prefix: &str, activity: &Activity) -> Vec<Metric> {
-    let count = |name: &str, value: u64| {
-        Metric::observed(format!("{prefix}.{name}"), Value::Count(value as i64))
-    };
-    let ratio = |name: &str, value: Option<f64>| {
-        Metric::observed(
-            format!("{prefix}.{name}"),
-            value.map_or(Value::Missing, Value::Ratio),
-        )
-    };
+    let mut metrics = dated_metrics(prefix, activity);
+    metrics.extend([
+        count(prefix, "open_now", activity.open_now),
+        count(prefix, "in_progress_now", activity.in_progress_now),
+    ]);
+    metrics
+}
 
+/// The seven metrics of §6.1 that are about the window, leaving out the two
+/// that are about *now*.
+///
+/// A monthly report is a sequence of windows, and `open_now` is the same
+/// number in every one of them: it is a statement about the clock, not
+/// about July. Repeating it under each month would make the blocks read as
+/// if they added up when they do not, so a month gets only what it counted.
+pub fn dated_metrics(prefix: &str, activity: &Activity) -> Vec<Metric> {
     vec![
-        count("created", activity.created),
-        count("completed", activity.completed),
-        count("canceled", activity.canceled),
-        ratio("completion_rate", activity.completion_rate),
-        ratio("abandonment_rate", activity.abandonment_rate),
-        count("open_now", activity.open_now),
-        count("in_progress_now", activity.in_progress_now),
-        ratio("created_delta", activity.created_delta),
-        ratio("completed_delta", activity.completed_delta),
+        count(prefix, "created", activity.created),
+        count(prefix, "completed", activity.completed),
+        count(prefix, "canceled", activity.canceled),
+        ratio_metric(prefix, "completion_rate", activity.completion_rate),
+        ratio_metric(prefix, "abandonment_rate", activity.abandonment_rate),
+        ratio_metric(prefix, "created_delta", activity.created_delta),
+        ratio_metric(prefix, "completed_delta", activity.completed_delta),
     ]
+}
+
+fn count(prefix: &str, name: &str, value: u64) -> Metric {
+    Metric::observed(format!("{prefix}.{name}"), Value::Count(value as i64))
+}
+
+fn ratio_metric(prefix: &str, name: &str, value: Option<f64>) -> Metric {
+    Metric::observed(
+        format!("{prefix}.{name}"),
+        value.map_or(Value::Missing, Value::ratio),
+    )
 }
 
 fn histogram_metrics(prefix: &str, histogram: &Histogram) -> Vec<Metric> {

@@ -241,10 +241,10 @@ fn the_global_report_names_the_nine_figures_of_the_spec() {
             "orders.canceled",
             "orders.completion_rate",
             "orders.abandonment_rate",
-            "orders.open_now",
-            "orders.in_progress_now",
             "orders.created_delta",
             "orders.completed_delta",
+            "orders.open_now",
+            "orders.in_progress_now",
         ]
     );
 }
@@ -279,9 +279,14 @@ fn a_monthly_report_has_one_block_per_month_in_the_window() {
         .map(|metric| metric.name)
         .collect();
 
-    assert_eq!(names.len(), 18);
+    // Seven per month: the two "now" figures are not dated and are left out.
+    assert_eq!(names.len(), 14);
     assert_eq!(names[0], "orders.2026-07.created");
-    assert_eq!(names[9], "orders.2026-08.created");
+    assert_eq!(names[7], "orders.2026-08.created");
+    assert!(
+        names.iter().all(|name| !name.ends_with("_now")),
+        "{names:?}"
+    );
 }
 
 #[test]

@@ -84,7 +84,7 @@ async fn a_completed_order_carries_its_whole_lifecycle() {
         vec![Order {
             order_id: "o1".to_string(),
             pubkey: ALPHA.to_string(),
-            instance: "Alpha".to_string(),
+            instance: "Alpha (82fa8cb9)".to_string(),
             created_at: T0,
             status: activity::Status::Success,
             direction: activity::Direction::Sell,
@@ -111,6 +111,23 @@ async fn an_instance_with_no_name_is_labelled_by_its_pubkey() {
     assert_eq!(loaded[0].instance, BETA);
     assert_eq!(loaded[0].taken_at, None, "never taken");
     assert_eq!(loaded[0].expires_at, Some(T0 + 900));
+}
+
+#[tokio::test]
+async fn two_instances_sharing_a_name_keep_distinct_labels() {
+    let pool = migrated().await;
+    ingest(&pool, &version("o1", ALPHA, T0, Status::Pending)).await;
+    ingest(&pool, &version("o2", BETA, T0 + 1, Status::Pending)).await;
+    for pubkey in [ALPHA, BETA] {
+        instances::upsert(&pool, pubkey, Some("Mostro"), T0)
+            .await
+            .expect("instance");
+    }
+
+    let loaded = orders(&pool, &mainnet()).await.expect("load");
+
+    let labels: Vec<&str> = loaded.iter().map(|order| order.instance.as_str()).collect();
+    assert_eq!(labels, vec!["Mostro (82fa8cb9)", "Mostro (1b7b0f8d)"]);
 }
 
 #[tokio::test]

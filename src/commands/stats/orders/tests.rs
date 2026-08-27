@@ -169,14 +169,18 @@ async fn an_instance_scope_leaves_the_other_instances_out() {
 }
 
 #[tokio::test]
-async fn slicing_by_instance_labels_a_named_instance_by_name_and_a_nameless_one_by_pubkey() {
+async fn slicing_by_instance_labels_a_named_instance_by_name_and_short_pubkey_and_a_nameless_one_by_pubkey()
+ {
     let pool = seeded().await;
 
     let report = report(&pool, &query(None), Some(Dimension::Instance), NOW)
         .await
         .expect("report");
 
-    assert_eq!(value(&report, "orders.Alpha.created"), &Value::Count(2));
+    assert_eq!(
+        value(&report, "orders.Alpha (82fa8cb9).created"),
+        &Value::Count(2)
+    );
     assert_eq!(
         value(&report, &format!("orders.{BETA}.created")),
         &Value::Count(1)

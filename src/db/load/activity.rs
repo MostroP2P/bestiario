@@ -11,7 +11,7 @@ use crate::db::repo::{csv, decode};
 use crate::ingest::parse::order::{Direction, Status};
 use crate::stats::activity::{self, Order};
 
-use super::Scope;
+use super::{Scope, instance_label};
 
 /// Every order in `scope`, oldest first.
 ///
@@ -23,7 +23,7 @@ where
     E: Executor<'e, Database = Sqlite>,
 {
     let mut query = QueryBuilder::<Sqlite>::new(
-        "SELECT o.order_id, o.pubkey, COALESCE(i.name, o.pubkey) AS instance,
+        "SELECT o.order_id, o.pubkey, i.name AS instance_name,
                 o.first_seen_at AS created_at, o.final_status AS status, o.kind,
                 o.fiat_code, o.payment_methods, o.success_at, o.canceled_at,
                 (SELECT MIN(v.created_at) FROM order_versions v
@@ -62,7 +62,7 @@ where
 struct Row {
     order_id: String,
     pubkey: String,
-    instance: String,
+    instance_name: Option<String>,
     created_at: i64,
     status: String,
     kind: String,
@@ -76,10 +76,12 @@ struct Row {
 
 impl Row {
     fn into_order(self) -> Result<Order, sqlx::Error> {
+        let instance = instance_label(&self.pubkey, self.instance_name.as_deref());
+
         Ok(Order {
             order_id: self.order_id,
             pubkey: self.pubkey,
-            instance: self.instance,
+            instance,
             created_at: self.created_at,
             status: status(decode("final_status", Status::parse(&self.status))?),
             direction: direction(decode("kind", Direction::parse(&self.kind))?),
