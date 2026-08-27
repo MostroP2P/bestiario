@@ -308,6 +308,56 @@ A rate over nothing — no order completed or canceled, no previous month to
 grow from — is reported as `—` in a table and `null` in JSON, never as
 zero: zero is an answer, and this is the absence of one.
 
+`--by day` cuts the window into UTC calendar days instead, one block per
+day and a Δ against the day before:
+
+```console
+$ bestiario stats orders --by day --from 2026-08-25 --until 2026-08-28
+2026-08-25T00:00:00+00:00 — 2026-08-28T00:00:00+00:00
+┌────────────────────────────────────┬─────────┐
+│ metric                             ┆ value   │
+╞════════════════════════════════════╪═════════╡
+│ orders.2026-08-25.created          ┆ —       │
+│ orders.2026-08-25.completed        ┆ —       │
+│ orders.2026-08-25.canceled         ┆ —       │
+│ orders.2026-08-25.completion_rate  ┆ —       │
+│ orders.2026-08-25.abandonment_rate ┆ —       │
+│ orders.2026-08-25.created_delta    ┆ —       │
+│ orders.2026-08-25.completed_delta  ┆ —       │
+│ orders.2026-08-26.created          ┆ 8       │
+│ orders.2026-08-26.completed        ┆ 1       │
+│ orders.2026-08-26.canceled         ┆ 1       │
+│ orders.2026-08-26.completion_rate  ┆ 50.0%   │
+│ orders.2026-08-26.abandonment_rate ┆ 12.5%   │
+│ orders.2026-08-26.created_delta    ┆ —       │
+│ orders.2026-08-26.completed_delta  ┆ —       │
+│ orders.2026-08-27.created          ┆ 0       │
+│ orders.2026-08-27.completed        ┆ 0       │
+│ orders.2026-08-27.canceled         ┆ 0       │
+│ orders.2026-08-27.completion_rate  ┆ —       │
+│ orders.2026-08-27.abandonment_rate ┆ —       │
+│ orders.2026-08-27.created_delta    ┆ -100.0% │
+│ orders.2026-08-27.completed_delta  ┆ -100.0% │
+└────────────────────────────────────┴─────────┘
+```
+
+Every day of the window is there, quiet ones included, so a chart cannot
+draw a line across a gap that was never published. A day the archive
+predates is the one thing that is *not* zero: nobody indexed it, and saying
+zero would claim the network published nothing when the truth is that
+bestiario was not there. Those days keep their rows and report `—`, and a Δ
+against one of them is `—` too. Relays hold orders for about a fortnight,
+so any window reaching back past your first `backfill` will show them.
+
+The same applies to a kind nothing ever asked for. `backfill --kind 38383`
+indexes orders and leaves disputes untouched; a later `stats disputes --by
+day` then has no dispute history to speak from, and reports `—` throughout
+rather than a month of confident zeros. Run `backfill` without `--kind`, or
+`sync`, and the days it covered become answerable — zeros included, because
+a day nobody disputed anything is a fact. A report combining families needs
+all of them: the dispute rate divides disputes by orders, so a day is
+answerable only when both reach it.
+
 ### Volume
 
 ```console

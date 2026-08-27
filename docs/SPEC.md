@@ -315,6 +315,16 @@ CREATE TABLE sync_state (
   updated_at   INTEGER NOT NULL,
   PRIMARY KEY (relay_url, kind)
 );
+
+-- Which kinds have been asked for, and how far back. A kind absent from
+-- `events` is a confirmed zero only if something once went and looked for
+-- it; `backfill --kind` makes that a per-kind question. Written by
+-- `backfill` and by `sync`, read for the bucket coverage floor of §6.
+CREATE TABLE indexed_kinds (
+  kind          INTEGER PRIMARY KEY,
+  indexed_from  INTEGER NOT NULL,       -- oldest created_at ever requested
+  updated_at    INTEGER NOT NULL
+);
 ```
 
 `orders` and `disputes` are projections: a `rebuild` command regenerates
@@ -357,7 +367,8 @@ total" comparison is the product's main axis.
 | Dimension | Values | Source |
 |---|---|---|
 | `instance` | pubkey / name | event `pubkey` |
-| `period` | day, week, month, year; free range | `created_at` |
+| `period` | calendar month | the timestamp that dates the figure |
+| `day` | calendar day (UTC) | the timestamp that dates the figure |
 | `kind` | `buy`, `sell` | `k` tag |
 | `status` | `pending`, `in-progress`, `success`, `canceled` | `s` tag |
 | `fiat` | ISO code | `f` tag |
@@ -369,6 +380,54 @@ total" comparison is the product's main axis.
 
 Convention: `∑` = aggregate; `%` = proportion; `p50/p90` = percentiles;
 `Δ` = change vs. the previous period. `(inf)` marks inferred metrics.
+
+**Buckets and what the archive can speak for.** `period` and `day` cut the
+window into UTC calendar buckets, half-open like the window itself and
+clipped to it, so consecutive buckets tile and none is counted twice. The
+timestamp that dates a row is the one that already dates that figure in its
+family — an order counts in the bucket its first `pending` version was seen
+in, a completion in the bucket it reached `success`, a fee in the bucket of
+its own event: a bucket changes the grouping, never the dating.
+
+Every bucket of the window is reported, including the ones nothing happened
+in, so a consumer plotting the result cannot draw a line across a gap that
+was never published. A bucket that ends **at or before the archive's floor for the
+kinds the report reads** is different: nobody indexed it, and reporting
+zero would assert that the network published nothing when what is true is
+that bestiario was not there. Those buckets keep their rows and their names
+and report `—` / `null`, and a Δ against one of them is likewise `—`, never
+a growth computed from a period nobody saw.
+
+That floor is the latest of three. The earliest event in the archive is
+when bestiario started indexing at all. The earliest event *of those kinds*
+is when it started holding what the report reads; the two differ because
+relays expire kinds at different rates — orders live about a fortnight and
+dev fees about a year — so a first backfill brings January's fees and only
+August's orders, and January's order-days are unknowable however many fees
+sit beside them.
+
+The third is for a kind the archive holds none of, which on its own is
+ambiguous: nobody published one, or nobody ever asked. `backfill --kind
+38383` indexes one kind and leaves the rest untouched, so the difference is
+real. `indexed_kinds` (§4) is the explicit answer — a row per kind that was
+requested, and the oldest `created_at` any request for it reached back to.
+A kind that was asked for and came back empty is a confirmed zero from that
+floor. A kind nobody ever asked for is unknown history, and a report
+reading it can speak for no bucket at all rather than print zeros for
+months nothing looked at.
+
+All three floors are read within the report's own scope, so an
+`--instance` report is told how far back *that* instance was indexed. Only
+the instance half of the scope applies: `events` stores each event verbatim
+and carries no `network` column.
+
+A report whose figures combine families takes the floor of every kind they
+read — the dispute rate divides disputes by the orders that left pending,
+so a bucket is answerable only when both histories reach it.
+
+Which days actually had a live subscription — as opposed to falling after
+that floor — is not recorded, so a sync that was down for a day is
+indistinguishable from a quiet day.
 
 ### 6.1 Activity
 
@@ -470,6 +529,10 @@ Convention: `∑` = aggregate; `%` = proportion; `p50/p90` = percentiles;
 - Dispute → order: 38386 does not include `order-id`.
 - Cancellation reason (expired, admin, cooperative): collapsed into `canceled`.
 - Intermediate statuses (`fiat-sent`, `dispute`): arrive as `in-progress`.
+- Whether a given day was actually being indexed: the archive knows its
+  earliest event, not which days had a live subscription. Buckets before
+  that event report `—`; a gap *after* it — a sync that was down for a day —
+  is indistinguishable from a quiet day and reads as zero.
 
 ### 6.10 Suggested views
 
@@ -623,12 +686,12 @@ bestiario series <metric> [--by month|week|day] [--split instance|kind|fiat]
 bestiario market <FIAT>                      # buy/sell pressure, premium, methods, time to fill
 
 # Metric families (§6.1–6.8) with free slicing
-bestiario stats orders    [--by status|kind|fiat|method|instance|period|hour|weekday]
-bestiario stats volume    [--by kind|fiat|instance|period] [--in USD]
+bestiario stats orders    [--by status|kind|fiat|method|instance|period|day|hour|weekday]
+bestiario stats volume    [--by kind|fiat|instance|period|day] [--in USD]
 bestiario stats market    [--by fiat|kind|instance]
 bestiario stats timing    [--by fiat|method|kind|instance]
-bestiario stats dev-fees  [--by instance|period]
-bestiario stats disputes  [--by status|initiator|instance|period]
+bestiario stats dev-fees  [--by instance|period|day]
+bestiario stats disputes  [--by status|initiator|instance|period|day]
 bestiario stats rates     [--fiat F]
 
 bestiario orders <ORDER_ID>                  # lifecycle + dev fee

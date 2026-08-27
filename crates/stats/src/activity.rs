@@ -21,8 +21,9 @@ use std::collections::BTreeMap;
 
 use chrono::{DateTime, Datelike, Timelike, Utc};
 
+use crate::bucket::{self, Coverage};
 use crate::metric::{Metric, Value};
-use crate::window::Window;
+use crate::window::{Period, Window};
 
 /// The four statuses that reach the wire (`docs/SPEC.md` §7).
 ///
@@ -140,6 +141,10 @@ pub enum Dimension {
     Instance,
     /// Calendar months inside the window, each reported as its own window.
     Month,
+    /// Calendar days inside the window, likewise: one block per day, empty
+    /// days included, and days the archive predates reported as missing
+    /// rather than as zero (see [`crate::bucket`]).
+    Day,
     /// Hour of day, UTC — a histogram rather than a grouping.
     Hour,
     /// Day of week, UTC — a histogram rather than a grouping.
@@ -300,7 +305,9 @@ pub fn slice(orders: &[Order], dimension: Dimension) -> BTreeMap<String, Vec<&Or
             Dimension::Fiat => vec![order.fiat_code.clone()],
             Dimension::Method => order.payment_methods.clone(),
             Dimension::Instance => vec![order.instance.clone()],
-            Dimension::Month | Dimension::Hour | Dimension::Weekday => Vec::new(),
+            // Not groupings of the orders themselves: a period is a
+            // window and a histogram is a fold, both handled by `report`.
+            Dimension::Month | Dimension::Day | Dimension::Hour | Dimension::Weekday => Vec::new(),
         };
 
         for key in keys {
@@ -381,17 +388,19 @@ pub fn report(
     window: Window,
     now: i64,
     dimension: Option<Dimension>,
+    coverage: Coverage,
 ) -> Vec<Metric> {
+    let periodic = |period| {
+        bucket::walk(window, period, coverage, |key, bucket, previous| {
+            let activity = summarise_against(orders, bucket, previous, now);
+            dated_metrics(&format!("orders.{key}"), &activity)
+        })
+    };
+
     match dimension {
         None => metrics("orders", &summarise(orders, window, now)),
-        Some(Dimension::Month) => window
-            .months()
-            .into_iter()
-            .flat_map(|(key, month)| {
-                let activity = summarise_against(orders, month, month.previous_month(), now);
-                dated_metrics(&format!("orders.{key}"), &activity)
-            })
-            .collect(),
+        Some(Dimension::Month) => periodic(Period::Month),
+        Some(Dimension::Day) => periodic(Period::Day),
         Some(Dimension::Hour) => histogram_metrics("orders.hour", &by_hour(orders, window)),
         Some(Dimension::Weekday) => {
             histogram_metrics("orders.weekday", &by_weekday(orders, window))

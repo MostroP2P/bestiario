@@ -12,6 +12,7 @@ use sqlx::SqlitePool;
 use crate::cli::OrderDimension;
 use crate::commands::Context;
 use crate::db::load;
+use crate::ingest::parse;
 use crate::report::{Format, Report};
 use crate::stats::Window;
 use crate::stats::activity::{self, Dimension};
@@ -41,7 +42,13 @@ pub async fn report(
 ) -> Result<Report> {
     let orders = load::activity::orders(pool, &query.scope).await?;
     let window = Window::new(query.range.from(), query.range.until());
-    let metrics = activity::report(&orders, window, now, dimension);
+    let metrics = activity::report(
+        &orders,
+        window,
+        now,
+        dimension,
+        super::super::coverage(pool, &[parse::order::KIND], &query.scope).await?,
+    );
 
     Ok(Report::new(query.range, metrics, now))
 }
@@ -58,6 +65,7 @@ fn dimension(by: OrderDimension) -> Dimension {
         OrderDimension::Method => Dimension::Method,
         OrderDimension::Instance => Dimension::Instance,
         OrderDimension::Period => Dimension::Month,
+        OrderDimension::Day => Dimension::Day,
         OrderDimension::Hour => Dimension::Hour,
         OrderDimension::Weekday => Dimension::Weekday,
     }

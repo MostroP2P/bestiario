@@ -200,6 +200,9 @@ pub enum OrderDimension {
     Instance,
     /// Calendar months inside the window.
     Period,
+    /// Calendar days inside the window: one block per day, empty days
+    /// included, days the archive predates reported as missing.
+    Day,
     /// Hour of day (UTC): the histogram of §6.1.
     Hour,
     /// Day of week (UTC): the other histogram of §6.1.
@@ -212,6 +215,7 @@ pub enum VolumeDimension {
     Fiat,
     Instance,
     Period,
+    Day,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -233,6 +237,7 @@ pub enum TimingDimension {
 pub enum InstanceOrPeriod {
     Instance,
     Period,
+    Day,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -241,6 +246,7 @@ pub enum DisputeDimension {
     Initiator,
     Instance,
     Period,
+    Day,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

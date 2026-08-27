@@ -4,6 +4,9 @@
 
 use super::*;
 
+/// These datasets are invented whole, so the archive covers them all.
+const ALL: Coverage = Coverage::since(0);
+
 const WINDOW: Window = Window {
     from: 1_000,
     until: 2_000,
@@ -193,7 +196,7 @@ fn slicing_by_instance_splits_disputes_and_taken_orders_alike() {
 
 #[test]
 fn the_global_report_names_every_figure_of_the_spec() {
-    let names: Vec<String> = report(&dataset(), WINDOW, NOW, None)
+    let names: Vec<String> = report(&dataset(), WINDOW, NOW, None, ALL)
         .into_iter()
         .map(|metric| metric.name)
         .collect();
@@ -229,7 +232,7 @@ fn the_global_report_names_every_figure_of_the_spec() {
 
 #[test]
 fn the_seller_share_is_the_complement_of_the_buyer_share() {
-    let metrics = report(&dataset(), WINDOW, NOW, Some(Dimension::Initiator));
+    let metrics = report(&dataset(), WINDOW, NOW, Some(Dimension::Initiator), ALL);
 
     assert_eq!(metrics.len(), 2);
     assert_eq!(metrics[0].name, "disputes.initiator.buyer");
@@ -239,7 +242,7 @@ fn the_seller_share_is_the_complement_of_the_buyer_share() {
 
 #[test]
 fn the_status_histogram_is_five_counts() {
-    let metrics = report(&dataset(), WINDOW, NOW, Some(Dimension::Status));
+    let metrics = report(&dataset(), WINDOW, NOW, Some(Dimension::Status), ALL);
 
     assert_eq!(metrics.len(), 5);
     assert_eq!(metrics[0].name, "disputes.status.initiated");
@@ -254,6 +257,7 @@ fn a_monthly_report_leaves_the_now_figures_out() {
         Window::new(1_782_864_000, 1_788_220_800),
         NOW,
         Some(Dimension::Month),
+        ALL,
     )
     .into_iter()
     .map(|metric| metric.name)
@@ -270,7 +274,7 @@ fn a_monthly_report_leaves_the_now_figures_out() {
 
 #[test]
 fn an_instance_slice_keeps_the_now_figures() {
-    let metrics = report(&dataset(), WINDOW, NOW, Some(Dimension::Instance));
+    let metrics = report(&dataset(), WINDOW, NOW, Some(Dimension::Instance), ALL);
 
     assert_eq!(metrics.len(), 16 + 6);
     assert_eq!(metrics[0].name, "disputes.Alpha (aaaaaaaa).opened");
@@ -281,7 +285,7 @@ fn an_instance_slice_keeps_the_now_figures() {
 #[test]
 fn every_dispute_metric_is_observed() {
     assert!(
-        report(&dataset(), WINDOW, NOW, None)
+        report(&dataset(), WINDOW, NOW, None, ALL)
             .iter()
             .all(|metric| !metric.is_inferred())
     );

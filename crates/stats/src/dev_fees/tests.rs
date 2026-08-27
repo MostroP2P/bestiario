@@ -5,6 +5,9 @@
 
 use super::*;
 
+/// These datasets are invented whole, so the archive covers them all.
+const ALL: Coverage = Coverage::since(0);
+
 const WINDOW: Window = Window {
     from: 1_000,
     until: 2_000,
@@ -200,7 +203,7 @@ fn slicing_by_instance_splits_fees_and_settlements_alike() {
 
 #[test]
 fn the_global_report_names_the_seven_figures_of_the_spec_then_the_implied_three() {
-    let names: Vec<String> = report(&dataset(), WINDOW, None, &THIRTY)
+    let names: Vec<String> = report(&dataset(), WINDOW, None, &THIRTY, ALL)
         .into_iter()
         .map(|metric| metric.name)
         .collect();
@@ -224,7 +227,7 @@ fn the_global_report_names_the_seven_figures_of_the_spec_then_the_implied_three(
 
 #[test]
 fn a_sliced_report_puts_the_slice_key_in_the_name() {
-    let by_instance = report(&dataset(), WINDOW, Some(Dimension::Instance), &THIRTY);
+    let by_instance = report(&dataset(), WINDOW, Some(Dimension::Instance), &THIRTY, ALL);
     assert_eq!(by_instance[0].name, "dev_fees.Alpha (aaaaaaaa).total_sats");
     assert_eq!(by_instance[0].value, Value::Sats(1_000));
 
@@ -234,6 +237,7 @@ fn a_sliced_report_puts_the_slice_key_in_the_name() {
         Window::new(1_782_864_000, 1_788_220_800),
         Some(Dimension::Month),
         &THIRTY,
+        ALL,
     );
     assert_eq!(by_month.len(), 20);
     assert_eq!(by_month[0].name, "dev_fees.2026-07.total_sats");
@@ -242,7 +246,7 @@ fn a_sliced_report_puts_the_slice_key_in_the_name() {
 
 #[test]
 fn missing_figures_are_reported_as_missing_not_as_zero() {
-    let metrics = report(&dataset(), Window::new(5_000, 6_000), None, &THIRTY);
+    let metrics = report(&dataset(), Window::new(5_000, 6_000), None, &THIRTY, ALL);
     let coverage = metrics
         .iter()
         .find(|metric| metric.name == "dev_fees.coverage")
@@ -258,7 +262,7 @@ fn missing_figures_are_reported_as_missing_not_as_zero() {
 
 #[test]
 fn every_dev_fee_figure_is_observed_except_the_implied_volume_and_its_ratio() {
-    let inferred: Vec<String> = report(&dataset(), WINDOW, None, &THIRTY)
+    let inferred: Vec<String> = report(&dataset(), WINDOW, None, &THIRTY, ALL)
         .into_iter()
         .filter(Metric::is_inferred)
         .map(|metric| metric.name)
@@ -273,7 +277,7 @@ fn every_dev_fee_figure_is_observed_except_the_implied_volume_and_its_ratio() {
 #[test]
 fn the_implied_volume_of_the_dataset_is_the_thousand_sats_over_fee_times_pct() {
     // 1000 sats of fees at fee 0.006 × pct 0.30 = 0.0018: 555_556 sats.
-    let metrics = report(&dataset(), WINDOW, None, &THIRTY);
+    let metrics = report(&dataset(), WINDOW, None, &THIRTY, ALL);
     let implied = metrics
         .iter()
         .find(|metric| metric.name == "dev_fees.implied_volume")
@@ -304,7 +308,7 @@ fn each_instance_block_rests_on_its_own_assumed_share() {
     let pct = |pubkey: &str| if pubkey == "bbbbbbbb" { 0.60 } else { 0.30 };
 
     // Act
-    let metrics = report(&data, WINDOW, Some(Dimension::Instance), &pct);
+    let metrics = report(&data, WINDOW, Some(Dimension::Instance), &pct, ALL);
     let implied = |instance: &str| {
         metrics
             .iter()
@@ -323,7 +327,7 @@ fn each_instance_block_rests_on_its_own_assumed_share() {
 fn a_fee_against_an_order_that_never_settled_leaves_the_observed_side_missing() {
     // Arrange: the whole dataset's orders are unsettled as far as the fees
     // know (the loader only fills `settled_amount_sats` for `success`).
-    let metrics = report(&dataset(), WINDOW, None, &THIRTY);
+    let metrics = report(&dataset(), WINDOW, None, &THIRTY, ALL);
 
     // Act
     let observed = metrics

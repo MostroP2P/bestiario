@@ -7,7 +7,9 @@
 //! second copy from a second relay changes nothing.
 
 use nostr_sdk::prelude::Event;
-use sqlx::{Executor, Sqlite};
+use sqlx::{Executor, QueryBuilder, Sqlite, SqlitePool};
+
+use crate::db::load::Scope;
 
 /// One row of `events`.
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
@@ -98,6 +100,78 @@ where
         .fetch_one(executor)
         .await?;
     Ok(count == 0)
+}
+
+/// How far back the archive can speak for a report reading `kinds`, within
+/// `scope`.
+///
+/// Three floors, and the latest of them wins.
+///
+/// The archive's own earliest event says when bestiario started indexing at
+/// all. The earliest event *of those kinds* says when it started holding
+/// what this report reads — which is later whenever a relay had already
+/// expired them: orders live about a fortnight on a relay and dev fees
+/// about a year, so a first backfill brings January's fees and only
+/// August's orders. Taking the archive's floor alone would call January's
+/// order-days covered and report zeros for a month the network was trading.
+///
+/// The third is for a kind the archive holds none of. Absent is ambiguous —
+/// nobody published one, or nobody ever asked — and `backfill --kind 38383`
+/// is a supported mode, so the difference is real. The answer comes from
+/// [`indexed_kinds`](super::indexed_kinds), which records what was
+/// requested and from when. A kind that was requested and came back empty
+/// is a confirmed zero from its recorded floor; a kind nobody ever
+/// requested is unknown history, and the report can speak for none of the
+/// window rather than print observed zeros for it.
+///
+/// `scope` narrows both `events` floors to the instance the report covers,
+/// so an instance added and backfilled after an older one's events expired
+/// does not inherit the older one's reach. Only the instance half of the
+/// scope applies: `events` stores each event verbatim and has no `network`
+/// column, and a floor pretending otherwise would be the same lie in a
+/// smaller place.
+///
+/// `None` when nothing can be spoken for: an empty archive, or a kind that
+/// was never asked for.
+pub async fn earliest_created_at(
+    pool: &SqlitePool,
+    kinds: &[u16],
+    scope: &Scope,
+) -> Result<Option<i64>, sqlx::Error> {
+    let Some(archive) = scoped_min(pool, None, scope).await? else {
+        return Ok(None);
+    };
+
+    let mut floor = archive;
+    for &kind in kinds {
+        let known = match scoped_min(pool, Some(kind), scope).await? {
+            Some(first) => first,
+            // Never stored. Only an explicit record of the request makes
+            // that a zero rather than a blank.
+            None => match super::indexed_kinds::indexed_from(pool, kind).await? {
+                Some(from) => from,
+                None => return Ok(None),
+            },
+        };
+        floor = floor.max(known);
+    }
+
+    Ok(Some(floor))
+}
+
+/// The earliest `created_at` in `scope`, of `kind` or of every kind.
+async fn scoped_min(
+    pool: &SqlitePool,
+    kind: Option<u16>,
+    scope: &Scope,
+) -> Result<Option<i64>, sqlx::Error> {
+    let mut query = QueryBuilder::<Sqlite>::new("SELECT MIN(created_at) FROM events WHERE 1 = 1");
+    if let Some(kind) = kind {
+        query.push(" AND kind = ").push_bind(i64::from(kind));
+    }
+    scope.apply_instance(&mut query, "events");
+
+    query.build_query_scalar().fetch_one(pool).await
 }
 
 /// Every archived event, oldest first.

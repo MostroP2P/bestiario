@@ -415,13 +415,14 @@ impl<'a> Sync<'a> {
     /// nobody to ask about, and asking every author for kind 10002 is a
     /// crawl of the network's whole NIP-65 index.
     async fn targets(&self, kinds: &[u16]) -> Result<Vec<(RelayUrl, Vec<Filter>)>> {
+        let now = chrono::Utc::now().timestamp();
         let mut targets = Vec::new();
         let vouched = self.vouched().await?;
 
         for relay in self.client.relays().to_vec() {
             let mut per_relay = Vec::new();
             for &kind in kinds {
-                if let Some(filter) = self.filter(&relay, kind, &vouched).await? {
+                if let Some(filter) = self.filter(&relay, kind, &vouched, now).await? {
                     per_relay.push(filter);
                 }
             }
@@ -459,20 +460,37 @@ impl<'a> Sync<'a> {
 
     /// The filter for one `(relay, kind)`, resumed from its cursor, or
     /// `None` when this run must not ask that relay for that kind.
+    ///
+    /// What is asked for is also recorded: a subscription with no cursor
+    /// asks the relay for everything it holds, which is what makes an empty
+    /// answer a fact about the network rather than a kind nobody looked for.
+    /// A kind this run must not ask about is not recorded, because nothing
+    /// went and looked. See [`repo::indexed_kinds`].
     async fn filter(
         &self,
         relay: &RelayUrl,
         kind: u16,
         vouched: &[PublicKey],
+        now: i64,
     ) -> Result<Option<Filter>> {
         let cursor = repo::sync_state::get(self.pool, &relay.to_string(), kind)
             .await
             .with_context(|| format!("reading the cursor for {relay} kind {kind}"))?
             .map(|cursor| cursor.last_created_at);
 
-        let range = resume_from(cursor, self.overlap).map(Range::onwards);
+        let from = resume_from(cursor, self.overlap);
 
-        Ok(filters::for_kind(kind, &self.authors, vouched, range, None))
+        let Some(filter) =
+            filters::for_kind(kind, &self.authors, vouched, from.map(Range::onwards), None)
+        else {
+            return Ok(None);
+        };
+
+        repo::indexed_kinds::record(self.pool, kind, from.unwrap_or(0), now)
+            .await
+            .with_context(|| format!("recording that kind {kind} was indexed"))?;
+
+        Ok(Some(filter))
     }
 }
 

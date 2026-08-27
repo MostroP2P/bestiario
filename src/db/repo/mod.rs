@@ -14,6 +14,7 @@ pub(crate) mod csv;
 pub mod dev_fees;
 pub mod disputes;
 pub mod events;
+pub mod indexed_kinds;
 pub mod instance_info;
 pub mod instances;
 pub mod orders;

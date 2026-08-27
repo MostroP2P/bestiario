@@ -234,3 +234,33 @@ async fn the_implied_volume_rests_on_the_configured_share() {
     assert!(implied.is_inferred());
     assert!(implied.error().expect("error").contains("pct assumed 0.30"));
 }
+
+/// `--by day` (issue #53). Both seeded fees are paid on 2026-08-25.
+#[tokio::test]
+async fn a_daily_report_names_each_day_and_keeps_the_quiet_ones() {
+    // Arrange
+    let pool = seeded().await;
+
+    // Act
+    let report = report(
+        &pool,
+        &query(),
+        Some(Dimension::Day),
+        &AssumptionSettings::default(),
+        NOW,
+    )
+    .await
+    .expect("report");
+
+    // Assert
+    assert_eq!(
+        value(&report, "dev_fees.2026-08-25.total_sats"),
+        &Value::Sats(350)
+    );
+    assert_eq!(
+        value(&report, "dev_fees.2026-08-26.total_sats"),
+        &Value::Sats(0),
+        "a day with no fee is zero, not absent"
+    );
+    assert_eq!(dimension(InstanceOrPeriod::Day), Dimension::Day);
+}

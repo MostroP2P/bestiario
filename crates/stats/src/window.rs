@@ -105,6 +105,41 @@ impl Window {
         self.buckets(Period::Year)
     }
 
+    /// The same span one `period` earlier — what a bucket's "Δ against the
+    /// period before" compares against.
+    ///
+    /// A calendar shift, not a subtraction of the window's length: months
+    /// and years are not all the same size, and a March compared against
+    /// the thirty-one days before it would be compared against three days
+    /// of January. `None` only for a bound outside the range a date can
+    /// represent.
+    pub fn preceding(&self, period: Period) -> Option<Self> {
+        match period {
+            Period::Day => self.shifted(Days::new(1)),
+            Period::Week => self.shifted(Days::new(7)),
+            Period::Month => self.previous_month(),
+            Period::Year => self.shifted_months(Months::new(12)),
+        }
+    }
+
+    fn shifted(&self, by: Days) -> Option<Self> {
+        let back = |timestamp: i64| {
+            DateTime::<Utc>::from_timestamp(timestamp, 0)?
+                .checked_sub_days(by)
+                .map(|at| at.timestamp())
+        };
+        Some(Self::new(back(self.from)?, back(self.until)?))
+    }
+
+    fn shifted_months(&self, by: Months) -> Option<Self> {
+        let back = |timestamp: i64| {
+            DateTime::<Utc>::from_timestamp(timestamp, 0)?
+                .checked_sub_months(by)
+                .map(|at| at.timestamp())
+        };
+        Some(Self::new(back(self.from)?, back(self.until)?))
+    }
+
     /// The calendar months this window touches, each clipped to it, oldest
     /// first, keyed `YYYY-MM`.
     ///
