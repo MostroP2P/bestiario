@@ -13,6 +13,7 @@
 pub mod activity;
 pub mod dev_fees;
 pub mod disputes;
+pub mod instances;
 
 use sqlx::{QueryBuilder, Sqlite};
 

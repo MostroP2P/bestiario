@@ -5,6 +5,7 @@ use sqlx::SqlitePool;
 
 use super::*;
 use crate::cli::Cli;
+use crate::commands::Context;
 use crate::config::Settings;
 use crate::db::connect_and_migrate;
 
@@ -65,6 +66,7 @@ async fn without_flags_the_query_covers_every_configured_network_and_every_insta
         query.scope.networks,
         vec![Network::Mainnet, Network::Signet]
     );
+    assert!(!query.network_narrowed);
     assert_eq!(
         query.range,
         Range::resolve(None, None, NOW).expect("window")
@@ -78,6 +80,7 @@ async fn the_network_flag_overrides_the_configured_list() {
         .expect("resolves");
 
     assert_eq!(query.scope.networks, vec![Network::Testnet]);
+    assert!(query.network_narrowed);
 }
 
 #[tokio::test]

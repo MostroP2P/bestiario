@@ -316,6 +316,17 @@ pub fn metrics(prefix: &str, disputes: &Disputes) -> Vec<Metric> {
     metrics
 }
 
+/// The names of [`metrics`] with every value missing — what a view reports
+/// when its scope cannot reach disputes at all, such as a `--network`
+/// narrowing: the events carry no network tag, and a network-wide figure
+/// under a network-scoped heading would be read as scoped.
+pub fn unavailable(prefix: &str) -> Vec<Metric> {
+    metrics(prefix, &Disputes::default())
+        .into_iter()
+        .map(|metric| Metric::observed(metric.name, Value::Missing))
+        .collect()
+}
+
 /// The metrics that are about the window, leaving out the ones about *now*.
 pub fn dated_metrics(prefix: &str, disputes: &Disputes) -> Vec<Metric> {
     let mut metrics = vec![count(prefix, "opened", disputes.opened)];

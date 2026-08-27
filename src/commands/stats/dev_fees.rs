@@ -13,7 +13,7 @@ use crate::report::{Format, Report};
 use crate::stats::Window;
 use crate::stats::dev_fees::{self, Dimension};
 
-use super::Query;
+use crate::commands::query::Query;
 
 /// Resolves the flags, computes the report, prints it.
 pub async fn run(context: &Context<'_>, by: Option<InstanceOrPeriod>, now: i64) -> Result<()> {

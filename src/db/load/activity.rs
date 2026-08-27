@@ -25,7 +25,7 @@ where
     let mut query = QueryBuilder::<Sqlite>::new(
         "SELECT o.order_id, o.pubkey, i.name AS instance_name,
                 o.first_seen_at AS created_at, o.final_status AS status, o.kind,
-                o.fiat_code, o.payment_methods, o.success_at, o.canceled_at,
+                o.fiat_code, o.payment_methods, o.amount_sats, o.success_at, o.canceled_at,
                 (SELECT MIN(v.created_at) FROM order_versions v
                   WHERE v.order_id = o.order_id AND v.status = 'in-progress') AS taken_at,
                 (SELECT v.expires_at FROM order_versions v
@@ -58,6 +58,7 @@ struct Row {
     kind: String,
     fiat_code: String,
     payment_methods: String,
+    amount_sats: i64,
     success_at: Option<i64>,
     canceled_at: Option<i64>,
     taken_at: Option<i64>,
@@ -77,6 +78,7 @@ impl Row {
             direction: direction(decode("kind", Direction::parse(&self.kind))?),
             fiat_code: self.fiat_code,
             payment_methods: csv::split(&self.payment_methods),
+            amount_sats: self.amount_sats,
             taken_at: self.taken_at,
             success_at: self.success_at,
             canceled_at: self.canceled_at,
