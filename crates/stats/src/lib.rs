@@ -35,6 +35,7 @@ pub mod disputes;
 pub mod instances;
 pub mod metric;
 pub mod percentile;
+pub mod summary;
 pub mod volume;
 pub mod window;
 
