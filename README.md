@@ -98,7 +98,8 @@ interrupted. It resumes from where it left off.
 
 ## Reports
 
-Every report below accepts the same window and scope flags:
+Every windowed report below — all of them except `orders <ORDER_ID>`,
+which shows one order whole — accepts the same window and scope flags:
 
 - `--from` and `--until`, as a unix timestamp or `YYYY-MM-DD` (UTC). The
   window is half-open — `--until` is excluded — so consecutive windows tile.
@@ -106,6 +107,10 @@ Every report below accepts the same window and scope flags:
 - `--instance <PUBKEY|NAME>`: one instance, by pubkey, by a unique prefix of
   it, or by name.
 - `--network <NETWORK>`: one network, overriding the configured list.
+  Dispute events carry no network tag, so disputes cannot be narrowed this
+  way: `stats disputes` refuses the flag, and the views that include a
+  dispute figure (`summary`, `instance`, `compare`) report it as `—` under
+  it rather than as a network-wide number beneath a network-scoped heading.
 - `--json`.
 
 The examples are real output, captured by the test suite from the corpus of
@@ -113,9 +118,16 @@ signed events under `tests/fixtures/` — every event there is one an instance
 actually published. That corpus was chosen to cover the shapes a parser has
 to survive, not to look like a month of trading: eight orders and five
 disputes from unrelated instances make for a dispute rate nobody should
-read as a market figure. The shape of each report is what to look at. Every
-command shown is executed by `tests/e2e.rs` against that corpus, so an
-example that no longer runs fails the build.
+read as a market figure. The shape of each report is what to look at.
+
+Every command shown is executed by `tests/e2e.rs` against that corpus, on
+a frozen clock, and the output shown under it has to be what the binary
+printed — byte for byte — so an example that has drifted fails the build.
+Two things follow from how that suite works. The relay it seeds refuses
+expired events, as any relay does, so the corpus is re-signed for it with
+keys derived from each instance's real pubkey: the pubkeys in the examples
+are those test keys, not the instances' own. And the clock is frozen at
+2026-08-27T03:06:40Z, which is why five orders are still "open now".
 
 ### Network summary
 
@@ -151,7 +163,7 @@ $ bestiario stats orders --from 2026-08-23 --until 2026-08-27
 │ orders.abandonment_rate ┆ 12.5% │
 │ orders.created_delta    ┆ —     │
 │ orders.completed_delta  ┆ —     │
-│ orders.open_now         ┆ 5     │
+│ orders.open_now         ┆ 4     │
 │ orders.in_progress_now  ┆ 1     │
 └─────────────────────────┴───────┘
 ```
@@ -208,7 +220,7 @@ $ bestiario stats orders --by fiat --from 2026-08-23 --until 2026-08-27
 │ orders.USD.abandonment_rate ┆ 0.0%   │
 │ orders.USD.created_delta    ┆ —      │
 │ orders.USD.completed_delta  ┆ —      │
-│ orders.USD.open_now         ┆ 1      │
+│ orders.USD.open_now         ┆ 0      │
 │ orders.USD.in_progress_now  ┆ 0      │
 └─────────────────────────────┴────────┘
 ```
@@ -227,7 +239,7 @@ $ bestiario stats dev-fees --from 2026-08-23 --until 2026-08-27
 ╞══════════════════════╪══════════╡
 │ dev_fees.total_sats  ┆ 117 sats │
 │ dev_fees.paid        ┆ 2        │
-│ dev_fees.coverage    ┆ 0.0%     │
+│ dev_fees.coverage    ┆ —        │
 │ dev_fees.latency_p50 ┆ —        │
 │ dev_fees.latency_p90 ┆ —        │
 │ dev_fees.duplicates  ┆ 0        │
@@ -245,27 +257,30 @@ orders that produced a fee, over the instances known to charge one.
 ```console
 $ bestiario stats disputes --from 2026-08-23 --until 2026-08-27
 2026-08-23T00:00:00+00:00 — 2026-08-27T00:00:00+00:00
-┌──────────────────────────────────┬────────┐
-│ metric                           ┆ value  │
-╞══════════════════════════════════╪════════╡
-│ disputes.opened                  ┆ 5      │
-│ disputes.status.initiated        ┆ 1      │
-│ disputes.status.in_progress      ┆ 1      │
-│ disputes.status.seller_refunded  ┆ 2      │
-│ disputes.status.settled          ┆ 1      │
-│ disputes.status.released         ┆ 0      │
-│ disputes.initiator.buyer         ┆ 60.0%  │
-│ disputes.initiator.seller        ┆ 40.0%  │
-│ disputes.rate                    ┆ 250.0% │
-│ disputes.resolved                ┆ 3      │
-│ disputes.outcome.seller_refunded ┆ 66.7%  │
-│ disputes.outcome.settled         ┆ 33.3%  │
-│ disputes.outcome.released        ┆ 0.0%   │
-│ disputes.resolution_p50          ┆ 1.4h   │
-│ disputes.resolution_p90          ┆ 2.0h   │
-│ disputes.open_now                ┆ 2      │
-│ disputes.open_oldest_age         ┆ 3.0d   │
-└──────────────────────────────────┴────────┘
+┌──────────────────────────────────┬──────────────────────────────────────┐
+│ metric                           ┆ value                                │
+╞══════════════════════════════════╪══════════════════════════════════════╡
+│ disputes.opened                  ┆ 5                                    │
+│ disputes.status.initiated        ┆ 1                                    │
+│ disputes.status.in_progress      ┆ 1                                    │
+│ disputes.status.seller_refunded  ┆ 2                                    │
+│ disputes.status.settled          ┆ 1                                    │
+│ disputes.status.released         ┆ 0                                    │
+│ disputes.initiator.buyer         ┆ 60.0%                                │
+│ disputes.initiator.seller        ┆ 40.0%                                │
+│ disputes.rate                    ┆ 250.0%                               │
+│ disputes.resolved                ┆ 3                                    │
+│ disputes.outcome.seller_refunded ┆ 66.7%                                │
+│ disputes.outcome.settled         ┆ 33.3%                                │
+│ disputes.outcome.released        ┆ 0.0%                                 │
+│ disputes.resolution_p50          ┆ 1.4h                                 │
+│ disputes.resolution_p90          ┆ 2.0h                                 │
+│ disputes.open_now                ┆ 2                                    │
+│ disputes.open.1.id               ┆ c6ebce7e-e521-4df3-a8c5-24301145eb66 │
+│ disputes.open.1.age              ┆ 3.1d                                 │
+│ disputes.open.2.id               ┆ c402fff7-5255-4894-8105-dfb98a5981d0 │
+│ disputes.open.2.age              ┆ 2.1d                                 │
+└──────────────────────────────────┴──────────────────────────────────────┘
 ```
 
 `--by status` and `--by initiator` print the histograms alone; `--by
@@ -274,26 +289,26 @@ instance` and `--by period` one block per slice.
 ### The bestiary
 
 ```console
-$ bestiario instances --instance 00037abd --from 2026-08-23 --until 2026-08-27
+$ bestiario instances --instance "Mostro Brasil" --from 2026-08-23 --until 2026-08-27
 2026-08-23T00:00:00+00:00 — 2026-08-27T00:00:00+00:00
 ┌─────────────────────────────────────────────────────┬──────────────────────────────────────────────────────────────────┐
 │ metric                                              ┆ value                                                            │
 ╞═════════════════════════════════════════════════════╪══════════════════════════════════════════════════════════════════╡
-│ instances.Mostro Brasil (00037abd).pubkey           ┆ 00037abd44e7a846689e230d5446abcd0d56a344fa81fff85c09d1929feda486 │
-│ instances.Mostro Brasil (00037abd).name             ┆ Mostro Brasil                                                    │
-│ instances.Mostro Brasil (00037abd).mostro_version   ┆ —                                                                │
-│ instances.Mostro Brasil (00037abd).protocol_version ┆ —                                                                │
-│ instances.Mostro Brasil (00037abd).fee              ┆ —                                                                │
-│ instances.Mostro Brasil (00037abd).min_order        ┆ —                                                                │
-│ instances.Mostro Brasil (00037abd).max_order        ┆ —                                                                │
-│ instances.Mostro Brasil (00037abd).fiat             ┆ —                                                                │
-│ instances.Mostro Brasil (00037abd).ln_networks      ┆ —                                                                │
-│ instances.Mostro Brasil (00037abd).bond             ┆ —                                                                │
-│ instances.Mostro Brasil (00037abd).first_seen       ┆ 2026-08-26T10:03:46+00:00                                        │
-│ instances.Mostro Brasil (00037abd).last_seen        ┆ 2026-08-26T10:36:53+00:00                                        │
-│ instances.Mostro Brasil (00037abd).silent_for       ┆ 15.5h                                                            │
-│ instances.Mostro Brasil (00037abd).silent           ┆ no                                                               │
-│ instances.Mostro Brasil (00037abd).created          ┆ 2                                                                │
+│ instances.Mostro Brasil (ec3c3e00).pubkey           ┆ ec3c3e00a04aa9e0c040fcef2dc7767d66c6c93d5dd2b39ba937b820ddf23610 │
+│ instances.Mostro Brasil (ec3c3e00).name             ┆ Mostro Brasil                                                    │
+│ instances.Mostro Brasil (ec3c3e00).mostro_version   ┆ —                                                                │
+│ instances.Mostro Brasil (ec3c3e00).protocol_version ┆ —                                                                │
+│ instances.Mostro Brasil (ec3c3e00).fee              ┆ —                                                                │
+│ instances.Mostro Brasil (ec3c3e00).min_order        ┆ —                                                                │
+│ instances.Mostro Brasil (ec3c3e00).max_order        ┆ —                                                                │
+│ instances.Mostro Brasil (ec3c3e00).fiat             ┆ —                                                                │
+│ instances.Mostro Brasil (ec3c3e00).ln_networks      ┆ —                                                                │
+│ instances.Mostro Brasil (ec3c3e00).bond             ┆ —                                                                │
+│ instances.Mostro Brasil (ec3c3e00).first_seen       ┆ 2026-08-26T10:03:46+00:00                                        │
+│ instances.Mostro Brasil (ec3c3e00).last_seen        ┆ 2026-08-26T10:36:53+00:00                                        │
+│ instances.Mostro Brasil (ec3c3e00).silent_for       ┆ 16.5h                                                            │
+│ instances.Mostro Brasil (ec3c3e00).silent           ┆ no                                                               │
+│ instances.Mostro Brasil (ec3c3e00).created          ┆ 2                                                                │
 └─────────────────────────────────────────────────────┴──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -309,7 +324,7 @@ $ bestiario instance Mostro --from 2026-08-23 --until 2026-08-27
 ┌──────────────────────────────────┬──────────────────────────────────────────────────────────────────┐
 │ metric                           ┆ value                                                            │
 ╞══════════════════════════════════╪══════════════════════════════════════════════════════════════════╡
-│ instance.pubkey                  ┆ 82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390 │
+│ instance.pubkey                  ┆ 6320ee5edbaeb9a00d7c4768e472e277539aa993007c43d75ce00a38dff4d425 │
 │ instance.name                    ┆ Mostro                                                           │
 │ instance.mostro_version          ┆ —                                                                │
 │ instance.protocol_version        ┆ —                                                                │
@@ -321,7 +336,7 @@ $ bestiario instance Mostro --from 2026-08-23 --until 2026-08-27
 │ instance.bond                    ┆ —                                                                │
 │ instance.first_seen              ┆ 2026-08-25T01:24:38+00:00                                        │
 │ instance.last_seen               ┆ 2026-08-26T10:39:05+00:00                                        │
-│ instance.silent_for              ┆ 15.4h                                                            │
+│ instance.silent_for              ┆ 16.5h                                                            │
 │ instance.silent                  ┆ no                                                               │
 │ orders.created                   ┆ 4                                                                │
 │ orders.completed                 ┆ 0                                                                │
@@ -330,7 +345,7 @@ $ bestiario instance Mostro --from 2026-08-23 --until 2026-08-27
 │ orders.abandonment_rate          ┆ 0.0%                                                             │
 │ orders.created_delta             ┆ —                                                                │
 │ orders.completed_delta           ┆ —                                                                │
-│ orders.open_now                  ┆ 3                                                                │
+│ orders.open_now                  ┆ 2                                                                │
 │ orders.in_progress_now           ┆ 1                                                                │
 │ volume.sats                      ┆ 0 sats                                                           │
 │ dev_fees.total_sats              ┆ 116 sats                                                         │
@@ -356,7 +371,8 @@ $ bestiario instance Mostro --from 2026-08-23 --until 2026-08-27
 │ disputes.resolution_p50          ┆ —                                                                │
 │ disputes.resolution_p90          ┆ —                                                                │
 │ disputes.open_now                ┆ 1                                                                │
-│ disputes.open_oldest_age         ┆ 2.1d                                                             │
+│ disputes.open.1.id               ┆ c402fff7-5255-4894-8105-dfb98a5981d0                             │
+│ disputes.open.1.age              ┆ 2.1d                                                             │
 │ share.orders                     ┆ 50.0%                                                            │
 │ share.volume                     ┆ 0.0%                                                             │
 └──────────────────────────────────┴──────────────────────────────────────────────────────────────────┘
@@ -367,99 +383,17 @@ $ bestiario instance Mostro --from 2026-08-23 --until 2026-08-27
 ```console
 $ bestiario compare --network regtest --from 2026-08-23 --until 2026-08-27
 2026-08-23T00:00:00+00:00 — 2026-08-27T00:00:00+00:00
-┌──────────────────────────────────────────────────────────────────────────────────────────┬───────────┐
-│ metric                                                                                   ┆ value     │
-╞══════════════════════════════════════════════════════════════════════════════════════════╪═══════════╡
-│ compare.b3626fe91b602bdbca3673bec0855221f41dc8f6d0e4027e51eaa525d68d87f2.completed       ┆ 0         │
-│ compare.b3626fe91b602bdbca3673bec0855221f41dc8f6d0e4027e51eaa525d68d87f2.volume_sats     ┆ 0 sats    │
-│ compare.b3626fe91b602bdbca3673bec0855221f41dc8f6d0e4027e51eaa525d68d87f2.completion_rate ┆ —         │
-│ compare.b3626fe91b602bdbca3673bec0855221f41dc8f6d0e4027e51eaa525d68d87f2.fee             ┆ —         │
-│ compare.b3626fe91b602bdbca3673bec0855221f41dc8f6d0e4027e51eaa525d68d87f2.dev_fees_sats   ┆ 0 sats    │
-│ compare.b3626fe91b602bdbca3673bec0855221f41dc8f6d0e4027e51eaa525d68d87f2.dispute_rate    ┆ —         │
-│ compare.b3626fe91b602bdbca3673bec0855221f41dc8f6d0e4027e51eaa525d68d87f2.version         ┆ —         │
-│ compare.Kmbalache 🇨🇺 (00000235).completed                                                ┆ 0         │
-│ compare.Kmbalache 🇨🇺 (00000235).volume_sats                                              ┆ 0 sats    │
-│ compare.Kmbalache 🇨🇺 (00000235).completion_rate                                          ┆ —         │
-│ compare.Kmbalache 🇨🇺 (00000235).fee                                                      ┆ —         │
-│ compare.Kmbalache 🇨🇺 (00000235).dev_fees_sats                                            ┆ 0 sats    │
-│ compare.Kmbalache 🇨🇺 (00000235).dispute_rate                                             ┆ —         │
-│ compare.Kmbalache 🇨🇺 (00000235).version                                                  ┆ —         │
-│ compare.Mostro (82fa8cb9).completed                                                      ┆ 0         │
-│ compare.Mostro (82fa8cb9).volume_sats                                                    ┆ 0 sats    │
-│ compare.Mostro (82fa8cb9).completion_rate                                                ┆ —         │
-│ compare.Mostro (82fa8cb9).fee                                                            ┆ —         │
-│ compare.Mostro (82fa8cb9).dev_fees_sats                                                  ┆ 0 sats    │
-│ compare.Mostro (82fa8cb9).dispute_rate                                                   ┆ —         │
-│ compare.Mostro (82fa8cb9).version                                                        ┆ —         │
-│ compare.MostroColomBia🇨🇴 (00000978).completed                                            ┆ 0         │
-│ compare.MostroColomBia🇨🇴 (00000978).volume_sats                                          ┆ 0 sats    │
-│ compare.MostroColomBia🇨🇴 (00000978).completion_rate                                      ┆ —         │
-│ compare.MostroColomBia🇨🇴 (00000978).fee                                                  ┆ —         │
-│ compare.MostroColomBia🇨🇴 (00000978).dev_fees_sats                                        ┆ 0 sats    │
-│ compare.MostroColomBia🇨🇴 (00000978).dispute_rate                                         ┆ —         │
-│ compare.MostroColomBia🇨🇴 (00000978).version                                              ┆ —         │
-│ compare.Mostro ₿oliviano🇧🇴 (00007cb3).completed                                          ┆ 0         │
-│ compare.Mostro ₿oliviano🇧🇴 (00007cb3).volume_sats                                        ┆ 0 sats    │
-│ compare.Mostro ₿oliviano🇧🇴 (00007cb3).completion_rate                                    ┆ —         │
-│ compare.Mostro ₿oliviano🇧🇴 (00007cb3).fee                                                ┆ —         │
-│ compare.Mostro ₿oliviano🇧🇴 (00007cb3).dev_fees_sats                                      ┆ 0 sats    │
-│ compare.Mostro ₿oliviano🇧🇴 (00007cb3).dispute_rate                                       ┆ —         │
-│ compare.Mostro ₿oliviano🇧🇴 (00007cb3).version                                            ┆ —         │
-│ compare.Fostro testing (17b520bd).completed                                              ┆ 1         │
-│ compare.Fostro testing (17b520bd).volume_sats                                            ┆ 1361 sats │
-│ compare.Fostro testing (17b520bd).completion_rate                                        ┆ 100.0%    │
-│ compare.Fostro testing (17b520bd).fee                                                    ┆ —         │
-│ compare.Fostro testing (17b520bd).dev_fees_sats                                          ┆ 0 sats    │
-│ compare.Fostro testing (17b520bd).dispute_rate                                           ┆ 0.0%      │
-│ compare.Fostro testing (17b520bd).version                                                ┆ —         │
-│ compare.NostroMostro 🇪🇸 (0000cc02).completed                                             ┆ 0         │
-│ compare.NostroMostro 🇪🇸 (0000cc02).volume_sats                                           ┆ 0 sats    │
-│ compare.NostroMostro 🇪🇸 (0000cc02).completion_rate                                       ┆ —         │
-│ compare.NostroMostro 🇪🇸 (0000cc02).fee                                                   ┆ 0.6%      │
-│ compare.NostroMostro 🇪🇸 (0000cc02).dev_fees_sats                                         ┆ 0 sats    │
-│ compare.NostroMostro 🇪🇸 (0000cc02).dispute_rate                                          ┆ —         │
-│ compare.NostroMostro 🇪🇸 (0000cc02).version                                               ┆ 0.18.5    │
-│ compare.Mostro Brasil (00037abd).completed                                               ┆ 0         │
-│ compare.Mostro Brasil (00037abd).volume_sats                                             ┆ 0 sats    │
-│ compare.Mostro Brasil (00037abd).completion_rate                                         ┆ —         │
-│ compare.Mostro Brasil (00037abd).fee                                                     ┆ —         │
-│ compare.Mostro Brasil (00037abd).dev_fees_sats                                           ┆ 0 sats    │
-│ compare.Mostro Brasil (00037abd).dispute_rate                                            ┆ —         │
-│ compare.Mostro Brasil (00037abd).version                                                 ┆ —         │
-│ compare.Sovereign Mostro VgWs (ef7d11a2).completed                                       ┆ 0         │
-│ compare.Sovereign Mostro VgWs (ef7d11a2).volume_sats                                     ┆ 0 sats    │
-│ compare.Sovereign Mostro VgWs (ef7d11a2).completion_rate                                 ┆ —         │
-│ compare.Sovereign Mostro VgWs (ef7d11a2).fee                                             ┆ 0.0%      │
-│ compare.Sovereign Mostro VgWs (ef7d11a2).dev_fees_sats                                   ┆ 0 sats    │
-│ compare.Sovereign Mostro VgWs (ef7d11a2).dispute_rate                                    ┆ —         │
-│ compare.Sovereign Mostro VgWs (ef7d11a2).version                                         ┆ 0.18.0    │
-│ compare.560795c6b0d0549a6a61797c0c59726f7159163cf68c4ff20e3a7e086ac0cf35.completed       ┆ 0         │
-│ compare.560795c6b0d0549a6a61797c0c59726f7159163cf68c4ff20e3a7e086ac0cf35.volume_sats     ┆ 0 sats    │
-│ compare.560795c6b0d0549a6a61797c0c59726f7159163cf68c4ff20e3a7e086ac0cf35.completion_rate ┆ —         │
-│ compare.560795c6b0d0549a6a61797c0c59726f7159163cf68c4ff20e3a7e086ac0cf35.fee             ┆ 0.6%      │
-│ compare.560795c6b0d0549a6a61797c0c59726f7159163cf68c4ff20e3a7e086ac0cf35.dev_fees_sats   ┆ 0 sats    │
-│ compare.560795c6b0d0549a6a61797c0c59726f7159163cf68c4ff20e3a7e086ac0cf35.dispute_rate    ┆ —         │
-│ compare.560795c6b0d0549a6a61797c0c59726f7159163cf68c4ff20e3a7e086ac0cf35.version         ┆ 0.16.3    │
-│ compare.c945e46329e8271d6c3ed9546685fc2632a609be9059cd9cfb6fac0bcc2478a9.completed       ┆ 0         │
-│ compare.c945e46329e8271d6c3ed9546685fc2632a609be9059cd9cfb6fac0bcc2478a9.volume_sats     ┆ 0 sats    │
-│ compare.c945e46329e8271d6c3ed9546685fc2632a609be9059cd9cfb6fac0bcc2478a9.completion_rate ┆ —         │
-│ compare.c945e46329e8271d6c3ed9546685fc2632a609be9059cd9cfb6fac0bcc2478a9.fee             ┆ 0.0%      │
-│ compare.c945e46329e8271d6c3ed9546685fc2632a609be9059cd9cfb6fac0bcc2478a9.dev_fees_sats   ┆ 0 sats    │
-│ compare.c945e46329e8271d6c3ed9546685fc2632a609be9059cd9cfb6fac0bcc2478a9.dispute_rate    ┆ —         │
-│ compare.c945e46329e8271d6c3ed9546685fc2632a609be9059cd9cfb6fac0bcc2478a9.version         ┆ 0.18.0    │
-│ compare.f94362713ff95e37914b12d5d2067d83e314bebf1e5b49e9ff4371738c572090.completed       ┆ 0         │
-│ compare.f94362713ff95e37914b12d5d2067d83e314bebf1e5b49e9ff4371738c572090.volume_sats     ┆ 0 sats    │
-│ compare.f94362713ff95e37914b12d5d2067d83e314bebf1e5b49e9ff4371738c572090.completion_rate ┆ —         │
-│ compare.f94362713ff95e37914b12d5d2067d83e314bebf1e5b49e9ff4371738c572090.fee             ┆ 0.0%      │
-│ compare.f94362713ff95e37914b12d5d2067d83e314bebf1e5b49e9ff4371738c572090.dev_fees_sats   ┆ 0 sats    │
-│ compare.f94362713ff95e37914b12d5d2067d83e314bebf1e5b49e9ff4371738c572090.dispute_rate    ┆ —         │
-│ compare.f94362713ff95e37914b12d5d2067d83e314bebf1e5b49e9ff4371738c572090.version         ┆ 0.18.0    │
-└──────────────────────────────────────────────────────────────────────────────────────────┴───────────┘
+┌───────────────────────────┬───────────┬─────────────┬─────────────────┬─────┬───────────────┬──────────────┬─────────┐
+│ instance                  ┆ completed ┆ volume_sats ┆ completion_rate ┆ fee ┆ dev_fees_sats ┆ dispute_rate ┆ version │
+╞═══════════════════════════╪═══════════╪═════════════╪═════════════════╪═════╪═══════════════╪══════════════╪═════════╡
+│ Fostro testing (8c6a4452) ┆ 1         ┆ 1361 sats   ┆ 100.0%          ┆ —   ┆ 0 sats        ┆ —            ┆ —       │
+└───────────────────────────┴───────────┴─────────────┴─────────────────┴─────┴───────────────┴──────────────┴─────────┘
 ```
 
-One block per instance: completed orders, sats volume, completion rate,
-fee, dev fees sent, dispute rate, version. Here scoped to one network to
-keep it short.
+One row per instance: completed orders, sats volume, completion rate, fee,
+dev fees sent, dispute rate, version. Under `--network` only the instances
+that traded on that network are compared — here one — and the dispute rate
+is `—`, since disputes cannot be narrowed to a network.
 
 ### One order
 
@@ -490,7 +424,7 @@ counts.
 ```console
 $ bestiario summary --json --from 2026-08-23 --until 2026-08-27
 {
-  "generated_at": "2026-08-27T02:05:42+00:00",
+  "generated_at": "2026-08-27T03:06:40+00:00",
   "range": {
     "from": "2026-08-23T00:00:00+00:00",
     "until": "2026-08-27T00:00:00+00:00"

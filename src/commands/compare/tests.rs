@@ -157,6 +157,33 @@ async fn the_comparison_over_the_real_corpus_matches_the_hand_count() {
 }
 
 #[tokio::test]
+async fn a_network_narrowed_comparison_lists_only_the_instances_trading_on_it() {
+    let pool = connect_and_migrate("sqlite::memory:")
+        .await
+        .expect("migrate");
+    settled(&pool, "a1", ALPHA, FROM + 100, 300).await;
+    instances::upsert(&pool, ALPHA, Some("Alpha"), FROM)
+        .await
+        .expect("alpha");
+    // Known, but with no order in the scope.
+    instances::upsert(&pool, BETA, None, FROM)
+        .await
+        .expect("beta");
+    let query = Query {
+        network_narrowed: true,
+        ..query()
+    };
+
+    let report = report(&pool, &query, NOW).await.expect("report");
+
+    assert_eq!(report.metrics.len(), 7, "one row: {:?}", report.metrics);
+    assert_eq!(
+        value(&report, "compare.Alpha (82fa8cb9).completed"),
+        &Value::Count(1)
+    );
+}
+
+#[tokio::test]
 async fn a_network_narrowed_comparison_leaves_dispute_rates_missing() {
     let pool = connect_and_migrate("sqlite::memory:")
         .await

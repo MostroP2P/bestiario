@@ -14,19 +14,22 @@
 //! from the current output. Read the diff before committing it: the point of
 //! the file is that a change here is a change someone decided on.
 //!
-//! # Capturing the README examples
+//! # The README examples
 //!
-//! `E2E_DUMP_DIR=<dir> cargo test --test e2e` also writes the *table*
-//! rendering of every report to `<dir>/<command>.txt`, so the worked
-//! examples in `README.md` are real output of this corpus rather than
-//! something typed from memory.
+//! Every `$ bestiario …` line inside a fenced block of `README.md` is run,
+//! and the output shown under it in the block has to be what the binary
+//! printed — byte for byte, the clock being frozen (`BESTIARIO_NOW`). A
+//! README that has drifted from the binary fails here rather than
+//! misleading a reader. `E2E_DUMP_DIR=<dir> cargo test --test e2e` writes
+//! every output, the README commands' as `readme-<n>.txt`, so the examples
+//! can be pasted back from the same run.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use nostr_sdk::prelude::{
-    Event, EventBuilder, FinalizeEvent as _, Keys, MockRelay, PublicKey, SecretKey,
+    Event, EventBuilder, FinalizeEvent as _, Keys, MockRelay, PublicKey, SecretKey, Tag,
 };
 use tempfile::TempDir;
 
@@ -37,6 +40,12 @@ const KINDS: [u16; 4] = [38383, 8383, 38386, 38385];
 /// A window around the capture date of the fixtures (2026-08-26).
 const FROM: &str = "1787500000";
 const UNTIL: &str = "1787800000";
+
+/// The clock the binary runs on (`BESTIARIO_NOW`): 2026-08-27T03:06:40Z,
+/// just after the window. Frozen so that the reports — `open_now`,
+/// `silent_for`, `generated_at` — are the same on every run and the
+/// README's examples can be compared byte for byte.
+const NOW: &str = "1787800000";
 
 /// The instance named "Mostro" — `82fa8cb9…` on the network; see
 /// [`test_keys`] for what it becomes on the local relay.
@@ -68,17 +77,27 @@ fn test_keys(real: &PublicKey) -> Keys {
 
 /// `event` as the local relay will keep it: without its `expiration`,
 /// signed by [`test_keys`].
+///
+/// A kind 38385 is keyed on its own pubkey (`d` = pubkey hex, SPEC §2.4),
+/// and the parser checks that; the `d` follows the key.
 fn for_relay(event: &Event) -> Event {
+    let keys = test_keys(&event.pubkey);
+    let tags = event
+        .tags
+        .iter()
+        .filter(|tag| tag.kind() != "expiration")
+        .map(|tag| {
+            if event.kind.as_u16() == 38385 && tag.kind() == "d" {
+                Tag::identifier(keys.public_key().to_hex())
+            } else {
+                tag.clone()
+            }
+        });
+
     EventBuilder::new(event.kind, event.content.clone())
-        .tags(
-            event
-                .tags
-                .iter()
-                .filter(|tag| tag.kind() != "expiration")
-                .cloned(),
-        )
+        .tags(tags)
         .custom_created_at(event.created_at)
-        .finalize(&test_keys(&event.pubkey))
+        .finalize(&keys)
         .expect("sign")
 }
 
@@ -139,6 +158,7 @@ url = "sqlite://{}"
 /// stdout.
 fn bestiario(settings: &Path, args: &[&str]) -> String {
     let output = Command::new(env!("CARGO_BIN_EXE_bestiario"))
+        .env("BESTIARIO_NOW", NOW)
         .arg("--config")
         .arg(settings)
         .args(args)
@@ -202,6 +222,8 @@ async fn backfill_then_every_report_against_the_local_relay() {
     let dir = TempDir::new().expect("tempdir");
     let settings = write_settings(dir.path(), &relay.url().await.to_string());
     let dump_dir = std::env::var_os("E2E_DUMP_DIR").map(PathBuf::from);
+    // Update mode: regenerate the pinned outputs instead of checking them.
+    let updating = std::env::var_os("E2E_UPDATE").is_some();
     if let Some(dir) = &dump_dir {
         fs::create_dir_all(dir).expect("dump dir");
     }
@@ -212,8 +234,9 @@ async fn backfill_then_every_report_against_the_local_relay() {
     // drifted from the binary fails here rather than misleading a reader.
     // The outputs are dumped as `readme-<n>.txt` so the examples in the
     // README can be pasted from the same run.
-    for (index, command) in readme_commands().iter().enumerate() {
-        let args: Vec<&str> = command.split_whitespace().collect();
+    for (index, (command, shown)) in readme_examples().iter().enumerate() {
+        let args = shell_words(command);
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let stdout = bestiario(&settings, &args);
         if args.contains(&"--json") {
             envelope(&stdout, command);
@@ -224,6 +247,14 @@ async fn backfill_then_every_report_against_the_local_relay() {
                 format!("$ bestiario {command}\n{stdout}"),
             )
             .expect("dump");
+        }
+        if !updating {
+            assert_eq!(
+                stdout.trim_end(),
+                shown.trim_end(),
+                "the README's example for `bestiario {command}` is not what the binary prints; \
+                 run with E2E_UPDATE=1 E2E_DUMP_DIR=<dir> and paste readme-{index:02}.txt"
+            );
         }
     }
 
@@ -279,7 +310,7 @@ async fn backfill_then_every_report_against_the_local_relay() {
     summary["generated_at"] = serde_json::Value::Null;
     let expected_path = manifest_dir().join("tests/expected/summary.json");
     let rendered = serde_json::to_string_pretty(&summary).expect("json") + "\n";
-    if std::env::var_os("E2E_UPDATE").is_some() {
+    if updating {
         fs::write(&expected_path, &rendered).expect("write expected");
     }
     let expected = fs::read_to_string(&expected_path).unwrap_or_else(|e| {
@@ -304,27 +335,73 @@ async fn backfill_then_every_report_against_the_local_relay() {
     assert_eq!(again, summary, "rebuild changed the summary");
 }
 
+/// `line` split the way a shell would, as far as double quotes: an
+/// instance name with a space in it is written `"Mostro Brasil"` in the
+/// README, and has to reach the binary as one argument.
+fn shell_words(line: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut quoted = false;
+    let mut pending = false;
+    for c in line.chars() {
+        match c {
+            '"' => {
+                quoted = !quoted;
+                pending = true;
+            }
+            c if c.is_whitespace() && !quoted => {
+                if pending {
+                    words.push(std::mem::take(&mut word));
+                    pending = false;
+                }
+            }
+            c => {
+                word.push(c);
+                pending = true;
+            }
+        }
+    }
+    if pending {
+        words.push(word);
+    }
+    words
+}
+
 /// Every `$ bestiario …` line inside a fenced code block of `README.md`,
-/// without the prompt and the binary name.
+/// without the prompt and the binary name, paired with the output the
+/// block shows under it (empty when the block shows none).
 ///
 /// `sync` is left out: it runs until interrupted, which is the one thing a
 /// test cannot wait for. The README shows it in a block without a prompt.
-fn readme_commands() -> Vec<String> {
+fn readme_examples() -> Vec<(String, String)> {
     let readme = fs::read_to_string(manifest_dir().join("README.md")).expect("README.md");
-    let mut commands = Vec::new();
+    let mut examples: Vec<(String, String)> = Vec::new();
     let mut fenced = false;
+    let mut current: Option<(String, String)> = None;
     for line in readme.lines() {
         if line.starts_with("```") {
             fenced = !fenced;
+            if let Some(example) = current.take() {
+                examples.push(example);
+            }
             continue;
         }
-        if let Some(command) = line.strip_prefix("$ bestiario ").filter(|_| fenced) {
-            commands.push(command.trim().to_string());
+        if !fenced {
+            continue;
+        }
+        if let Some(command) = line.strip_prefix("$ bestiario ") {
+            if let Some(example) = current.take() {
+                examples.push(example);
+            }
+            current = Some((command.trim().to_string(), String::new()));
+        } else if let Some((_, shown)) = &mut current {
+            shown.push_str(line);
+            shown.push('\n');
         }
     }
     assert!(
-        !commands.is_empty(),
+        !examples.is_empty(),
         "README.md shows no `$ bestiario` commands"
     );
-    commands
+    examples
 }
