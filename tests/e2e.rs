@@ -25,7 +25,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use nostr_sdk::prelude::{Event, MockRelay};
+use nostr_sdk::prelude::{
+    Event, EventBuilder, FinalizeEvent as _, Keys, MockRelay, PublicKey, SecretKey,
+};
 use tempfile::TempDir;
 
 /// The kinds the backfill walks, in the fixture directories of the same
@@ -36,16 +38,53 @@ const KINDS: [u16; 4] = [38383, 8383, 38386, 38385];
 const FROM: &str = "1787500000";
 const UNTIL: &str = "1787800000";
 
-/// Enough of `82fa8cb9…` (the instance named "Mostro") to be unique.
-const INSTANCE_PREFIX: &str = "82fa8cb9";
+/// The instance named "Mostro" — `82fa8cb9…` on the network; see
+/// [`test_keys`] for what it becomes on the local relay.
+const MOSTRO: &str = "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390";
 
 fn manifest_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
+/// The keys an instance signs with on the local relay: derived from its
+/// real pubkey, so the same instance is the same pubkey on every run.
+///
+/// # Why the corpus is re-signed for the relay
+///
+/// Every fixture carries a NIP-40 `expiration` tag, and the local relay —
+/// like any relay — refuses an expired event. Orders expire within a day
+/// of publication, so a corpus captured on one date is gone from the relay
+/// a day later, and an end-to-end test seeded with the events as captured
+/// would lose an order a day until the pinned summary no longer matched.
+/// The events are therefore rebuilt without the `expiration` tag and signed
+/// with these keys: every tag, timestamp and identifier is the instance's
+/// own, the signature verifies, and only the pubkey differs from the one
+/// on the network. The unit tests keep the events exactly as captured.
+fn test_keys(real: &PublicKey) -> Keys {
+    // The real x-only pubkey is 32 random-looking bytes, which is what a
+    // secret key is; the derivation needs no hash to be deterministic.
+    Keys::new(SecretKey::from_slice(&real.to_bytes()).expect("a valid scalar"))
+}
+
+/// `event` as the local relay will keep it: without its `expiration`,
+/// signed by [`test_keys`].
+fn for_relay(event: &Event) -> Event {
+    EventBuilder::new(event.kind, event.content.clone())
+        .tags(
+            event
+                .tags
+                .iter()
+                .filter(|tag| tag.kind() != "expiration")
+                .cloned(),
+        )
+        .custom_created_at(event.created_at)
+        .finalize(&test_keys(&event.pubkey))
+        .expect("sign")
+}
+
 /// Every fixture of the indexed kinds, other platforms included: the
 /// pipeline has to turn those away, and a walk that never meets one would
-/// not show that it does.
+/// not show that it does. Re-signed for the relay; see [`for_relay`].
 fn fixtures() -> Vec<Event> {
     let mut events = Vec::new();
     for kind in KINDS {
@@ -58,7 +97,8 @@ fn fixtures() -> Vec<Event> {
         paths.sort();
         for path in paths {
             let json = fs::read_to_string(&path).expect("fixture");
-            events.push(Event::from_json(&json).expect("a signed event"));
+            let captured = Event::from_json(&json).expect("a signed event");
+            events.push(for_relay(&captured));
         }
     }
     events
@@ -150,11 +190,11 @@ async fn backfill_then_every_report_against_the_local_relay() {
     for event in &events {
         relay.add_event(event.clone()).await.expect("seed");
     }
+    let mostro = test_keys(&PublicKey::from_hex(MOSTRO).expect("hex")).public_key();
+    let instance_prefix = &mostro.to_hex()[..8];
     let order_id = events
         .iter()
-        .find(|event| {
-            event.kind.as_u16() == 38383 && event.pubkey.to_hex().starts_with(INSTANCE_PREFIX)
-        })
+        .find(|event| event.kind.as_u16() == 38383 && event.pubkey == mostro)
         .and_then(|event| event.tags.identifier())
         .expect("an order from the profiled instance")
         .to_string();
@@ -181,7 +221,7 @@ async fn backfill_then_every_report_against_the_local_relay() {
     let reports: Vec<Vec<&str>> = vec![
         vec!["summary"],
         vec!["instances"],
-        vec!["instance", INSTANCE_PREFIX],
+        vec!["instance", instance_prefix],
         vec!["compare"],
         vec!["stats", "orders"],
         vec!["stats", "orders", "--by", "fiat"],
