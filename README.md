@@ -504,18 +504,26 @@ the bucket before it. `--by` takes `day`, `week`, `month` or `year`;
 ```console
 $ bestiario series volume.sats --by day --split kind --from 2026-08-23 --until 2026-08-27
 2026-08-23T00:00:00+00:00 — 2026-08-27T00:00:00+00:00
-┌─────────────────────────────────┬───────┐
-│ metric                          ┆ value │
-╞═════════════════════════════════╪═══════╡
-│ orders.created.2026-08-23       ┆ 0     │
-│ orders.created.2026-08-23.delta ┆ —     │
-│ orders.created.2026-08-24       ┆ 0     │
-│ orders.created.2026-08-24.delta ┆ —     │
-│ orders.created.2026-08-25       ┆ 0     │
-│ orders.created.2026-08-25.delta ┆ —     │
-│ orders.created.2026-08-26       ┆ 8     │
-│ orders.created.2026-08-26.delta ┆ —     │
-└─────────────────────────────────┴───────┘_SPLIT
+┌───────────────────────────────────┬───────────┐
+│ metric                            ┆ value     │
+╞═══════════════════════════════════╪═══════════╡
+│ volume.sats.buy.2026-08-23        ┆ 0 sats    │
+│ volume.sats.buy.2026-08-23.delta  ┆ —         │
+│ volume.sats.buy.2026-08-24        ┆ 0 sats    │
+│ volume.sats.buy.2026-08-24.delta  ┆ —         │
+│ volume.sats.buy.2026-08-25        ┆ 0 sats    │
+│ volume.sats.buy.2026-08-25.delta  ┆ —         │
+│ volume.sats.buy.2026-08-26        ┆ 0 sats    │
+│ volume.sats.buy.2026-08-26.delta  ┆ —         │
+│ volume.sats.sell.2026-08-23       ┆ 0 sats    │
+│ volume.sats.sell.2026-08-23.delta ┆ —         │
+│ volume.sats.sell.2026-08-24       ┆ 0 sats    │
+│ volume.sats.sell.2026-08-24.delta ┆ —         │
+│ volume.sats.sell.2026-08-25       ┆ 0 sats    │
+│ volume.sats.sell.2026-08-25.delta ┆ —         │
+│ volume.sats.sell.2026-08-26       ┆ 1361 sats │
+│ volume.sats.sell.2026-08-26.delta ┆ —         │
+└───────────────────────────────────┴───────────┘
 ```
 
 The Δ is a relative change for a magnitude — a count, a sum, a duration —
