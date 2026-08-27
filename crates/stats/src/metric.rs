@@ -181,6 +181,16 @@ impl Metric {
         }
     }
 
+    /// The same figure with no value: what a report says about a period
+    /// the archive cannot speak for. The name, the kind and the error
+    /// survive, since they describe the figure and not the answer.
+    pub fn missing(self) -> Self {
+        Self {
+            value: Value::Missing,
+            ..self
+        }
+    }
+
     pub fn kind(&self) -> MetricKind {
         self.kind
     }

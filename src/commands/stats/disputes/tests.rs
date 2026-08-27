@@ -210,3 +210,28 @@ async fn the_json_rendering_is_the_envelope_of_the_spec() {
     assert_eq!(json["metrics"][0]["name"], "disputes.status.initiated");
     assert_eq!(json["metrics"].as_array().map(Vec::len), Some(5));
 }
+
+/// `--by day` (issue #53).
+#[tokio::test]
+async fn a_daily_report_names_each_day_and_keeps_the_quiet_ones() {
+    // Arrange
+    let pool = seeded().await;
+
+    // Act
+    let report = report(&pool, &query(), Some(Dimension::Day), NOW)
+        .await
+        .expect("report");
+
+    // Assert: every day of the window has a block, quiet ones included.
+    let days = report
+        .metrics
+        .iter()
+        .filter(|metric| metric.name.ends_with(".opened"))
+        .count();
+    assert_eq!(days, 8);
+    assert_eq!(
+        value(&report, "disputes.2026-08-26.opened"),
+        &Value::Count(0)
+    );
+    assert_eq!(dimension(DisputeDimension::Day), Dimension::Day);
+}

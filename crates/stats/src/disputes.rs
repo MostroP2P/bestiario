@@ -17,9 +17,10 @@
 
 use std::collections::BTreeMap;
 
+use crate::bucket::{self, Coverage};
 use crate::metric::{Metric, Value};
 use crate::percentile::percentile;
-use crate::window::Window;
+use crate::window::{Period, Window};
 
 /// The five statuses mostrod publishes (`docs/SPEC.md` §2.3). Defined here
 /// again because this crate cannot see the parser.
@@ -133,6 +134,10 @@ pub enum Dimension {
     Instance,
     /// Calendar months inside the window, each reported as its own window.
     Month,
+    /// Calendar days inside the window, likewise: one block per day, empty
+    /// days included, and days the archive predates reported as missing
+    /// rather than as zero (see [`crate::bucket`]).
+    Day,
 }
 
 /// The §6.7 figures for one window.
@@ -276,18 +281,21 @@ pub fn report(
     window: Window,
     now: i64,
     dimension: Option<Dimension>,
+    coverage: Coverage,
 ) -> Vec<Metric> {
     match dimension {
         None => metrics("disputes", &summarise(data, window, now)),
         Some(Dimension::Status) => status_metrics("disputes", &summarise(data, window, now)),
         Some(Dimension::Initiator) => initiator_metrics("disputes", &summarise(data, window, now)),
-        Some(Dimension::Month) => window
-            .months()
-            .into_iter()
-            .flat_map(|(key, month)| {
-                dated_metrics(&format!("disputes.{key}"), &summarise(data, month, now))
+        Some(period @ (Dimension::Month | Dimension::Day)) => {
+            let period = match period {
+                Dimension::Day => Period::Day,
+                _ => Period::Month,
+            };
+            bucket::walk(window, period, coverage, |key, bucket, _| {
+                dated_metrics(&format!("disputes.{key}"), &summarise(data, bucket, now))
             })
-            .collect(),
+        }
         Some(Dimension::Instance) => by_instance(data)
             .into_iter()
             .flat_map(|(key, group)| {

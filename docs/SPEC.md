@@ -357,7 +357,8 @@ total" comparison is the product's main axis.
 | Dimension | Values | Source |
 |---|---|---|
 | `instance` | pubkey / name | event `pubkey` |
-| `period` | day, week, month, year; free range | `created_at` |
+| `period` | calendar month | the timestamp that dates the figure |
+| `day` | calendar day (UTC) | the timestamp that dates the figure |
 | `kind` | `buy`, `sell` | `k` tag |
 | `status` | `pending`, `in-progress`, `success`, `canceled` | `s` tag |
 | `fiat` | ISO code | `f` tag |
@@ -369,6 +370,37 @@ total" comparison is the product's main axis.
 
 Convention: `∑` = aggregate; `%` = proportion; `p50/p90` = percentiles;
 `Δ` = change vs. the previous period. `(inf)` marks inferred metrics.
+
+**Buckets and what the archive can speak for.** `period` and `day` cut the
+window into UTC calendar buckets, half-open like the window itself and
+clipped to it, so consecutive buckets tile and none is counted twice. The
+timestamp that dates a row is the one that already dates that figure in its
+family — an order counts in the bucket its first `pending` version was seen
+in, a completion in the bucket it reached `success`, a fee in the bucket of
+its own event: a bucket changes the grouping, never the dating.
+
+Every bucket of the window is reported, including the ones nothing happened
+in, so a consumer plotting the result cannot draw a line across a gap that
+was never published. A bucket that ends **at or before the archive's floor for the
+kinds the report reads** is different: nobody indexed it, and reporting
+zero would assert that the network published nothing when what is true is
+that bestiario was not there. Those buckets keep their rows and their names
+and report `—` / `null`, and a Δ against one of them is likewise `—`, never
+a growth computed from a period nobody saw.
+
+That floor is the later of two: the earliest event in the archive, which is
+when bestiario started indexing at all, and the earliest event *of those
+kinds*, which is when it started holding what the report reads. The two
+differ because relays expire kinds at different rates — orders live about a
+fortnight and dev fees about a year — so a first backfill brings January's
+fees and only August's orders, and January's order-days are unknowable
+however many fees sit beside them. When the archive holds none of those
+kinds at all, the first floor stands: bestiario was indexing, and there
+were none to see.
+
+Which days actually had a live subscription — as opposed to falling after
+that floor — is not recorded, so a sync that was down for a day is
+indistinguishable from a quiet day.
 
 ### 6.1 Activity
 
@@ -470,6 +502,10 @@ Convention: `∑` = aggregate; `%` = proportion; `p50/p90` = percentiles;
 - Dispute → order: 38386 does not include `order-id`.
 - Cancellation reason (expired, admin, cooperative): collapsed into `canceled`.
 - Intermediate statuses (`fiat-sent`, `dispute`): arrive as `in-progress`.
+- Whether a given day was actually being indexed: the archive knows its
+  earliest event, not which days had a live subscription. Buckets before
+  that event report `—`; a gap *after* it — a sync that was down for a day —
+  is indistinguishable from a quiet day and reads as zero.
 
 ### 6.10 Suggested views
 
@@ -623,12 +659,12 @@ bestiario series <metric> [--by month|week|day] [--split instance|kind|fiat]
 bestiario market <FIAT>                      # buy/sell pressure, premium, methods, time to fill
 
 # Metric families (§6.1–6.8) with free slicing
-bestiario stats orders    [--by status|kind|fiat|method|instance|period|hour|weekday]
-bestiario stats volume    [--by kind|fiat|instance|period] [--in USD]
+bestiario stats orders    [--by status|kind|fiat|method|instance|period|day|hour|weekday]
+bestiario stats volume    [--by kind|fiat|instance|period|day] [--in USD]
 bestiario stats market    [--by fiat|kind|instance]
 bestiario stats timing    [--by fiat|method|kind|instance]
-bestiario stats dev-fees  [--by instance|period]
-bestiario stats disputes  [--by status|initiator|instance|period]
+bestiario stats dev-fees  [--by instance|period|day]
+bestiario stats disputes  [--by status|initiator|instance|period|day]
 bestiario stats rates     [--fiat F]
 
 bestiario orders <ORDER_ID>                  # lifecycle + dev fee

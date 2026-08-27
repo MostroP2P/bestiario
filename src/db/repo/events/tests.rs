@@ -145,3 +145,79 @@ async fn two_versions_of_the_same_order_are_two_rows() {
 
     assert_eq!(stored_ids(&pool).await.len(), 2);
 }
+
+// How far back the archive can speak for (issue #53).
+
+/// 2026-01-01 and 2026-08-26, roughly: a dev fee kept for a year and an
+/// order kept for a fortnight, which is the asymmetry that matters.
+const JANUARY: i64 = 1_767_225_600;
+const AUGUST: i64 = 1_787_702_400;
+
+async fn stored(pool: &SqlitePool, id: &str, kind: i64, created_at: i64) {
+    let record = EventRecord {
+        id: id.to_string(),
+        pubkey: "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390".to_string(),
+        kind,
+        created_at,
+        d_tag: None,
+        raw_json: "{}".to_string(),
+        relay_url: RELAY.to_string(),
+        seen_at: created_at,
+    };
+    insert_if_new(pool, &record).await.expect("insert");
+}
+
+#[tokio::test]
+async fn a_kind_the_relays_expired_earlier_has_a_later_floor_than_the_archive() {
+    // Arrange: a first backfill brings January's dev fees and, because the
+    // relay keeps orders a fortnight, only August's orders.
+    let pool = migrated().await;
+    stored(&pool, "fee", 8383, JANUARY).await;
+    stored(&pool, "order", 38383, AUGUST).await;
+
+    // Act / Assert
+    assert_eq!(
+        earliest_created_at(&pool, &[38383]).await.expect("read"),
+        Some(AUGUST),
+        "January's order-days were never indexed"
+    );
+    assert_eq!(
+        earliest_created_at(&pool, &[8383]).await.expect("read"),
+        Some(JANUARY)
+    );
+}
+
+#[tokio::test]
+async fn a_report_reading_several_kinds_can_only_speak_for_what_it_has_all_of() {
+    let pool = migrated().await;
+    stored(&pool, "fee", 8383, JANUARY).await;
+    stored(&pool, "order", 38383, AUGUST).await;
+
+    let both = earliest_created_at(&pool, &[8383, 38383])
+        .await
+        .expect("read");
+
+    assert_eq!(both, Some(AUGUST), "the later of the two floors");
+}
+
+#[tokio::test]
+async fn a_kind_the_archive_holds_none_of_falls_back_to_when_indexing_began() {
+    // bestiario was there from January and saw no disputes: that is a
+    // fact about the network, not a hole in the archive.
+    let pool = migrated().await;
+    stored(&pool, "fee", 8383, JANUARY).await;
+
+    let disputes = earliest_created_at(&pool, &[38386]).await.expect("read");
+
+    assert_eq!(disputes, Some(JANUARY));
+}
+
+#[tokio::test]
+async fn an_empty_archive_can_speak_for_nothing() {
+    let pool = migrated().await;
+
+    assert_eq!(
+        earliest_created_at(&pool, &[38383]).await.expect("read"),
+        None
+    );
+}

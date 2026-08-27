@@ -218,3 +218,104 @@ async fn the_json_rendering_is_the_envelope_of_the_spec() {
     assert_eq!(json["metrics"][0]["name"], "orders.created");
     assert_eq!(json["metrics"][0]["kind"], "observed");
 }
+
+// `--by day` (issue #53): the wiring reads the archive's coverage and the
+// slice is named by the date.
+
+/// `FROM` is 2026-08-25T23:20:00Z, so the window opens forty minutes into
+/// a calendar day and closes forty minutes into another: eight buckets, the
+/// first and the last of them clipped.
+const FIRST_DAY: &str = "2026-08-25";
+const SECOND_DAY: &str = "2026-08-26";
+const DAYS_IN_WINDOW: usize = 8;
+
+#[tokio::test]
+async fn a_daily_report_names_each_day_and_keeps_the_quiet_ones() {
+    // Arrange: everything the seed publishes happens on the first day.
+    let pool = seeded().await;
+
+    // Act
+    let report = report(&pool, &query(None), Some(Dimension::Day), NOW)
+        .await
+        .expect("report");
+
+    // Assert
+    assert_eq!(
+        value(&report, &format!("orders.{FIRST_DAY}.created")),
+        &Value::Count(3)
+    );
+    assert_eq!(
+        value(&report, &format!("orders.{SECOND_DAY}.created")),
+        &Value::Count(0),
+        "a quiet day is still a day"
+    );
+    let days = report
+        .metrics
+        .iter()
+        .filter(|metric| metric.name.ends_with(".created"))
+        .count();
+    assert_eq!(days, DAYS_IN_WINDOW, "one block per day of the window");
+}
+
+#[tokio::test]
+async fn a_day_the_archive_predates_is_missing_rather_than_zero() {
+    // Arrange: a window opening a day before the earliest stored event.
+    let pool = seeded().await;
+    let query = Query {
+        range: Range::resolve(Some(FROM - 86_400), Some(UNTIL), NOW).expect("window"),
+        ..query(None)
+    };
+
+    // Act
+    let report = report(&pool, &query, Some(Dimension::Day), NOW)
+        .await
+        .expect("report");
+
+    // Assert
+    assert_eq!(
+        value(&report, "orders.2026-08-24.created"),
+        &Value::Missing,
+        "nobody indexed that day; zero would be a claim"
+    );
+    assert_eq!(
+        value(&report, &format!("orders.{FIRST_DAY}.created")),
+        &Value::Count(3)
+    );
+}
+
+#[tokio::test]
+async fn a_daily_report_narrows_with_the_instance_scope() {
+    let pool = seeded().await;
+
+    let report = report(&pool, &query(Some(ALPHA)), Some(Dimension::Day), NOW)
+        .await
+        .expect("report");
+
+    assert_eq!(
+        value(&report, &format!("orders.{FIRST_DAY}.created")),
+        &Value::Count(2),
+        "Beta's order is out of scope"
+    );
+}
+
+#[tokio::test]
+async fn the_json_of_a_daily_report_carries_the_date_and_the_kind() {
+    let pool = seeded().await;
+
+    let rendered = report(&pool, &query(None), Some(Dimension::Day), NOW)
+        .await
+        .expect("report")
+        .render(Format::Json);
+    let json: serde_json::Value = serde_json::from_str(&rendered).expect("valid JSON");
+
+    let first = &json["metrics"][0];
+    assert_eq!(first["name"], format!("orders.{FIRST_DAY}.created"));
+    assert_eq!(first["kind"], "observed");
+    assert_eq!(first["unit"], "count");
+}
+
+#[tokio::test]
+async fn every_cli_dimension_including_day_maps_to_an_aggregation_one() {
+    assert_eq!(dimension(OrderDimension::Period), Dimension::Month);
+    assert_eq!(dimension(OrderDimension::Day), Dimension::Day);
+}

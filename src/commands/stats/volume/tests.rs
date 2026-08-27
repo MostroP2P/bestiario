@@ -334,3 +334,64 @@ async fn a_rate_from_an_unvouched_key_cannot_move_the_converted_total() {
         &Value::fiat(2.5, "USD")
     );
 }
+
+/// `--by day` (issue #53). `FROM` is 2026-08-25T23:20:00Z, so everything
+/// the seed settles lands on that day and the window holds eight buckets.
+#[tokio::test]
+async fn a_daily_report_names_each_day_and_keeps_the_quiet_ones() {
+    // Arrange
+    let pool = connect_and_migrate("sqlite::memory:")
+        .await
+        .expect("migrate");
+    settled(&pool, "a", FROM + 100, 5_000, FiatAmount::Fixed(50.0)).await;
+    instances::upsert(&pool, ALPHA, Some("Alpha"), FROM)
+        .await
+        .expect("alpha");
+
+    // Act
+    let report = report(&pool, &query(), Some(Dimension::Day), None, NOW)
+        .await
+        .expect("report");
+
+    // Assert
+    assert_eq!(
+        value(&report, "volume.2026-08-25.sats"),
+        &Value::Sats(5_000)
+    );
+    assert_eq!(
+        value(&report, "volume.2026-08-26.sats"),
+        &Value::Sats(0),
+        "a day with nothing settled is zero, not absent"
+    );
+    assert_eq!(
+        report
+            .metrics
+            .iter()
+            .filter(|metric| metric.name.ends_with(".sats"))
+            .count(),
+        8
+    );
+    assert_eq!(dimension(VolumeDimension::Day), Dimension::Day);
+}
+
+#[tokio::test]
+async fn a_day_the_archive_predates_reports_no_volume_rather_than_none_traded() {
+    let pool = connect_and_migrate("sqlite::memory:")
+        .await
+        .expect("migrate");
+    settled(&pool, "a", FROM + 100, 5_000, FiatAmount::Fixed(50.0)).await;
+    let query = Query {
+        range: Range::resolve(Some(FROM - 86_400), Some(UNTIL), NOW).expect("window"),
+        ..query()
+    };
+
+    let report = report(&pool, &query, Some(Dimension::Day), None, NOW)
+        .await
+        .expect("report");
+
+    assert_eq!(value(&report, "volume.2026-08-24.sats"), &Value::Missing);
+    assert_eq!(
+        value(&report, "volume.2026-08-25.sats"),
+        &Value::Sats(5_000)
+    );
+}

@@ -17,9 +17,10 @@
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 
+use crate::bucket::{self, Coverage};
 use crate::metric::{Metric, Value};
 use crate::percentile::percentile;
-use crate::window::Window;
+use crate::window::{Period, Window};
 
 /// One kind 8383 event, with what is known about the order it names.
 #[derive(Debug, Clone, PartialEq)]
@@ -83,6 +84,10 @@ pub enum Dimension {
     Instance,
     /// Calendar months inside the window, each reported as its own window.
     Month,
+    /// Calendar days inside the window, likewise: one block per day, empty
+    /// days included, and days the archive predates reported as missing
+    /// rather than as zero (see [`crate::bucket`]).
+    Day,
 }
 
 /// The §6.6 figures for one window.
@@ -186,6 +191,7 @@ pub fn report(
     window: Window,
     dimension: Option<Dimension>,
     dev_fee_pct: &dyn Fn(&str) -> f64,
+    coverage: Coverage,
 ) -> Vec<Metric> {
     let block = |prefix: &str, data: &DevFeeData, window: Window| {
         let mut block = metrics(prefix, &summarise(data, window));
@@ -198,11 +204,15 @@ pub fn report(
 
     match dimension {
         None => block("dev_fees", data, window),
-        Some(Dimension::Month) => window
-            .months()
-            .into_iter()
-            .flat_map(|(key, month)| block(&format!("dev_fees.{key}"), data, month))
-            .collect(),
+        Some(period @ (Dimension::Month | Dimension::Day)) => {
+            let period = match period {
+                Dimension::Day => Period::Day,
+                _ => Period::Month,
+            };
+            bucket::walk(window, period, coverage, |key, bucket, _| {
+                block(&format!("dev_fees.{key}"), data, bucket)
+            })
+        }
         Some(Dimension::Instance) => by_instance(data)
             .into_iter()
             .flat_map(|(key, group)| block(&format!("dev_fees.{key}"), &group, window))

@@ -9,6 +9,7 @@ use crate::cli::VolumeDimension;
 use crate::commands::Context;
 use crate::commands::query::Query;
 use crate::db::load;
+use crate::ingest::parse;
 use crate::report::{Format, Report};
 use crate::stats::Window;
 use crate::stats::volume::{self, Conversion, Dimension};
@@ -66,7 +67,13 @@ pub async fn report(
 
     Ok(Report::new(
         query.range,
-        volume::report(&orders, window, dimension, conversion),
+        volume::report(
+            &orders,
+            window,
+            dimension,
+            conversion,
+            super::super::coverage(pool, &[parse::order::KIND]).await?,
+        ),
         now,
     ))
 }
@@ -87,6 +94,7 @@ fn dimension(by: VolumeDimension) -> Dimension {
         VolumeDimension::Fiat => Dimension::Fiat,
         VolumeDimension::Instance => Dimension::Instance,
         VolumeDimension::Period => Dimension::Month,
+        VolumeDimension::Day => Dimension::Day,
     }
 }
 

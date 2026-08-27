@@ -7,7 +7,7 @@
 //! second copy from a second relay changes nothing.
 
 use nostr_sdk::prelude::Event;
-use sqlx::{Executor, Sqlite};
+use sqlx::{Executor, QueryBuilder, Sqlite};
 
 /// One row of `events`.
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
@@ -98,6 +98,52 @@ where
         .fetch_one(executor)
         .await?;
     Ok(count == 0)
+}
+
+/// How far back the archive can speak for a report reading `kinds`.
+///
+/// Two floors, and the later of them wins. The archive's own earliest
+/// event says when bestiario started indexing at all. The earliest event
+/// *of those kinds* says when it started holding what this report reads —
+/// which is later whenever a relay had already expired them: orders live
+/// about a fortnight on a relay and dev fees about a year, so a first
+/// backfill brings January's fees and only August's orders. Taking the
+/// archive's floor alone would call January's order-days covered and
+/// report zeros for a month the network was trading.
+///
+/// When the archive holds none of `kinds` at all, its own floor is the
+/// answer: bestiario was indexing, and there were none to see.
+/// `None` only when the archive is empty.
+pub async fn earliest_created_at<'e, E>(
+    executor: E,
+    kinds: &[u16],
+) -> Result<Option<i64>, sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    // The latest of the per-kind floors, not the earliest across them: a
+    // report reading two kinds can only speak for a period it holds both
+    // of, and `MIN` over the pair would take the kind the relays kept
+    // longest and call the other's gap covered.
+    let mut query = QueryBuilder::<Sqlite>::new(
+        "SELECT (SELECT MIN(created_at) FROM events) AS archive,
+                (SELECT MAX(first) FROM (
+                     SELECT MIN(created_at) AS first FROM events WHERE kind IN (",
+    );
+    let mut list = query.separated(", ");
+    for kind in kinds {
+        list.push_bind(i64::from(*kind));
+    }
+    query.push(" ) GROUP BY kind)) AS family");
+
+    let (archive, family): (Option<i64>, Option<i64>) =
+        query.build_query_as().fetch_one(executor).await?;
+
+    Ok(match (archive, family) {
+        (Some(archive), Some(family)) => Some(archive.max(family)),
+        (archive, None) => archive,
+        (None, family) => family,
+    })
 }
 
 /// Every archived event, oldest first.
