@@ -12,7 +12,7 @@
 //! somebody noticed. Here it cannot be forgotten: an inferred metric is
 //! constructed through [`Metric::inferred`], which requires the error.
 
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 
 /// Whether a figure was measured or estimated (`docs/SPEC.md` §5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -27,13 +27,24 @@ pub enum MetricKind {
 /// The unit travels with the number rather than being spelled into the
 /// metric's name, so that a renderer can format a ratio as a percentage and a
 /// duration as minutes without parsing English.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(tag = "unit", content = "value", rename_all = "lowercase")]
+///
+/// # Floating-point values
+///
+/// `f64` admits `NaN` and the infinities, and neither is a figure: JSON
+/// cannot carry them, and a table cannot read them. The two variants that
+/// hold one are therefore treated as [`Missing`](Self::Missing) wherever
+/// they are rendered — see [`normalised`](Self::normalised) — and the
+/// constructors [`ratio`](Self::ratio) and [`fiat`](Self::fiat) make that
+/// substitution up front, so an aggregation dividing by zero produces a
+/// missing figure rather than a `NaN` that is one only at the output.
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     /// A plain count. Signed: a delta against the previous period is one.
     Count(i64),
     Sats(i64),
-    /// A fraction in `0..=1`, rendered as a percentage.
+    /// A finite fraction, rendered as a percentage. Usually in `0..=1`; a
+    /// growth figure against the previous period can be negative or exceed
+    /// one, so the range is not enforced — finiteness is.
     Ratio(f64),
     Seconds(i64),
     Fiat {
@@ -50,17 +61,99 @@ pub enum Value {
     Missing,
 }
 
+impl Value {
+    /// A ratio, or [`Missing`](Self::Missing) when `ratio` is not a finite
+    /// number.
+    pub fn ratio(ratio: f64) -> Self {
+        if ratio.is_finite() {
+            Self::Ratio(ratio)
+        } else {
+            Self::Missing
+        }
+    }
+
+    /// A fiat amount, or [`Missing`](Self::Missing) when `amount` is not a
+    /// finite number.
+    pub fn fiat(amount: f64, code: impl Into<String>) -> Self {
+        if amount.is_finite() {
+            Self::Fiat {
+                amount,
+                code: code.into(),
+            }
+        } else {
+            Self::Missing
+        }
+    }
+
+    /// The value as a renderer should see it: itself, unless it holds a
+    /// non-finite number, in which case [`Missing`](Self::Missing).
+    ///
+    /// The variants are public, so a `Value::Ratio(f64::NAN)` can be built;
+    /// this is the one place that decides what it means, and both output
+    /// formats go through it.
+    pub fn normalised(&self) -> &Self {
+        match self {
+            Self::Ratio(ratio) if !ratio.is_finite() => &Self::Missing,
+            Self::Fiat { amount, .. } if !amount.is_finite() => &Self::Missing,
+            other => other,
+        }
+    }
+}
+
+/// The wire shape of a [`Value`]: `{"unit": …, "value": …}`.
+///
+/// A separate enum rather than a derive on `Value` itself for two reasons
+/// the derive cannot express: `Missing` has to carry `"value": null` so
+/// that every metric record has a `value` member (`docs/SPEC.md` §10), and
+/// a non-finite number has to become that same shape rather than
+/// `serde_json`'s silent `null` under `"unit": "ratio"`.
+#[derive(Serialize)]
+#[serde(tag = "unit", content = "value", rename_all = "lowercase")]
+enum Wire<'a> {
+    Count(i64),
+    Sats(i64),
+    Ratio(f64),
+    Seconds(i64),
+    Fiat { amount: f64, code: &'a str },
+    Text(&'a str),
+    Missing(()),
+}
+
+impl Serialize for Value {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let wire = match self.normalised() {
+            Value::Count(count) => Wire::Count(*count),
+            Value::Sats(sats) => Wire::Sats(*sats),
+            Value::Ratio(ratio) => Wire::Ratio(*ratio),
+            Value::Seconds(seconds) => Wire::Seconds(*seconds),
+            Value::Fiat { amount, code } => Wire::Fiat {
+                amount: *amount,
+                code,
+            },
+            Value::Text(text) => Wire::Text(text),
+            Value::Missing => Wire::Missing(()),
+        };
+
+        wire.serialize(serializer)
+    }
+}
+
 /// One named figure, of one kind, with the error that qualifies it.
+///
+/// `kind` and `error` are private and move together: the only way to get an
+/// inferred metric is [`Metric::inferred`], which demands the error, and the
+/// only way to get an observed one is [`Metric::observed`], which admits
+/// none. `name` and `value` carry no invariant and stay public.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Metric {
     pub name: String,
-    pub kind: MetricKind,
+    kind: MetricKind,
     #[serde(flatten)]
     pub value: Value,
     /// What makes an inferred figure uncertain. Always `None` for an observed
     /// one — there is nothing between the events and the number.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
+    error: Option<String>,
 }
 
 impl Metric {
@@ -88,8 +181,17 @@ impl Metric {
         }
     }
 
+    pub fn kind(&self) -> MetricKind {
+        self.kind
+    }
+
     pub fn is_inferred(&self) -> bool {
         self.kind == MetricKind::Inferred
+    }
+
+    /// The error of an inferred figure; `None` for an observed one.
+    pub fn error(&self) -> Option<&str> {
+        self.error.as_deref()
     }
 }
 

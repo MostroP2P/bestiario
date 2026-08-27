@@ -57,6 +57,60 @@ fn the_json_marks_each_metric_with_its_kind_and_carries_the_error_only_when_ther
     assert_eq!(metrics[1]["error"], "rate up to 5 min old");
     assert_eq!(metrics[1]["value"]["code"], "USD");
     assert_eq!(metrics[2]["unit"], "missing");
+    assert_eq!(metrics[2]["value"], serde_json::Value::Null);
+}
+
+/// The table line naming `metric`, so a test can check what sits beside it.
+fn row<'a>(table: &'a str, metric: &str) -> &'a str {
+    table
+        .lines()
+        .find(|line| line.contains(metric))
+        .unwrap_or_else(|| panic!("`{metric}` has a row:\n{table}"))
+}
+
+#[test]
+fn the_table_puts_each_formatted_value_beside_its_metric() {
+    let table = mixed().render(Format::Table);
+
+    assert!(row(&table, "orders.created").contains("42"), "{table}");
+    assert!(row(&table, "volume.usd").contains("1234.50 USD"), "{table}");
+    assert!(
+        row(&table, "volume.usd").contains("rate up to 5 min old"),
+        "{table}"
+    );
+    assert!(
+        row(&table, "orders.completion_rate").contains("—"),
+        "{table}"
+    );
+}
+
+#[test]
+fn a_non_finite_number_renders_as_missing_in_both_formats() {
+    let report = Report::new(
+        range(),
+        vec![
+            Metric::observed("nan", Value::Ratio(f64::NAN)),
+            Metric::observed(
+                "inf",
+                Value::Fiat {
+                    amount: f64::INFINITY,
+                    code: "USD".into(),
+                },
+            ),
+        ],
+        NOW,
+    );
+
+    let table = report.render(Format::Table);
+    assert!(row(&table, "nan").contains("—"), "{table}");
+    assert!(row(&table, "inf").contains("—"), "{table}");
+    assert!(!table.contains("NaN"), "{table}");
+
+    let json: serde_json::Value =
+        serde_json::from_str(&report.render(Format::Json)).expect("valid json");
+    assert_eq!(json["metrics"][0]["unit"], "missing");
+    assert_eq!(json["metrics"][0]["value"], serde_json::Value::Null);
+    assert_eq!(json["metrics"][1]["unit"], "missing");
 }
 
 #[test]
@@ -100,6 +154,17 @@ fn the_table_reads_values_the_way_a_person_would() {
         "1234.50 ARS"
     );
     assert_eq!(display(&Value::Missing), "—");
+}
+
+#[test]
+fn a_ratio_displays_at_the_edges_and_beyond_them() {
+    assert_eq!(display(&Value::Ratio(0.0)), "0.0%");
+    assert_eq!(display(&Value::Ratio(1.0)), "100.0%");
+    // A delta: legitimate, and read as growth.
+    assert_eq!(display(&Value::Ratio(2.0)), "200.0%");
+    assert_eq!(display(&Value::Ratio(-0.5)), "-50.0%");
+    assert_eq!(display(&Value::Ratio(f64::NAN)), "—");
+    assert_eq!(display(&Value::Ratio(f64::INFINITY)), "—");
 }
 
 #[test]

@@ -11,7 +11,7 @@ use super::{Report, display, labelled};
 /// column on every row would say "there might have been something here" to
 /// a reader who has no way to know there was not.
 pub fn render(report: &Report) -> String {
-    let has_errors = report.metrics.iter().any(|metric| metric.error.is_some());
+    let has_errors = report.metrics.iter().any(|metric| metric.error().is_some());
 
     let mut table = Table::new();
     table
@@ -27,7 +27,7 @@ pub fn render(report: &Report) -> String {
     for metric in &report.metrics {
         let mut row = vec![labelled(metric), display(&metric.value)];
         if has_errors {
-            row.push(metric.error.clone().unwrap_or_default());
+            row.push(metric.error().unwrap_or_default().to_string());
         }
         table.add_row(row);
     }

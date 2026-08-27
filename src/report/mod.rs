@@ -79,7 +79,7 @@ impl Report {
 /// The mark is short on purpose. It goes on every inferred row of every
 /// table, and a longer one would stop being read.
 pub(crate) fn labelled(metric: &Metric) -> String {
-    match metric.kind {
+    match metric.kind() {
         MetricKind::Observed => metric.name.clone(),
         MetricKind::Inferred => format!("{} (inf)", metric.name),
     }
@@ -91,7 +91,7 @@ pub(crate) fn labelled(metric: &Metric) -> String {
 /// because the table is for people; the JSON keeps the raw value and the
 /// unit for programs.
 pub(crate) fn display(value: &Value) -> String {
-    match value {
+    match value.normalised() {
         Value::Count(count) => count.to_string(),
         Value::Sats(sats) => format!("{sats} sats"),
         Value::Ratio(ratio) => format!("{:.1}%", ratio * 100.0),
