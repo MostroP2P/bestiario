@@ -9,7 +9,7 @@ use sqlx::SqlitePool;
 use super::*;
 use crate::db::connect_and_migrate;
 use crate::ingest::Policy;
-use crate::ingest::parse::fixtures::load;
+use crate::ingest::parse::fixtures::{for_relay, load};
 use crate::network::Network;
 
 const MEMORY: &str = "sqlite::memory:";
@@ -75,7 +75,7 @@ async fn an_event_published_while_sync_runs_is_stored() {
         .expect("connect");
     let pipeline = pipeline(&pool);
     let mut sync = Sync::new(&mut client, &pipeline, &pool);
-    let event = load(38383, "pending_range");
+    let event = for_relay(&load(38383, "pending_range"));
 
     // Act: publish once the subscription is up, then stop as soon as the row
     // is there — no fixed sleep to make the test slow or flaky.
@@ -114,7 +114,7 @@ async fn following_advances_the_cursor_so_an_interrupted_run_needs_no_flush() {
     let url = relay.url().await.to_string();
     let pipeline = pipeline(&pool);
     let mut sync = Sync::new(&mut client, &pipeline, &pool);
-    let event = load(38383, "pending_range");
+    let event = for_relay(&load(38383, "pending_range"));
 
     // Act
     let (stop, stopped) = tokio::sync::oneshot::channel();
@@ -187,7 +187,7 @@ async fn a_relay_that_was_down_at_startup_is_followed_once_it_answers() {
 
     let pipeline = pipeline(&pool);
     let mut sync = Sync::new(&mut client, &pipeline, &pool);
-    let event = load(38383, "pending_range");
+    let event = for_relay(&load(38383, "pending_range"));
 
     // Act: publish only on the relay that was down.
     let (stop, stopped) = tokio::sync::oneshot::channel();

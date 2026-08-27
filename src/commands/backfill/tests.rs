@@ -10,7 +10,7 @@ use sqlx::SqlitePool;
 use super::*;
 use crate::db::connect_and_migrate;
 use crate::ingest::Policy;
-use crate::ingest::parse::fixtures::load;
+use crate::ingest::parse::fixtures::{for_relay, load};
 use crate::network::Network;
 
 const MEMORY: &str = "sqlite::memory:";
@@ -36,7 +36,7 @@ async fn seeded(fixtures: &[(u16, &str)]) -> (MockRelay, RelayClient) {
 
     for (kind, name) in fixtures {
         relay
-            .add_event(load(*kind, name))
+            .add_event(for_relay(&load(*kind, name)))
             .await
             .expect("the local relay accepts a signed event");
     }
@@ -193,7 +193,7 @@ async fn a_relay_that_cannot_be_reached_does_not_abort_the_run() {
     let pool = migrated().await;
     let relay = MockRelay::run().await.expect("start the local relay");
     relay
-        .add_event(load(38383, "pending_range"))
+        .add_event(for_relay(&load(38383, "pending_range")))
         .await
         .expect("seed");
     let client = RelayClient::connect(&[relay.url().await.to_string()])
