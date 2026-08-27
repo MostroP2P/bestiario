@@ -102,7 +102,8 @@ impl Range {
     }
 }
 
-fn format_timestamp(timestamp: i64) -> String {
+/// A unix timestamp as RFC 3339, or as the bare number if it is out of range.
+pub fn format_timestamp(timestamp: i64) -> String {
     DateTime::<Utc>::from_timestamp(timestamp, 0)
         .map(|dt| dt.to_rfc3339())
         .unwrap_or_else(|| timestamp.to_string())
