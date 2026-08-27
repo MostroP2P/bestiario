@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="assets/logo.png" alt="bestiario" width="360">
+</div>
+
 # bestiario
 
 Statistics for the [Mostro](https://mostro.network) network, computed from
