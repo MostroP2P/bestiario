@@ -85,6 +85,7 @@ fn one_row_per_instance_with_its_own_figures() {
             status: disputes::Status::Initiated,
             initiator: None,
             resolved_at: None,
+            outcome: None,
         }],
         taken: vec![
             Taken {
@@ -105,7 +106,7 @@ fn one_row_per_instance_with_its_own_figures() {
     ];
 
     // Act
-    let metrics = report(&profiles, &orders, &fees, &disputes, WINDOW, NOW);
+    let metrics = report(&profiles, &orders, &fees, Some(&disputes), WINDOW, NOW);
 
     // Assert
     assert_eq!(metrics.len(), 14);
@@ -151,7 +152,7 @@ fn an_instance_with_nothing_in_the_window_still_has_a_row() {
         &[profile("Quiet", None, None)],
         &[],
         &DevFeeData::default(),
-        &DisputeData::default(),
+        Some(&DisputeData::default()),
         WINDOW,
         NOW,
     );
@@ -162,4 +163,40 @@ fn an_instance_with_nothing_in_the_window_still_has_a_row() {
         value(&metrics, "compare.Quiet.completion_rate"),
         &Value::Missing
     );
+}
+
+#[test]
+fn the_columns_are_the_figures_of_a_row_in_order() {
+    let metrics = report(
+        &[profile("Only", None, None)],
+        &[],
+        &DevFeeData::default(),
+        Some(&DisputeData::default()),
+        WINDOW,
+        NOW,
+    );
+
+    let suffixes: Vec<&str> = metrics
+        .iter()
+        .map(|metric| metric.name.rsplit('.').next().expect("segment"))
+        .collect();
+    assert_eq!(suffixes, COLUMNS);
+}
+
+#[test]
+fn a_scope_that_cannot_reach_disputes_leaves_every_dispute_rate_missing() {
+    let metrics = report(
+        &[profile("Alpha", None, None)],
+        &[order("a1", "Alpha", Status::Success, 1)],
+        &DevFeeData::default(),
+        None,
+        WINDOW,
+        NOW,
+    );
+
+    assert_eq!(
+        value(&metrics, "compare.Alpha.dispute_rate"),
+        &Value::Missing
+    );
+    assert_eq!(value(&metrics, "compare.Alpha.completed"), &Value::Count(1));
 }

@@ -103,6 +103,7 @@ async fn seeded() -> SqlitePool {
 
 fn query(pubkey: Option<&str>) -> Query {
     Query {
+        network_narrowed: false,
         range: Range::resolve(Some(FROM), Some(UNTIL), NOW).expect("window"),
         scope: Scope {
             pubkey: pubkey.map(str::to_string),

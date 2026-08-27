@@ -51,10 +51,11 @@ pub struct Settlement {
     /// Whether at least one fee names this order.
     pub has_fee: bool,
     /// Whether the instance charged a fee at the time — `Some(false)` when
-    /// its kind 38385 in force said `fee = 0`, `None` when it never said.
-    /// An instance charging nothing owes no dev fee, so §6.6 leaves it out
-    /// of the coverage denominator; one that never published is kept in,
-    /// since charging is the norm and silence is not a declaration.
+    /// its kind 38385 in force said `fee = 0`, `None` when none in force
+    /// said. §6.6 counts coverage over instances with `fee > 0` only, so
+    /// both leave the denominator: an instance charging nothing owes no dev
+    /// fee, and one whose policy is unknown cannot be said to owe one
+    /// without inferring it — and every figure here is observed.
     pub charges_fee: Option<bool>,
 }
 
@@ -80,8 +81,9 @@ pub struct DevFees {
     pub total_sats: i64,
     /// Fees that count, i.e. one per order.
     pub paid: u64,
-    /// Completed orders with a fee over completed orders that owed one;
-    /// `None` when none owed one.
+    /// Completed orders with a fee over completed orders known to owe one
+    /// — the instance's fee in force was above zero; `None` when none is
+    /// known to.
     pub coverage: Option<f64>,
     /// `fee.created_at − success_at`, over fees whose order is known and
     /// completed; `None` when there are none.
@@ -117,7 +119,7 @@ pub fn summarise(data: &DevFeeData, window: Window) -> DevFees {
         .settlements
         .iter()
         .filter(|settlement| window.contains(settlement.success_at))
-        .filter(|settlement| settlement.charges_fee != Some(false))
+        .filter(|settlement| settlement.charges_fee == Some(true))
         .collect();
     let covered = owed.iter().filter(|settlement| settlement.has_fee).count();
 

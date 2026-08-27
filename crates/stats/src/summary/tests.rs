@@ -54,6 +54,7 @@ fn disputes() -> DisputeData {
             status: disputes::Status::Initiated,
             initiator: Some(Initiator::Buyer),
             resolved_at: None,
+            outcome: None,
         }],
         taken: Vec::new(),
     }
@@ -69,7 +70,7 @@ fn value<'a>(metrics: &'a [Metric], name: &str) -> &'a Value {
 
 #[test]
 fn the_summary_names_the_eight_figures_of_the_view() {
-    let names: Vec<String> = report(&orders(), &disputes(), WINDOW, NOW)
+    let names: Vec<String> = report(&orders(), Some(&disputes()), WINDOW, NOW)
         .into_iter()
         .map(|metric| metric.name)
         .collect();
@@ -92,7 +93,7 @@ fn the_summary_names_the_eight_figures_of_the_view() {
 #[test]
 fn the_figures_are_hand_computable_from_the_dataset() {
     // Arrange / Act
-    let metrics = report(&orders(), &disputes(), WINDOW, NOW);
+    let metrics = report(&orders(), Some(&disputes()), WINDOW, NOW);
 
     // Assert
     assert_eq!(value(&metrics, "summary.created"), &Value::Count(5));
@@ -126,7 +127,7 @@ fn a_ranking_ties_alphabetically_and_stops_at_top_n() {
 
 #[test]
 fn an_empty_window_has_nothing_to_rank() {
-    let metrics = report(&orders(), &disputes(), Window::new(5_000, 6_000), NOW);
+    let metrics = report(&orders(), Some(&disputes()), Window::new(5_000, 6_000), NOW);
 
     assert_eq!(value(&metrics, "summary.top_fiat"), &Value::Missing);
     assert_eq!(value(&metrics, "summary.completion_rate"), &Value::Missing);
@@ -140,8 +141,16 @@ fn an_empty_window_has_nothing_to_rank() {
 #[test]
 fn every_summary_metric_is_observed() {
     assert!(
-        report(&orders(), &disputes(), WINDOW, NOW)
+        report(&orders(), Some(&disputes()), WINDOW, NOW)
             .iter()
             .all(|metric| !metric.is_inferred())
     );
+}
+
+#[test]
+fn a_scope_that_cannot_reach_disputes_reports_the_open_count_as_missing() {
+    let metrics = report(&orders(), None, WINDOW, NOW);
+
+    assert_eq!(value(&metrics, "summary.open_disputes"), &Value::Missing);
+    assert_eq!(value(&metrics, "summary.created"), &Value::Count(5));
 }

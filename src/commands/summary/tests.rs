@@ -7,6 +7,7 @@ use crate::db::load::Scope;
 use crate::db::repo::events::{self, EventRecord};
 use crate::db::repo::orders;
 use crate::ingest::parse::order::{Direction, FiatAmount, OrderVersion, Status};
+use crate::ingest::pipeline::seed_fixtures;
 use crate::network::Network;
 use crate::stats::Value;
 
@@ -54,6 +55,7 @@ async fn settled(pool: &SqlitePool, id: &str, at: i64, fiat: &str, sats: i64) {
 
 fn query() -> Query {
     Query {
+        network_narrowed: false,
         range: Range::resolve(Some(FROM), Some(UNTIL), NOW).expect("window"),
         scope: Scope {
             pubkey: None,
@@ -104,4 +106,64 @@ async fn an_empty_database_still_produces_the_whole_view() {
 
     assert_eq!(report.metrics.len(), 8);
     assert_eq!(value(&report, "summary.top_methods"), &Value::Missing);
+}
+
+/// The summary over the real corpus under `tests/fixtures/`, every event
+/// run through the pipeline. The expected values are hand-counted from the
+/// corpus: eight Mostro orders in the window (seven mainnet, one regtest
+/// `success` of 1361 sats), one canceled, four instances creating, ARS/BRL/
+/// EUR twice each, and two disputes not in a terminal status.
+#[tokio::test]
+async fn the_summary_over_the_real_corpus_matches_the_hand_count() {
+    // Arrange
+    let pool = connect_and_migrate("sqlite::memory:")
+        .await
+        .expect("migrate");
+    let now = 1_787_800_000;
+    seed_fixtures(&pool, now).await;
+    let query = Query {
+        network_narrowed: false,
+        range: Range::resolve(Some(1_787_500_000), Some(now), now).expect("window"),
+        scope: Scope {
+            pubkey: None,
+            networks: vec![Network::Mainnet, Network::Regtest],
+        },
+    };
+
+    // Act
+    let report = report(&pool, &query, now).await.expect("report");
+
+    // Assert
+    assert_eq!(value(&report, "summary.created"), &Value::Count(8));
+    assert_eq!(value(&report, "summary.completed"), &Value::Count(1));
+    assert_eq!(
+        value(&report, "summary.completion_rate"),
+        &Value::Ratio(0.5)
+    );
+    assert_eq!(value(&report, "summary.volume_sats"), &Value::Sats(1_361));
+    assert_eq!(value(&report, "summary.active_instances"), &Value::Count(4));
+    assert_eq!(
+        value(&report, "summary.top_fiat"),
+        &Value::Text("ARS (2), BRL (2), EUR (2)".into())
+    );
+    assert_eq!(
+        value(&report, "summary.top_methods"),
+        &Value::Text("CBU (2), CVU (2), BBVA Efectivo Móvil (1)".into())
+    );
+    assert_eq!(value(&report, "summary.open_disputes"), &Value::Count(2));
+}
+
+#[tokio::test]
+async fn a_network_narrowed_summary_reports_open_disputes_as_missing() {
+    let pool = connect_and_migrate("sqlite::memory:")
+        .await
+        .expect("migrate");
+    let query = Query {
+        network_narrowed: true,
+        ..query()
+    };
+
+    let report = report(&pool, &query, NOW).await.expect("report");
+
+    assert_eq!(value(&report, "summary.open_disputes"), &Value::Missing);
 }

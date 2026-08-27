@@ -182,3 +182,55 @@ fn the_format_comes_from_the_flag_alone() {
     assert_eq!(Format::from_flag(true), Format::Json);
     assert_eq!(Format::from_flag(false), Format::Table);
 }
+
+/// Two instances, three columns, one metric outside the grid.
+fn grid() -> Report {
+    Report::new(
+        range(),
+        vec![
+            Metric::observed("compare.Alpha.completed", Value::Count(3)),
+            Metric::observed("compare.Alpha.volume", Value::Sats(500)),
+            Metric::inferred("compare.Alpha.usd", Value::Count(7), "rate 5m old"),
+            Metric::observed("compare.Beta.completed", Value::Count(1)),
+            Metric::observed("compare.Beta.volume", Value::Missing),
+            Metric::observed("summary.created", Value::Count(99)),
+        ],
+        NOW,
+    )
+}
+
+#[test]
+fn the_pivoted_table_has_one_row_per_key_and_one_column_per_figure() {
+    let table = grid().render_rows(
+        Format::Table,
+        "instance",
+        "compare",
+        &["completed", "volume", "usd"],
+    );
+
+    let alpha = table
+        .lines()
+        .find(|line| line.contains("Alpha"))
+        .expect("row");
+    assert!(alpha.contains("3"), "{table}");
+    assert!(alpha.contains("500 sats"), "{table}");
+    assert!(alpha.contains("7 (inf)"), "{table}");
+    let beta = table
+        .lines()
+        .find(|line| line.contains("Beta"))
+        .expect("row");
+    assert!(beta.contains("—"), "{table}");
+    assert!(!table.contains("99"), "outside the grid: {table}");
+    assert_eq!(
+        table.lines().filter(|line| line.contains("│")).count(),
+        3,
+        "{table}"
+    );
+}
+
+#[test]
+fn the_pivoted_rendering_leaves_the_json_untouched() {
+    let pivoted = grid().render_rows(Format::Json, "instance", "compare", &["completed"]);
+
+    assert_eq!(pivoted, grid().render(Format::Json));
+}
