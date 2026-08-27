@@ -156,6 +156,54 @@ async fn a_listed_pubkey_is_accepted_when_unknown_instances_are_not() {
 }
 
 #[tokio::test]
+async fn an_unlisted_pubkey_is_stored_and_registered_when_unknown_instances_are_accepted() {
+    // Arrange: nobody is listed, and the flag is on. The `y` tag is what
+    // makes this publisher recognisably Mostro's (SPEC §8.1 step 4), and
+    // that is the whole of the evidence the flag asks for.
+    let pool = migrated().await;
+    let event = load(38383, "pending_range");
+    let policy = Policy::new(Vec::<String>::new(), true, [Network::Mainnet]);
+
+    // Act
+    let outcome = pipeline(&pool, policy)
+        .ingest(&event, RELAY, NOW)
+        .await
+        .expect("ingest");
+
+    // Assert: stored, and the bestiary grew a member nobody configured.
+    assert_eq!(outcome, IngestOutcome::Stored);
+    assert_eq!(count(&pool, EVENTS).await, 1);
+    assert_eq!(count(&pool, ORDER_VERSIONS).await, 1);
+    let registered = repo::instances::find(&pool, &event.pubkey.to_hex())
+        .await
+        .expect("read")
+        .expect("auto-registered");
+    assert_eq!(registered.pubkey, event.pubkey.to_hex());
+}
+
+#[tokio::test]
+async fn the_flag_admits_a_publisher_it_does_not_vouch_for() {
+    // The two questions are separate: `accept_unknown_instances` decides
+    // whether an unlisted publisher may be indexed at all, and the `y` tag
+    // decides whether what it published is Mostro's. An unlisted pubkey
+    // publishing another platform's order is turned away with the flag on.
+    let pool = migrated().await;
+    let event = load(38383, "other_platform_hodlhodl");
+    let policy = Policy::new(Vec::<String>::new(), true, [Network::Mainnet]);
+
+    let outcome = pipeline(&pool, policy)
+        .ingest(&event, RELAY, NOW)
+        .await
+        .expect("ingest");
+
+    assert!(matches!(
+        outcome,
+        IngestOutcome::Rejected(Rejection::OtherPlatform { .. })
+    ));
+    assert_eq!(count(&pool, INSTANCES).await, 0, "and joins no bestiary");
+}
+
+#[tokio::test]
 async fn an_order_from_another_platform_is_rejected() {
     // Arrange
     let pool = migrated().await;
