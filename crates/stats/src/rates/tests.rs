@@ -193,3 +193,24 @@ fn a_fallback_lookup_does_not_walk_more_history_than_the_bound_allows() {
     assert!(matches!(quote.source, RateSource::Fallback { .. }));
     assert!(book.rate_at("silent", "EUR", 49_990).is_none());
 }
+
+#[test]
+fn two_instances_publishing_in_the_same_second_are_ordered_by_pubkey() {
+    // The book is walked backwards to the instant asked about, so two
+    // snapshots sharing a second need a total order or the walk is not
+    // reproducible from one run to the next.
+    let book = RateBook::new(vec![
+        snapshot("beta", 1_000, 51_000.0),
+        snapshot("alpha", 1_000, 50_000.0),
+    ]);
+
+    // Both stand at the same instant; the lookup finds each instance's own.
+    assert_eq!(
+        book.rate_at("alpha", "USD", 1_000).expect("a rate").rate,
+        50_000.0
+    );
+    assert_eq!(
+        book.rate_at("beta", "USD", 1_000).expect("a rate").rate,
+        51_000.0
+    );
+}

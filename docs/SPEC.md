@@ -754,6 +754,16 @@ second shape for the same figures. See
   uncovered, which is why those two are held to 100% separately rather than
   averaged into a single number that can hide them.
 
+  Both gates are `scripts/coverage.sh`, run from one measurement so they
+  cannot disagree about what was measured. Two things there are decisions
+  rather than plumbing. The per-layer gate counts **lines no test
+  executed** rather than a per-file percentage: llvm's summary can report a
+  file a line short of 100% while its annotated report shows every line
+  running, and a gate on a number nobody can act on only ever blocks. And
+  a layer that matches no measured file fails the gate — a directory that
+  moved would otherwise read as fully covered, which is how a gate stops
+  guarding without anybody noticing.
+
 ## 13. Phases
 
 High-level ordering only. The PR-by-PR breakdown lives in

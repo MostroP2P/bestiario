@@ -257,3 +257,18 @@ fn a_share_of_a_volume_that_does_not_fit_is_missing_rather_than_wrong() {
         "the counts still add up"
     );
 }
+
+#[test]
+fn an_instant_no_calendar_can_render_is_shown_as_the_number_it_is() {
+    let profile = Profile {
+        first_seen_at: i64::MAX,
+        ..alpha()
+    };
+
+    let metrics = profile_metrics("instance", &profile, NOW);
+
+    assert_eq!(
+        value(&metrics, "instance.first_seen"),
+        &Value::Text(i64::MAX.to_string())
+    );
+}

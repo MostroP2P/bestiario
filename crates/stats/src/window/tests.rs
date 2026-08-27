@@ -252,3 +252,24 @@ fn a_bound_no_date_can_represent_has_no_period_before_it() {
         assert_eq!(absurd.preceding(period), None, "{period:?}");
     }
 }
+
+#[test]
+fn a_window_ending_past_every_date_has_no_period_before_it_either() {
+    // The far bound is the one that fails here: the near one is a real
+    // instant, so the shift starts and then finds nowhere to land.
+    let unbounded = Window::new(0, i64::MAX);
+
+    for period in [Period::Day, Period::Week, Period::Month, Period::Year] {
+        assert_eq!(unbounded.preceding(period), None, "{period:?}");
+    }
+    assert_eq!(unbounded.previous_month(), None);
+}
+
+#[test]
+fn a_window_starting_past_every_date_has_no_buckets_to_cut() {
+    let absurd = Window::new(i64::MAX - 1, i64::MAX);
+
+    for period in [Period::Day, Period::Week, Period::Month, Period::Year] {
+        assert!(absurd.buckets(period).is_empty(), "{period:?}");
+    }
+}

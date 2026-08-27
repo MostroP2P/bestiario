@@ -93,6 +93,15 @@ fn a_missing_rate_and_an_instance_charging_nothing_are_counted_apart() {
     assert_eq!(implied.no_fee_in_force, 1);
     assert_eq!(implied.zero_fee, 1);
     assert_eq!(implied.not_invertible(), 2);
+
+    // And the reader is told which is which, since one is an archive gap
+    // and the other is an instance that owes no dev fee at all.
+    let error = metrics("dev_fees", &implied)[0]
+        .error()
+        .expect("an error column")
+        .to_string();
+    assert!(error.contains("1 fee with no fee in force"), "{error}");
+    assert!(error.contains("1 fee charging a zero fee"), "{error}");
 }
 
 #[test]
@@ -348,5 +357,29 @@ fn a_market_price_order_left_out_of_the_comparison_is_named_beside_it() {
     assert!(
         error.contains("1 fee left out at amt = 0"),
         "the reader is told what the ratio does not cover: {error}"
+    );
+}
+
+#[test]
+fn an_instance_that_charges_nothing_is_the_only_reason_given_when_it_is_the_only_one() {
+    // Every fee here comes from an instance whose fee is zero: no dev fee
+    // is owed, so there is nothing to invert and nothing missing either.
+    let data = data(vec![Fee {
+        fee_in_force: Some(0.0),
+        ..fee("free", 10, Some(1_000))
+    }]);
+
+    let implied = summarise(&data, WINDOW, &quarter);
+    let error = metrics("dev_fees", &implied)[0]
+        .error()
+        .expect("an error column")
+        .to_string();
+
+    assert_eq!(implied.no_fee_in_force, 0);
+    assert_eq!(implied.zero_fee, 1);
+    assert!(error.contains("1 fee charging a zero fee"), "{error}");
+    assert!(
+        !error.contains("no fee in force"),
+        "a gap nobody has is not named: {error}"
     );
 }

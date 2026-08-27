@@ -1092,7 +1092,16 @@ Neither talks to a relay.
 ```sh
 cargo test --workspace            # unit, integration and the end-to-end suite
 cargo clippy --workspace --all-targets -- -D warnings
+./scripts/coverage.sh             # the two coverage gates of SPEC §12
 ```
+
+`scripts/coverage.sh` measures the workspace once and applies both gates of
+`docs/SPEC.md` §12: 95% of lines overall, and every line of `crates/stats`
+and `src/ingest/parse` executed. Those two layers are plain functions over
+plain data, so a line no test reaches there is a case nobody thought about;
+the rest is I/O failure handling, where the test costs more than the line is
+worth. `--open` shows the annotated report, `--clean` discards profiles from
+an earlier build.
 
 `docs/SPEC.md` is the source of truth for event formats, the data model,
 the metrics and the CLI; `docs/ROADMAP.md` is the plan, one row per pull
