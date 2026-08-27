@@ -11,6 +11,21 @@ use chrono::{DateTime, Utc};
 /// How far back a report reaches when the user gives no `--from`.
 const DEFAULT_WINDOW_DAYS: i64 = 30;
 
+/// The widest window a report will bucket, in years.
+///
+/// `--until` takes any unix timestamp, so `--until 9223372036854775807` is
+/// a window of a quarter of a million years — three million month blocks
+/// for `--by period` to build, print and scroll past, and the memory to
+/// hold them. Refused rather than attempted: a century is further back
+/// than any relay's history and further forward than any question about
+/// it, so a window wider than one is a typo, and saying so beats grinding
+/// on it.
+const MAX_WINDOW_YEARS: i64 = 100;
+
+/// [`MAX_WINDOW_YEARS`] in seconds, over Julian years so that leap days do
+/// not make the bound depend on where the window sits.
+const MAX_WINDOW_SECS: i64 = MAX_WINDOW_YEARS * 31_557_600;
+
 /// A half-open interval of unix seconds: `from <= t < until`.
 ///
 /// Half-open rather than inclusive on both ends, so that consecutive windows
@@ -28,6 +43,12 @@ pub struct Range {
 pub enum RangeError {
     #[error("the reporting window is empty: --from {from} is not before --until {until}")]
     Empty { from: i64, until: i64 },
+    #[error(
+        "the reporting window spans more than {MAX_WINDOW_YEARS} years \
+         (--from {from} to --until {until}); narrow it, or drop --until if \
+         you meant \"up to now\""
+    )]
+    TooWide { from: i64, until: i64 },
 }
 
 impl Range {
@@ -44,6 +65,13 @@ impl Range {
 
         if from >= until {
             return Err(RangeError::Empty { from, until });
+        }
+
+        // Before anything is read, because every bucketed report walks this
+        // window one period at a time and the walk is what a quarter of a
+        // million years is expensive in.
+        if until.saturating_sub(from) > MAX_WINDOW_SECS {
+            return Err(RangeError::TooWide { from, until });
         }
 
         Ok(Self { from, until })

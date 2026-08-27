@@ -58,7 +58,7 @@ use nostr_sdk::prelude::{Filter, PublicKey, RelayUrl};
 use sqlx::SqlitePool;
 
 use crate::commands::Context;
-use crate::commands::backfill::authors;
+use crate::commands::backfill::{authors, listed_instances};
 use crate::commands::range::Range;
 use crate::config::Settings;
 use crate::db::repo;
@@ -125,6 +125,9 @@ pub struct Sync<'a> {
     pool: &'a SqlitePool,
     /// Empty means *any* author; see [`filters::for_kind`].
     authors: Vec<PublicKey>,
+    /// The instances the operator listed, whatever `accept_unknown_instances`
+    /// says — half of who an untagged kind may be asked about.
+    listed: Vec<PublicKey>,
     overlap: i64,
     /// Present when the run should follow the relays it discovers; see
     /// [`Sync::with_discovery`].
@@ -138,6 +141,7 @@ impl<'a> Sync<'a> {
             pipeline,
             pool,
             authors: Vec::new(),
+            listed: Vec::new(),
             overlap: 0,
             settings: None,
         }
@@ -145,6 +149,13 @@ impl<'a> Sync<'a> {
 
     pub fn with_authors(mut self, authors: Vec<PublicKey>) -> Self {
         self.authors = authors;
+        self
+    }
+
+    /// The instances `[indexer].instances` names, which vouch for an
+    /// untagged kind before this archive has seen them publish anything.
+    pub fn with_listed(mut self, listed: Vec<PublicKey>) -> Self {
+        self.listed = listed;
         self
     }
 
@@ -399,44 +410,87 @@ impl<'a> Sync<'a> {
 
     /// One filter set per relay, for `kinds`, each resumed from its own
     /// cursor.
+    /// A relay left with no filter at all is left out rather than sent an
+    /// empty REQ: before anything is vouched for, the untagged kinds have
+    /// nobody to ask about, and asking every author for kind 10002 is a
+    /// crawl of the network's whole NIP-65 index.
     async fn targets(&self, kinds: &[u16]) -> Result<Vec<(RelayUrl, Vec<Filter>)>> {
         let now = chrono::Utc::now().timestamp();
         let mut targets = Vec::new();
+        let vouched = self.vouched().await?;
 
         for relay in self.client.relays().to_vec() {
             let mut per_relay = Vec::new();
             for &kind in kinds {
-                per_relay.push(self.filter(&relay, kind, now).await?);
+                if let Some(filter) = self.filter(&relay, kind, &vouched, now).await? {
+                    per_relay.push(filter);
+                }
             }
-            targets.push((relay, per_relay));
+            if !per_relay.is_empty() {
+                targets.push((relay, per_relay));
+            }
         }
 
         Ok(targets)
     }
 
-    /// The filter for one `(relay, kind)`, resumed from its cursor.
+    /// Who an untagged kind may be asked about: the instances the operator
+    /// listed, and the ones this archive has already seen publishing a
+    /// `y = mostro` event.
     ///
-    /// Asking is also recorded: a subscription with no cursor asks the relay
-    /// for everything it holds, which is what makes an empty answer a fact
-    /// about the network rather than a kind nobody looked for. See
-    /// [`repo::indexed_kinds`].
-    async fn filter(&self, relay: &RelayUrl, kind: u16, now: i64) -> Result<Filter> {
+    /// Re-read before every subscription, because the priming pass that
+    /// precedes it proves publishers this one may then ask about — the same
+    /// reason `backfill` re-reads it per kind.
+    async fn vouched(&self) -> Result<Vec<PublicKey>> {
+        let mut vouched = self.listed.clone();
+
+        for pubkey in repo::instances::platform_proven(self.pool)
+            .await
+            .context("reading which publishers this archive vouches for")?
+        {
+            if let Ok(key) = PublicKey::parse(&pubkey)
+                && !vouched.contains(&key)
+            {
+                vouched.push(key);
+            }
+        }
+
+        Ok(vouched)
+    }
+
+    /// The filter for one `(relay, kind)`, resumed from its cursor, or
+    /// `None` when this run must not ask that relay for that kind.
+    ///
+    /// What is asked for is also recorded: a subscription with no cursor
+    /// asks the relay for everything it holds, which is what makes an empty
+    /// answer a fact about the network rather than a kind nobody looked for.
+    /// A kind this run must not ask about is not recorded, because nothing
+    /// went and looked. See [`repo::indexed_kinds`].
+    async fn filter(
+        &self,
+        relay: &RelayUrl,
+        kind: u16,
+        vouched: &[PublicKey],
+        now: i64,
+    ) -> Result<Option<Filter>> {
         let cursor = repo::sync_state::get(self.pool, &relay.to_string(), kind)
             .await
             .with_context(|| format!("reading the cursor for {relay} kind {kind}"))?
             .map(|cursor| cursor.last_created_at);
 
         let from = resume_from(cursor, self.overlap);
+
+        let Some(filter) =
+            filters::for_kind(kind, &self.authors, vouched, from.map(Range::onwards), None)
+        else {
+            return Ok(None);
+        };
+
         repo::indexed_kinds::record(self.pool, kind, from.unwrap_or(0), now)
             .await
             .with_context(|| format!("recording that kind {kind} was indexed"))?;
 
-        Ok(filters::for_kind(
-            kind,
-            &self.authors,
-            from.map(Range::onwards),
-            None,
-        ))
+        Ok(Some(filter))
     }
 }
 
@@ -501,6 +555,7 @@ pub async fn run(context: &Context<'_>) -> Result<()> {
     let pipeline = Pipeline::new(context.pool.clone(), Policy::from(&settings.indexer));
     let mut sync = Sync::new(&mut client, &pipeline, context.pool)
         .with_authors(authors(settings)?)
+        .with_listed(listed_instances(settings)?)
         .with_overlap(settings.nostr.resume_overlap_secs as i64)
         .with_discovery(settings);
 

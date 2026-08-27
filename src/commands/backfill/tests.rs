@@ -66,7 +66,7 @@ async fn a_walk_stores_every_event_the_relay_holds_in_the_window() {
     .await;
 
     // Act
-    let counts = Backfill::new(&client, &pipeline(&pool))
+    let counts = Backfill::new(&client, &pipeline(&pool), &pool)
         .run(&[38383], range(0), NOW)
         .await
         .expect("walk");
@@ -92,7 +92,7 @@ async fn a_window_smaller_than_the_backlog_is_walked_page_by_page() {
     ])
     .await;
 
-    let counts = Backfill::new(&client, &pipeline(&pool))
+    let counts = Backfill::new(&client, &pipeline(&pool), &pool)
         .with_window_limit(1)
         .run(&[38383], range(0), NOW)
         .await
@@ -113,7 +113,7 @@ async fn the_walk_does_not_reach_below_the_floor_it_was_given() {
     .await;
 
     // Act
-    let counts = Backfill::new(&client, &pipeline(&pool))
+    let counts = Backfill::new(&client, &pipeline(&pool), &pool)
         .with_window_limit(1)
         .run(&[38383], range(1_787_730_000), NOW)
         .await
@@ -129,7 +129,7 @@ async fn walking_the_same_backlog_twice_stores_it_once() {
     let pool = migrated().await;
     let (_relay, client) = seeded(&[(38383, "pending_range"), (38383, "canceled")]).await;
     let pipeline = pipeline(&pool);
-    let backfill = Backfill::new(&client, &pipeline);
+    let backfill = Backfill::new(&client, &pipeline, &pool);
     backfill
         .run(&[38383], range(0), NOW)
         .await
@@ -155,7 +155,7 @@ async fn an_event_the_pipeline_turns_away_is_counted_as_rejected() {
         seeded(&[(38383, "pending_range"), (38383, "other_platform_hodlhodl")]).await;
 
     // Act
-    let counts = Backfill::new(&client, &pipeline(&pool))
+    let counts = Backfill::new(&client, &pipeline(&pool), &pool)
         .run(&[38383], range(0), NOW)
         .await
         .expect("walk");
@@ -180,7 +180,7 @@ async fn every_requested_kind_is_walked() {
     .await;
 
     // Act
-    let counts = Backfill::new(&client, &pipeline(&pool))
+    let counts = Backfill::new(&client, &pipeline(&pool), &pool)
         .run(&crate::nostr::filters::INDEXED_KINDS, range(0), NOW)
         .await
         .expect("walk");
@@ -204,7 +204,7 @@ async fn a_relay_that_cannot_be_reached_does_not_abort_the_run() {
     relay.shutdown();
 
     // Act: the relay is gone, so every window fails.
-    let counts = Backfill::new(&client, &pipeline(&pool))
+    let counts = Backfill::new(&client, &pipeline(&pool), &pool)
         .run(&[38383], range(0), NOW)
         .await
         .expect("walk");
@@ -223,7 +223,7 @@ async fn a_page_with_room_to_spare_does_not_end_the_walk() {
     let pool = migrated().await;
     let (_relay, client) = seeded(&[(38383, "pending_range"), (38383, "canceled")]).await;
 
-    let counts = Backfill::new(&client, &pipeline(&pool))
+    let counts = Backfill::new(&client, &pipeline(&pool), &pool)
         .with_window_limit(500)
         .run(&[38383], range(0), NOW)
         .await
@@ -243,23 +243,28 @@ async fn a_database_that_cannot_be_written_to_fails_the_run() {
     pool.close().await;
 
     // Act
-    let result = Backfill::new(&client, &pipeline)
+    let result = Backfill::new(&client, &pipeline, &pool)
         .run(&[38383], range(0), NOW)
         .await;
 
     // Assert: reported, not counted. A summary that omitted the event and
     // exited zero would claim an archive that is not on disk, and §8.1 reads
     // the archive row first, so the next run would not retry it either.
-    let error = result.expect_err("a failed write ends the run");
+    //
+    // Which of the archive's uses fails first is not the point — the walk
+    // reads who is vouched for before it writes anything — so what is
+    // pinned is that the failure is named and returned rather than swallowed.
+    let error = result.expect_err("an unusable archive ends the run");
+    let message = error.to_string();
     assert!(
-        error.to_string().contains("storing event"),
+        message.contains("storing event") || message.contains("vouches for"),
         "unexpected error: {error}"
     );
 }
 
 /// The settings a discovery test runs under: one relay configured, and the
 /// operator asking bestiario to follow what the instances advertise.
-fn settings_for(relay: &str, discover: bool) -> Settings {
+fn settings_for(relay: &str, discover: bool, listed: &str) -> Settings {
     Settings::from_toml_str(&format!(
         r#"
 [nostr]
@@ -267,7 +272,7 @@ relays = ["{relay}"]
 discover_relays = {discover}
 
 [indexer]
-instances = []
+instances = ["{listed}"]
 accept_unknown_instances = true
 networks = ["mainnet"]
 
@@ -317,7 +322,7 @@ async fn a_relay_named_by_a_list_walked_this_run_is_walked_this_run() {
         .expect("the list lives here");
 
     let pool = migrated().await;
-    let settings = settings_for(&configured_url, true);
+    let settings = settings_for(&configured_url, true, &keys.public_key().to_hex());
     let cli = Cli::try_parse_from(["bestiario", "backfill"]).expect("parses");
     let context = Context {
         settings: &settings,
@@ -376,7 +381,7 @@ async fn with_discovery_off_an_advertised_relay_is_not_dialled() {
         .expect("seed");
 
     let pool = migrated().await;
-    let settings = settings_for(&configured_url, false);
+    let settings = settings_for(&configured_url, false, &keys.public_key().to_hex());
     let cli = Cli::try_parse_from(["bestiario", "backfill"]).expect("parses");
     let context = Context {
         settings: &settings,

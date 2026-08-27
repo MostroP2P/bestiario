@@ -38,10 +38,12 @@
 
 use anyhow::{Context as _, Result};
 use nostr_sdk::prelude::{Event, PublicKey, RelayUrl};
+use sqlx::SqlitePool;
 
 use crate::commands::Context;
 use crate::commands::range::Range;
 use crate::config::Settings;
+use crate::db::repo;
 use crate::ingest::{Counts, Pipeline, Policy};
 use crate::nostr::client::RelayClient;
 use crate::nostr::filters;
@@ -56,18 +58,25 @@ const WINDOW_LIMIT: usize = 500;
 pub struct Backfill<'a> {
     client: &'a RelayClient,
     pipeline: &'a Pipeline,
+    /// Read to decide who is vouched for; see [`Backfill::vouched`].
+    pool: &'a SqlitePool,
     /// Empty means *any* author, which is what `accept_unknown_instances`
     /// asks for; see [`filters::for_kind`].
     authors: Vec<PublicKey>,
+    /// The instances the operator listed, whatever `accept_unknown_instances`
+    /// says — half of who an untagged kind may be asked about.
+    listed: Vec<PublicKey>,
     window_limit: usize,
 }
 
 impl<'a> Backfill<'a> {
-    pub fn new(client: &'a RelayClient, pipeline: &'a Pipeline) -> Self {
+    pub fn new(client: &'a RelayClient, pipeline: &'a Pipeline, pool: &'a SqlitePool) -> Self {
         Self {
             client,
             pipeline,
+            pool,
             authors: Vec::new(),
+            listed: Vec::new(),
             window_limit: WINDOW_LIMIT,
         }
     }
@@ -75,6 +84,13 @@ impl<'a> Backfill<'a> {
     /// Narrows every request to these authors.
     pub fn with_authors(mut self, authors: Vec<PublicKey>) -> Self {
         self.authors = authors;
+        self
+    }
+
+    /// The instances `[indexer].instances` names, which vouch for an
+    /// untagged kind before this archive has seen them publish anything.
+    pub fn with_listed(mut self, listed: Vec<PublicKey>) -> Self {
+        self.listed = listed;
         self
     }
 
@@ -136,10 +152,41 @@ impl<'a> Backfill<'a> {
         Ok(counts)
     }
 
+    /// Who an untagged kind may be asked about right now: the instances the
+    /// operator listed, and the ones this archive has already seen
+    /// publishing a `y = mostro` event.
+    ///
+    /// Read per kind rather than once per run, because the run itself
+    /// changes the answer: [`filters::INDEXED_KINDS`] walks the tagged kinds
+    /// first, and each one proves publishers the untagged kinds may then be
+    /// asked about. A first backfill on an empty archive therefore still
+    /// discovers relay lists — from the instances its own orders have just
+    /// vouched for.
+    async fn vouched(&self) -> Result<Vec<PublicKey>> {
+        let mut vouched = self.listed.clone();
+
+        for pubkey in repo::instances::platform_proven(self.pool)
+            .await
+            .context("reading which publishers this archive vouches for")?
+        {
+            // A pubkey that reached a table came off a verified event, so
+            // this cannot fail; ignoring it rather than failing the walk is
+            // still the right shape for a filter that is only a narrowing.
+            if let Ok(key) = PublicKey::parse(&pubkey)
+                && !vouched.contains(&key)
+            {
+                vouched.push(key);
+            }
+        }
+
+        Ok(vouched)
+    }
+
     /// One relay, one kind, from the top of `range` down to its floor.
     async fn walk(&self, relay: &RelayUrl, kind: u16, range: Range, now: i64) -> Result<Counts> {
         let mut counts = Counts::default();
         let mut until = range.until();
+        let vouched = self.vouched().await?;
 
         while until > range.from() {
             let window = match Range::resolve(Some(range.from()), Some(until), now) {
@@ -148,8 +195,20 @@ impl<'a> Backfill<'a> {
                 Err(_) => break,
             };
 
-            let filter =
-                filters::for_kind(kind, &self.authors, Some(window), Some(self.window_limit));
+            let Some(filter) = filters::for_kind(
+                kind,
+                &self.authors,
+                &vouched,
+                Some(window),
+                Some(self.window_limit),
+            ) else {
+                // An untagged kind with nobody to ask about: see
+                // `filters::for_kind`. The tagged kinds walked before this
+                // one found no instance, so there is no narrowed request to
+                // make and a broad one is not this indexer's to make.
+                tracing::debug!(%relay, kind, "no vouched publisher; not asking for this kind");
+                break;
+            };
 
             let events = match self.client.fetch_window(relay, filter).await {
                 Ok(events) => events,
@@ -259,6 +318,18 @@ pub fn authors(settings: &Settings) -> anyhow::Result<Vec<PublicKey>> {
         return Ok(Vec::new());
     }
 
+    listed_instances(settings)
+}
+
+/// The instances `[indexer].instances` names, whatever
+/// `accept_unknown_instances` says.
+///
+/// Not the same question as [`authors`]: that one is who a *request* may be
+/// narrowed to, and the flag widens it to anybody. This one is who the
+/// operator vouches for by name, which no flag widens — an untagged kind is
+/// asked about these and about whoever the archive has since proven, and
+/// about nobody else.
+pub fn listed_instances(settings: &Settings) -> anyhow::Result<Vec<PublicKey>> {
     settings
         .indexer
         .instances
@@ -339,8 +410,10 @@ async fn walk_with_discovery(
 ) -> Result<Counts> {
     let settings = context.settings;
     let authors = authors(settings)?;
-    let mut counts = Backfill::new(client, pipeline)
+    let listed = listed_instances(settings)?;
+    let mut counts = Backfill::new(client, pipeline, context.pool)
         .with_authors(authors.clone())
+        .with_listed(listed.clone())
         .run(kinds, range, now)
         .await?;
 
@@ -375,8 +448,9 @@ async fn walk_with_discovery(
             relays = fresh.len(),
             "walking the relays this run discovered"
         );
-        counts += Backfill::new(client, pipeline)
+        counts += Backfill::new(client, pipeline, context.pool)
             .with_authors(authors.clone())
+            .with_listed(listed.clone())
             .walk_relays(&fresh, kinds, range, now)
             .await?;
 

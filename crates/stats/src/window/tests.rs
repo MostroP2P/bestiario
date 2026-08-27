@@ -185,3 +185,42 @@ fn a_window_of_no_length_has_no_buckets() {
         assert!(empty.buckets(period).is_empty(), "{period:?}");
     }
 }
+
+// The two ends of the calendar. A window is as wide as the caller typed,
+// and `Window` is a value type with no CLI in front of it.
+
+#[test]
+fn a_window_reaching_past_the_last_representable_date_is_bucketed_not_refused() {
+    // Arrange: a window whose end an `i64` can name and the calendar
+    // cannot, so the walk runs out of dates before it runs out of window.
+    let ceiling = chrono::DateTime::<chrono::Utc>::MAX_UTC.timestamp();
+    let window = Window::new(ceiling - 2 * DAY, i64::MAX);
+
+    // Act
+    let days = window.days();
+
+    // Assert: the walk ends at the calendar's end rather than panicking,
+    // and reports the buckets that do exist.
+    assert!(!days.is_empty(), "the days before the end are still days");
+    assert!(days.iter().all(|(_, bucket)| bucket.until <= ceiling + DAY));
+}
+
+#[test]
+fn a_limit_is_still_refused_over_a_window_wider_than_it_allows() {
+    let window = Window::new(0, 40 * DAY);
+
+    assert_eq!(window.buckets_upto(Period::Day, 10), None);
+    assert!(window.buckets_upto(Period::Day, 100).is_some());
+}
+
+#[test]
+fn a_window_opening_in_the_first_week_a_date_can_represent_has_no_weeks() {
+    // Arrange: there is no Monday before the first representable date, so
+    // `opening` has nowhere to walk back to.
+    let floor = chrono::DateTime::<chrono::Utc>::MIN_UTC.timestamp();
+    let window = Window::new(floor, floor + 3 * DAY);
+
+    // Act / Assert: an answer, not a panic.
+    assert_eq!(window.weeks(), Vec::new());
+    assert_eq!(window.days().len(), 3, "days need no Monday behind them");
+}

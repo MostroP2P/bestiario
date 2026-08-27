@@ -94,7 +94,12 @@ such claim and is dropped, like a URL that cannot be dialled. With the flag
 off the connection set is exactly what `settings.toml` lists, whatever the
 instances have advertised. A relay list carries no `y` tag, so bestiario
 takes one only from a pubkey it already knows as an instance — the same
-rule that guards rate snapshots.
+rule that guards rate snapshots — and it *asks* only about those pubkeys
+too, even with `accept_unknown_instances = true`. Kind 10002 is the kind
+every Nostr user publishes: requesting it of no author in particular would
+download the network's whole NIP-65 index to throw all but a handful of it
+away. Until something has vouched for a publisher, the two untagged kinds
+are not requested at all.
 
 The connection set is not fixed at startup. A relay list read during a
 `backfill` is followed by that same invocation — the run walks the relays it
@@ -107,7 +112,7 @@ happened to know about on the day it started.
 
 ```console
 $ bestiario backfill
-backfill: 21 stored, 4 already known, 5 rejected
+backfill: 21 stored, 5 already known, 3 rejected
 ```
 
 `backfill` walks each relay's history backwards, from now down to
@@ -140,7 +145,9 @@ which shows one order whole — accepts the same window and scope flags:
 
 - `--from` and `--until`, as a unix timestamp or `YYYY-MM-DD` (UTC). The
   window is half-open — `--until` is excluded — so consecutive windows tile.
-  The default is the last thirty days.
+  The default is the last thirty days, and a window wider than a century is
+  refused: further back than any relay's history and further forward than
+  any question about it, so it is a typo rather than a request.
 - `--instance <PUBKEY|NAME>`: one instance, by pubkey, by a unique prefix of
   it, or by name.
 - `--network <NETWORK>`: one network, overriding the configured list.
@@ -165,6 +172,41 @@ expired events, as any relay does, so the corpus is re-signed for it with
 keys derived from each instance's real pubkey: the pubkeys in the examples
 are those test keys, not the instances' own. And the clock is frozen at
 2026-08-27T03:06:40Z, which is why five orders are still "open now".
+
+## What a number rests on
+
+Every figure in every report is one of three things, and the difference is
+the difference between a measurement and an estimate. It is marked, not
+explained in a footnote: an inferred figure carries `(inf)` after its name
+in a table and `"kind": "inferred"` in JSON, with what qualifies it in the
+`error` column beside it.
+
+| | What it is | How to read it |
+|---|---|---|
+| **Observed** | A count or a sum of published events. `orders.created`, `volume.sats`, `dev_fees.total_sats`, `disputes.opened`. | A fact about what the instances published. If it is wrong, either an event was missed or the parser is. |
+| **Derived** | Arithmetic over observed figures: a rate, a share, a percentile. `orders.completion_rate`, `market.buy_orders_share`, `timing.time_to_fill_p50`, `disputes.rate`. | As solid as the two numbers under it, and no more. Read the definition before the value — `disputes.rate` divides disputes by orders that found a taker, and pairs no dispute to any order, because a dispute event does not name one. |
+| **Inferred** | Rests on something nobody published, so it cannot be checked against the wire. Marked `(inf)`. | Never quote it as a measurement. The `error` column states the assumption and the margin; if you disagree with the assumption, the figure is yours to recompute. |
+
+Only two families are inferred, and both say why:
+
+- **Volume in a reference currency** (`stats volume --in USD`) multiplies
+  each completed order by the rate its instance had published by the moment
+  it settled. The assumption is that the rate a few minutes old still held
+  when the trade closed; the `error` column gives the age of the oldest
+  quote used, how many orders were priced on another instance's snapshot,
+  and how many could not be priced and are excluded from the sum.
+- **Volume implied by dev fees** (`stats dev-fees`) inverts each fee by
+  `fee_in_force × dev_fee_percentage`. That percentage is *not published by
+  any instance* — it is the `[assumptions]` key of `settings.toml`, `0.30`
+  by default — and one satoshi of rounding on a fee is `1 ÷ (fee × pct)`
+  satoshis of volume. Both are in the `error` column, and
+  `implied_vs_observed` sets the figure against the observed volume of the
+  orders that are still known, which is the measure of how far the assumed
+  share is from the real one.
+
+Everything else in this README is observed or derived. Where a figure
+cannot be computed at all, it reads `—` in a table and `null` in JSON —
+never zero: zero is an answer, and the absence of one is not.
 
 ### Network summary
 

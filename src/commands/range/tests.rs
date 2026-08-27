@@ -105,6 +105,27 @@ fn a_zero_length_window_is_rejected() {
 }
 
 #[test]
+fn a_window_wider_than_a_century_is_refused_rather_than_bucketed() {
+    // Arrange / Act: `--until` takes any timestamp, and this one asks for
+    // a quarter of a million years of month blocks.
+    let error = Range::resolve(Some(0), Some(i64::MAX), NOW).expect_err("too wide");
+
+    // Assert
+    assert!(matches!(error, RangeError::TooWide { .. }));
+    assert!(
+        error.to_string().contains("100 years"),
+        "the message says what the bound is: {error}"
+    );
+}
+
+#[test]
+fn a_window_of_decades_is_still_a_window() {
+    let fifty_years = 50 * 31_557_600;
+
+    assert!(Range::resolve(Some(NOW - fifty_years), Some(NOW), NOW).is_ok());
+}
+
+#[test]
 fn the_previous_window_has_the_same_length_and_ends_where_this_one_starts() {
     // What the "Δ vs. the previous period" metrics of SPEC §6.1 compare with.
     let range = Range::resolve(Some(NOW - 30 * DAY), Some(NOW), NOW).expect("valid range");

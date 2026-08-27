@@ -164,3 +164,54 @@ async fn an_unknown_pubkey_is_not_found() {
     assert_eq!(find(&pool, PUBKEY).await.expect("find"), None);
     assert!(all(&pool).await.expect("all").is_empty());
 }
+
+#[tokio::test]
+async fn the_proven_publishers_are_exactly_the_ones_proven_one_by_one() {
+    // The list and the predicate answer the same question, and a request
+    // narrowed by the list has to agree with the admission that uses the
+    // predicate — or a run would ask for events it then turns away, or turn
+    // away events it asked for.
+    let pool = migrated().await;
+
+    // A pubkey the bestiary has seen only through a rate snapshot: `upsert`
+    // is what every indexed kind does, this one included, so the projection
+    // alone is no proof.
+    seen(&pool, OTHER, Some("Unproven"), EARLIER).await;
+
+    sqlx::query(
+        "INSERT INTO events (id, pubkey, kind, created_at, raw_json, relay_url, seen_at)
+         VALUES ('fee', ?1, 8383, ?2, '{}', 'wss://relay.example', ?2)",
+    )
+    .bind(PUBKEY)
+    .bind(EARLIER)
+    .execute(&pool)
+    .await
+    .expect("the archived event the fee refers to");
+
+    sqlx::query(
+        "INSERT INTO dev_fees
+           (event_id, pubkey, order_id, amount_sats, payment_hash, created_at, is_duplicate)
+         VALUES ('fee', ?1, 'order', 60, 'hash', ?2, 0)",
+    )
+    .bind(PUBKEY)
+    .bind(EARLIER)
+    .execute(&pool)
+    .await
+    .expect("a y-tagged publication");
+
+    let proven = platform_proven(&pool).await.expect("proven");
+
+    assert_eq!(proven, [PUBKEY.to_string()]);
+    assert!(is_platform_proven(&pool, PUBKEY).await.expect("asked"));
+    assert!(
+        !is_platform_proven(&pool, OTHER).await.expect("asked"),
+        "an instances row is not evidence; the two must agree"
+    );
+}
+
+#[tokio::test]
+async fn nothing_is_proven_by_an_empty_archive() {
+    let pool = migrated().await;
+
+    assert!(platform_proven(&pool).await.expect("proven").is_empty());
+}

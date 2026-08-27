@@ -56,9 +56,15 @@ impl Window {
 
     /// The buckets of `period` this window touches, each clipped to it,
     /// oldest first — what a series is plotted over.
+    ///
+    /// Total: every window has a finite number of buckets, because the
+    /// walk ends at the last instant a date can represent. How many is a
+    /// question for the caller that has a limit to enforce; this one is for
+    /// the callers whose window is already bounded, and
+    /// `crate::commands::range` is where that bound is applied.
     pub fn buckets(&self, period: Period) -> Vec<(String, Window)> {
         self.buckets_upto(period, usize::MAX)
-            .expect("a window a date can represent has fewer buckets than `usize::MAX`")
+            .expect("no window has more buckets than `usize::MAX`")
     }
 
     /// The same, refusing rather than building more than `limit` of them.
@@ -66,9 +72,8 @@ impl Window {
     /// A window is as wide as the caller typed, and `--from 0 --until
     /// 9223372036854775807 --by day` asks for a hundred trillion buckets.
     /// Building them all to discover there are too many spends the memory
-    /// the limit exists to protect, and walks the cursor past the last date
-    /// `chrono` can represent on the way. So the walk stops one bucket past
-    /// the limit: enough to know it was exceeded, and no more.
+    /// the limit exists to protect, so the walk stops one bucket past the
+    /// limit: enough to know it was exceeded, and no more.
     pub fn buckets_upto(&self, period: Period, limit: usize) -> Option<Vec<(String, Window)>> {
         match period {
             Period::Day => self.walk(period, "%Y-%m-%d", limit, |at| {
@@ -155,9 +160,14 @@ impl Window {
 
         match period {
             Period::Day => midnight(start.date_naive()),
-            Period::Week => midnight(
-                start.date_naive() - Days::new(start.weekday().num_days_from_monday() as u64),
-            ),
+            // Checked: `NaiveDate - Days` panics on underflow, and a
+            // window opening in the first week a date can represent has no
+            // Monday before it. `None` is what this function promises for
+            // a bound it cannot walk back to.
+            Period::Week => start
+                .date_naive()
+                .checked_sub_days(Days::new(start.weekday().num_days_from_monday() as u64))
+                .and_then(midnight),
             Period::Month => Utc
                 .with_ymd_and_hms(start.year(), start.month(), 1, 0, 0, 0)
                 .single(),
@@ -169,10 +179,11 @@ impl Window {
     /// keying it by `format`. A bucket the window does not actually reach
     /// into — the part of the first one before it opens — is not a bucket.
     ///
-    /// `None` once more than `limit` buckets have been built, and once the
-    /// cursor steps past the last instant a date can represent: a window
-    /// that wide has more buckets than any caller asked for, and the two
-    /// are the same answer.
+    /// `None` once more than `limit` buckets have been built, and only
+    /// then. A cursor that steps past the last instant a date can
+    /// represent *ends* the walk instead: there are no buckets out there to
+    /// have missed, so a window reaching that far has been given every one
+    /// that exists rather than refused.
     fn walk(
         &self,
         period: Period,
@@ -186,7 +197,8 @@ impl Window {
         };
 
         while cursor.timestamp() < self.until {
-            let following = next(cursor)?;
+            // The end of the calendar, not a failure: see above.
+            let Some(following) = next(cursor) else { break };
             let clipped = Window::new(
                 cursor.timestamp().max(self.from),
                 following.timestamp().min(self.until),
