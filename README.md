@@ -562,6 +562,83 @@ comparable quote disagrees with nobody, and that row says `—` too. Without
 `--instance` the report covers every instance in the bestiary, one block
 each.
 
+### Series
+
+```console
+$ bestiario series orders.created --by day --from 2026-08-23 --until 2026-08-27
+2026-08-23T00:00:00+00:00 — 2026-08-27T00:00:00+00:00
+┌─────────────────────────────────┬───────┐
+│ metric                          ┆ value │
+╞═════════════════════════════════╪═══════╡
+│ orders.created.2026-08-23       ┆ 0     │
+│ orders.created.2026-08-23.delta ┆ —     │
+│ orders.created.2026-08-24       ┆ 0     │
+│ orders.created.2026-08-24.delta ┆ —     │
+│ orders.created.2026-08-25       ┆ 0     │
+│ orders.created.2026-08-25.delta ┆ —     │
+│ orders.created.2026-08-26       ┆ 8     │
+│ orders.created.2026-08-26.delta ┆ —     │
+└─────────────────────────────────┴───────┘
+```
+
+Any metric of the families above, once per bucket, with the change against
+the bucket before it. `--by` takes `day`, `week`, `month` or `year`;
+`--split instance|kind|fiat` plots one line per slice:
+
+```console
+$ bestiario series volume.sats --by day --split kind --from 2026-08-23 --until 2026-08-27
+2026-08-23T00:00:00+00:00 — 2026-08-27T00:00:00+00:00
+┌───────────────────────────────────┬───────────┐
+│ metric                            ┆ value     │
+╞═══════════════════════════════════╪═══════════╡
+│ volume.sats.buy.2026-08-23        ┆ 0 sats    │
+│ volume.sats.buy.2026-08-23.delta  ┆ —         │
+│ volume.sats.buy.2026-08-24        ┆ 0 sats    │
+│ volume.sats.buy.2026-08-24.delta  ┆ —         │
+│ volume.sats.buy.2026-08-25        ┆ 0 sats    │
+│ volume.sats.buy.2026-08-25.delta  ┆ —         │
+│ volume.sats.buy.2026-08-26        ┆ 0 sats    │
+│ volume.sats.buy.2026-08-26.delta  ┆ —         │
+│ volume.sats.sell.2026-08-23       ┆ 0 sats    │
+│ volume.sats.sell.2026-08-23.delta ┆ —         │
+│ volume.sats.sell.2026-08-24       ┆ 0 sats    │
+│ volume.sats.sell.2026-08-24.delta ┆ —         │
+│ volume.sats.sell.2026-08-25       ┆ 0 sats    │
+│ volume.sats.sell.2026-08-25.delta ┆ —         │
+│ volume.sats.sell.2026-08-26       ┆ 1361 sats │
+│ volume.sats.sell.2026-08-26.delta ┆ —         │
+└───────────────────────────────────┴───────────┘
+```
+
+The Δ is a relative change for a magnitude — a count, a sum, a duration —
+since that is what "grew by a third" means, and the arithmetic difference
+for a figure that is already a proportion: a completion rate going from 20%
+to 30% rose by ten points, not by half. The first bucket has nothing to
+have changed from, and a change from zero is not a proportion of anything;
+both read `—` — which, over a corpus this sparse, is every bucket of the
+examples above.
+
+The metric name is whatever the reports call it, and nothing keeps a
+separate list: a metric a family gains is one `series` can plot the day it
+lands. That includes the names the data gives rather than the code —
+`volume.fiat.ARS.total` exists because an ARS order completed — so which
+names are plottable depends on the window, and a name that does not exist
+in it is answered with the ones that do. A converted figure names its own
+currency and is priced from the snapshots exactly as `stats volume --in
+USD` is: `series volume.in.USD.total` needs no flag of its own.
+
+An inferred figure stays inferred once it is a bucket: `(inf)` in the
+table, `"kind": "inferred"` in the JSON, with the qualification the report
+gives it — and so does a Δ between two of them, since a change between two
+estimates is an estimate.
+
+Two kinds of figure are refused rather than plotted: those about *now*
+(`orders.open_now`), which would be the same number in every bucket, and
+those that are already a change against a previous period
+(`orders.created_delta`), since a Δ of a Δ answers nothing. So is a range
+with more buckets than a table anybody reads — before the buckets are
+built, not after.
+
 ### Dev fees
 
 ```console
