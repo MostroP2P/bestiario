@@ -86,11 +86,24 @@ pub struct Dispute {
     /// When it was opened: the `created_at` tag, or the first version seen
     /// when no version published one.
     pub opened_at: i64,
-    /// From the latest version.
+    /// From the latest version — what decides whether it is still open.
     pub status: Status,
     pub initiator: Option<Initiator>,
     /// `created_at` of the first version in a terminal status.
     pub resolved_at: Option<i64>,
+    /// The status of that first terminal version — the outcome. Kept apart
+    /// from [`status`](Self::status) because a later version can republish
+    /// the dispute under another terminal status, and the outcome is what
+    /// happened when it was resolved, dated by [`resolved_at`](Self::resolved_at).
+    pub outcome: Option<Status>,
+}
+
+/// One dispute still open, as the report lists them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenDispute {
+    pub dispute_id: String,
+    /// `now − opened_at`.
+    pub age: i64,
 }
 
 /// One order that left `pending` — the population disputes arise from.
@@ -143,11 +156,9 @@ pub struct Disputes {
     /// `resolved_at − opened_at` over disputes resolved in the window.
     pub resolution_p50: Option<i64>,
     pub resolution_p90: Option<i64>,
-    /// Not in a terminal status, whenever opened. About *now*.
-    pub open_now: u64,
-    /// `now − opened_at` of the oldest open dispute; `None` when none is
-    /// open. Also about *now*.
-    pub open_oldest_age: Option<i64>,
+    /// Not in a terminal status, opened at or before `now`, oldest first.
+    /// About *now*, not about the window.
+    pub open: Vec<OpenDispute>,
 }
 
 /// The §6.7 figures for `data` over `window`, with `now` dating the open
@@ -187,7 +198,11 @@ pub fn summarise(data: &DisputeData, window: Window, now: i64) -> Disputes {
         .collect();
     let outcome = (!resolved.is_empty()).then(|| {
         Status::TERMINAL.map(|status| {
-            resolved.iter().filter(|d| d.status == status).count() as f64 / resolved.len() as f64
+            resolved
+                .iter()
+                .filter(|d| d.outcome == Some(status))
+                .count() as f64
+                / resolved.len() as f64
         })
     });
     let resolution: Vec<i64> = resolved
@@ -195,11 +210,19 @@ pub fn summarise(data: &DisputeData, window: Window, now: i64) -> Disputes {
         .filter_map(|d| d.resolved_at.map(|at| at - d.opened_at))
         .collect();
 
-    let open: Vec<&Dispute> = data
+    // A dispute whose opening is ahead of the clock — a publisher's clock
+    // running fast — has not opened yet as far as this report can tell, and
+    // would otherwise be listed with a negative age.
+    let mut open: Vec<&Dispute> = data
         .disputes
         .iter()
-        .filter(|dispute| !dispute.status.is_terminal())
+        .filter(|dispute| !dispute.status.is_terminal() && dispute.opened_at <= now)
         .collect();
+    open.sort_by(|a, b| {
+        a.opened_at
+            .cmp(&b.opened_at)
+            .then(a.dispute_id.cmp(&b.dispute_id))
+    });
 
     Disputes {
         opened: opened.len() as u64,
@@ -210,8 +233,13 @@ pub fn summarise(data: &DisputeData, window: Window, now: i64) -> Disputes {
         outcome,
         resolution_p50: percentile(&resolution, 0.5),
         resolution_p90: percentile(&resolution, 0.9),
-        open_now: open.len() as u64,
-        open_oldest_age: open.iter().map(|d| now - d.opened_at).max(),
+        open: open
+            .iter()
+            .map(|d| OpenDispute {
+                dispute_id: d.dispute_id.clone(),
+                age: now - d.opened_at,
+            })
+            .collect(),
     }
 }
 
@@ -270,16 +298,25 @@ pub fn report(
 }
 
 /// One [`Disputes`] as every metric of §6.7, all observed.
+///
+/// The open disputes come last, `open_now` then one `open.<n>.id` /
+/// `open.<n>.age` pair each, oldest first — the "sorted by `opened_at`"
+/// list of §6.7 rather than a count that hides which ones they are.
 pub fn metrics(prefix: &str, disputes: &Disputes) -> Vec<Metric> {
     let mut metrics = dated_metrics(prefix, disputes);
-    metrics.extend([
-        count(prefix, "open_now", disputes.open_now),
-        seconds(prefix, "open_oldest_age", disputes.open_oldest_age),
-    ]);
+    metrics.push(count(prefix, "open_now", disputes.open.len() as u64));
+    for (index, open) in disputes.open.iter().enumerate() {
+        let n = index + 1;
+        metrics.push(Metric::observed(
+            format!("{prefix}.open.{n}.id"),
+            Value::Text(open.dispute_id.clone()),
+        ));
+        metrics.push(seconds(prefix, &format!("open.{n}.age"), Some(open.age)));
+    }
     metrics
 }
 
-/// The metrics that are about the window, leaving out the two about *now*.
+/// The metrics that are about the window, leaving out the ones about *now*.
 pub fn dated_metrics(prefix: &str, disputes: &Disputes) -> Vec<Metric> {
     let mut metrics = vec![count(prefix, "opened", disputes.opened)];
     metrics.extend(status_metrics(prefix, disputes));

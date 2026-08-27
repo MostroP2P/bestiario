@@ -157,7 +157,11 @@ async fn the_global_report_reads_the_seeded_disputes() {
     );
     assert_eq!(value(&report, "disputes.open_now"), &Value::Count(1));
     assert_eq!(
-        value(&report, "disputes.open_oldest_age"),
+        value(&report, "disputes.open.1.id"),
+        &Value::Text("d2".into())
+    );
+    assert_eq!(
+        value(&report, "disputes.open.1.age"),
         &Value::Seconds(NOW - (FROM + 600))
     );
 }
@@ -174,6 +178,14 @@ async fn slicing_by_instance_labels_the_slice() {
         value(&report, "disputes.Alpha (82fa8cb9).opened"),
         &Value::Count(2)
     );
+}
+
+#[tokio::test]
+async fn a_network_scope_is_refused_with_the_reason() {
+    let error = refuse_network_scope(Some(Network::Mainnet)).expect_err("refused");
+
+    assert!(error.to_string().contains("no network tag"), "{error}");
+    refuse_network_scope(None).expect("no scope, no objection");
 }
 
 #[tokio::test]

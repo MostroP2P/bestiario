@@ -8,10 +8,11 @@
 //! that found a taker — dated by the first `in-progress` version, or by the
 //! settlement when the walk never saw one.
 //!
-//! The network filter does not apply to disputes: kind 38386 publishes no
-//! `network` tag (§2.3). It does apply to the orders, so a `--network`
-//! report divides the disputes of every network by the orders of one. That
-//! is a limit of the events, stated here rather than hidden.
+//! The network filter applies to neither read. Kind 38386 publishes no
+//! `network` tag (§2.3), so disputes cannot be attributed to a network;
+//! filtering only the orders would divide the disputes of every network by
+//! the orders of one. Both are therefore network-blind, and the command
+//! refuses `--network` rather than print a report that pretends otherwise.
 
 use sqlx::{Executor, QueryBuilder, Sqlite};
 
@@ -43,7 +44,11 @@ where
                 d.final_status AS status, d.initiator,
                 (SELECT MIN(v.created_at) FROM dispute_versions v
                   WHERE v.dispute_id = d.dispute_id
-                    AND v.status IN ('seller-refunded', 'settled', 'released')) AS resolved_at
+                    AND v.status IN ('seller-refunded', 'settled', 'released')) AS resolved_at,
+                (SELECT v.status FROM dispute_versions v
+                  WHERE v.dispute_id = d.dispute_id
+                    AND v.status IN ('seller-refunded', 'settled', 'released')
+                  ORDER BY v.created_at, v.event_id LIMIT 1) AS outcome
          FROM disputes d
          LEFT JOIN instances i ON i.pubkey = d.pubkey
          WHERE 1 = 1",
@@ -73,7 +78,7 @@ where
          LEFT JOIN instances i ON i.pubkey = o.pubkey
          WHERE 1 = 1",
     );
-    scope.apply(&mut query, "o");
+    scope.apply_instance(&mut query, "o");
     query.push(" ORDER BY left_pending_at, o.order_id");
 
     Ok(query
@@ -94,6 +99,7 @@ struct DisputeRow {
     status: String,
     initiator: Option<String>,
     resolved_at: Option<i64>,
+    outcome: Option<String>,
 }
 
 impl DisputeRow {
@@ -103,6 +109,11 @@ impl DisputeRow {
             Some(wire) => Some(initiator(decode("initiator", Initiator::parse(wire))?)),
         };
 
+        let outcome = match self.outcome.as_deref() {
+            None => None,
+            Some(wire) => Some(status(decode("outcome", Status::parse(wire))?)),
+        };
+
         Ok(Dispute {
             dispute_id: self.dispute_id,
             instance: instance_label(&self.pubkey, self.instance_name.as_deref()),
@@ -110,6 +121,7 @@ impl DisputeRow {
             status: status(decode("final_status", Status::parse(&self.status))?),
             initiator,
             resolved_at: self.resolved_at,
+            outcome,
         })
     }
 }

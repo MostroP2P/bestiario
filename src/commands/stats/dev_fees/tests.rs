@@ -7,8 +7,9 @@ use crate::commands::range::Range;
 use crate::db::connect_and_migrate;
 use crate::db::load::Scope;
 use crate::db::repo::events::{self, EventRecord};
-use crate::db::repo::{dev_fees as fees_repo, instances, orders};
+use crate::db::repo::{dev_fees as fees_repo, instance_info, instances, orders};
 use crate::ingest::parse::dev_fee::DevFee;
+use crate::ingest::parse::info::InstanceInfo;
 use crate::ingest::parse::order::{Direction, FiatAmount, OrderVersion, Status};
 use crate::network::Network;
 use crate::stats::Value;
@@ -77,11 +78,31 @@ async fn fee(pool: &SqlitePool, id: &str, order_id: &str, created_at: i64, amoun
 }
 
 /// Two settled orders, one paid for (300 sats, 60s late), one not; plus an
-/// orphan fee of 50 sats.
+/// orphan fee of 50 sats. The instance published a fee above zero before
+/// either settled, so both count towards coverage.
 async fn seeded() -> SqlitePool {
     let pool = connect_and_migrate("sqlite::memory:")
         .await
         .expect("migrate");
+    event(&pool, "info", 38385, FROM).await;
+    instance_info::insert_version(
+        &pool,
+        &InstanceInfo {
+            event_id: "info".to_string(),
+            pubkey: ALPHA.to_string(),
+            created_at: FROM,
+            fee: Some(0.006),
+            max_order_amount: None,
+            min_order_amount: None,
+            fiat_currencies: None,
+            mostro_version: None,
+            protocol_version: None,
+            ln_networks: None,
+            bond_enabled: None,
+        },
+    )
+    .await
+    .expect("info");
     settled(&pool, "paid", FROM + 100).await;
     settled(&pool, "unpaid", FROM + 200).await;
     fee(&pool, "f1", "paid", FROM + 160, 300).await;
