@@ -18,12 +18,14 @@ fn dispute(id: &str, opened_at: i64, status: Status, initiator: Option<Initiator
         status,
         initiator,
         resolved_at: None,
+        outcome: None,
     }
 }
 
 fn resolved(id: &str, opened_at: i64, status: Status, resolved_at: i64) -> Dispute {
     Dispute {
         resolved_at: Some(resolved_at),
+        outcome: Some(status),
         ..dispute(id, opened_at, status, Some(Initiator::Seller))
     }
 }
@@ -49,7 +51,7 @@ fn taken(id: &str, left_pending_at: i64) -> Taken {
 ///   window, seller-refunded at 1200, 700s) → **3**; outcome refunded 1/3,
 ///   settled 1/3, released 1/3; resolution p50 **600**, p90 **700**
 /// - open now: d1, d2, d6 (opened after the window, still initiated) →
-///   **3**; oldest is d1 at 1100 → age **1400**
+///   oldest first → **3**, d1 first with age **1400**
 fn dataset() -> DisputeData {
     DisputeData {
         disputes: vec![
@@ -111,11 +113,48 @@ fn outcome_and_resolution_time_are_dated_by_the_terminal_version() {
 }
 
 #[test]
-fn open_now_counts_every_non_terminal_dispute_whenever_it_was_opened() {
+fn open_lists_every_non_terminal_dispute_oldest_first_whenever_it_was_opened() {
     let disputes = summarise(&dataset(), WINDOW, NOW);
 
-    assert_eq!(disputes.open_now, 3);
-    assert_eq!(disputes.open_oldest_age, Some(NOW - 1_100));
+    let open: Vec<(&str, i64)> = disputes
+        .open
+        .iter()
+        .map(|open| (open.dispute_id.as_str(), open.age))
+        .collect();
+    assert_eq!(
+        open,
+        vec![
+            ("d1", NOW - 1_100),
+            ("d2", NOW - 1_200),
+            ("d6", NOW - 2_100)
+        ]
+    );
+}
+
+#[test]
+fn a_dispute_opened_after_now_is_not_open_yet() {
+    // A publisher's clock running fast: not counted, and never a negative age.
+    let data = DisputeData {
+        disputes: vec![dispute("future", NOW + 60, Status::Initiated, None)],
+        taken: Vec::new(),
+    };
+
+    assert!(summarise(&data, WINDOW, NOW).open.is_empty());
+}
+
+#[test]
+fn the_outcome_is_the_first_terminal_version_not_the_latest_status() {
+    // Resolved as settled, later republished as released: the outcome the
+    // resolution date refers to is the settlement.
+    let data = DisputeData {
+        disputes: vec![Dispute {
+            status: Status::Released,
+            ..resolved("d", 1_000, Status::Settled, 1_500)
+        }],
+        taken: Vec::new(),
+    };
+
+    assert_eq!(summarise(&data, WINDOW, NOW).outcome, Some([0.0, 1.0, 0.0]));
 }
 
 #[test]
@@ -128,17 +167,7 @@ fn an_empty_window_reports_missing_rates_not_zero_ones() {
     assert_eq!(disputes.outcome, None);
     assert_eq!(disputes.resolution_p50, None);
     // The "now" figures do not depend on the window.
-    assert_eq!(disputes.open_now, 3);
-}
-
-#[test]
-fn no_open_disputes_means_no_oldest_age() {
-    let data = DisputeData {
-        disputes: vec![resolved("d", 1_000, Status::Settled, 1_100)],
-        taken: Vec::new(),
-    };
-
-    assert_eq!(summarise(&data, WINDOW, NOW).open_oldest_age, None);
+    assert_eq!(disputes.open.len(), 3);
 }
 
 #[test]
@@ -188,7 +217,12 @@ fn the_global_report_names_every_figure_of_the_spec() {
             "disputes.resolution_p50",
             "disputes.resolution_p90",
             "disputes.open_now",
-            "disputes.open_oldest_age",
+            "disputes.open.1.id",
+            "disputes.open.1.age",
+            "disputes.open.2.id",
+            "disputes.open.2.age",
+            "disputes.open.3.id",
+            "disputes.open.3.age",
         ]
     );
 }
@@ -238,12 +272,10 @@ fn a_monthly_report_leaves_the_now_figures_out() {
 fn an_instance_slice_keeps_the_now_figures() {
     let metrics = report(&dataset(), WINDOW, NOW, Some(Dimension::Instance));
 
-    assert_eq!(metrics.len(), 17);
+    assert_eq!(metrics.len(), 16 + 6);
     assert_eq!(metrics[0].name, "disputes.Alpha (aaaaaaaa).opened");
-    assert_eq!(
-        metrics[16].name,
-        "disputes.Alpha (aaaaaaaa).open_oldest_age"
-    );
+    assert_eq!(metrics[16].name, "disputes.Alpha (aaaaaaaa).open.1.id");
+    assert_eq!(metrics[16].value, Value::Text("d1".into()));
 }
 
 #[test]
