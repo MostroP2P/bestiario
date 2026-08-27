@@ -340,12 +340,6 @@ impl Settings {
         }
         Ok(())
     }
-
-    /// The dev fee share to assume for `pubkey`: its override if it has one,
-    /// otherwise the global default.
-    pub fn dev_fee_percentage_for(&self, pubkey: &str) -> f64 {
-        self.assumptions.dev_fee_percentage_for(pubkey)
-    }
 }
 
 impl AssumptionSettings {
