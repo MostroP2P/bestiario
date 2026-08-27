@@ -267,7 +267,9 @@ dated by the moment they did: total, average and p50/p90 ticket, the
 largest order, the size buckets and the maker's side. Fiat figures are per
 currency and cover fixed-amount orders only — a range order names no single
 amount, so it has sats to add and no fiat to add. `--by` slices by `kind`,
-`fiat`, `instance` or `period`:
+`fiat`, `instance` or `period`, one block per slice that completed
+something in the window — only completed orders are read, so the cost of
+a week's report is a week's orders, not the history:
 
 ```console
 $ bestiario stats volume --by kind --from 2026-08-23 --until 2026-08-27
@@ -275,19 +277,6 @@ $ bestiario stats volume --by kind --from 2026-08-23 --until 2026-08-27
 ┌─────────────────────────────────┬────────────┐
 │ metric                          ┆ value      │
 ╞═════════════════════════════════╪════════════╡
-│ volume.buy.sats                 ┆ 0 sats     │
-│ volume.buy.completed            ┆ 0          │
-│ volume.buy.ticket_avg           ┆ —          │
-│ volume.buy.ticket_p50           ┆ —          │
-│ volume.buy.ticket_p90           ┆ —          │
-│ volume.buy.largest              ┆ —          │
-│ volume.buy.size.lt_10k          ┆ 0          │
-│ volume.buy.size.10k_50k         ┆ 0          │
-│ volume.buy.size.50k_200k        ┆ 0          │
-│ volume.buy.size.200k_1m         ┆ 0          │
-│ volume.buy.size.gt_1m           ┆ 0          │
-│ volume.buy.buy_sats             ┆ 0 sats     │
-│ volume.buy.sell_sats            ┆ 0 sats     │
 │ volume.sell.sats                ┆ 1361 sats  │
 │ volume.sell.completed           ┆ 1          │
 │ volume.sell.ticket_avg          ┆ 1361 sats  │

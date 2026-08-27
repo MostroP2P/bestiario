@@ -46,8 +46,11 @@ pub async fn report(
     convert_to: Option<&str>,
     now: i64,
 ) -> Result<Report> {
-    let orders = load::activity::orders(pool, &query.scope).await?;
     let window = Window::new(query.range.from(), query.range.until());
+    // Only what the window can count: every §6.2 figure is over the orders
+    // that reached `success` inside it, and a month slice is inside it too.
+    let orders =
+        load::activity::completed_in(pool, &query.scope, window.from, window.until).await?;
     let book = match convert_to {
         Some(_) => Some(
             load::rates::book(pool)
