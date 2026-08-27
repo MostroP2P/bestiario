@@ -479,3 +479,142 @@ fn per_instance_overrides_are_ordered_deterministically() {
     assert_eq!(keys, vec![&a, &b]);
     let _: &BTreeMap<String, f64> = &settings.assumptions.dev_fee_percentage;
 }
+
+/// The NIP-19 encoding of the pubkey in [`VALID`], derived rather than
+/// pasted so the test cannot drift from the fixture.
+fn valid_npub() -> String {
+    use nostr_sdk::prelude::{PublicKey, ToBech32};
+    PublicKey::from_hex("82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390")
+        .expect("fixture pubkey is valid hex")
+        .to_bech32()
+        .expect("every pubkey has an npub form")
+}
+
+#[test]
+fn accepts_an_npub_instance_and_folds_it_to_hex() {
+    // Arrange
+    let npub = valid_npub();
+    let toml = with_line("instances", &format!(r#"instances = ["{npub}"]"#));
+
+    // Act
+    let settings = Settings::from_toml_str(&toml).expect("an npub is accepted");
+
+    // Assert
+    assert_eq!(
+        settings.indexer.instances,
+        ["82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390"]
+    );
+}
+
+#[test]
+fn accepts_a_mix_of_hex_and_npub_instances() {
+    let npub = valid_npub();
+    let other = "1".repeat(64);
+    let toml = with_line(
+        "instances",
+        &format!(r#"instances = ["{other}", "{npub}"]"#),
+    );
+
+    let settings = Settings::from_toml_str(&toml).expect("mixed encodings are accepted");
+
+    assert_eq!(
+        settings.indexer.instances,
+        [
+            other.as_str(),
+            "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390"
+        ]
+    );
+}
+
+#[test]
+fn accepts_an_npub_with_surrounding_whitespace_and_uppercase() {
+    // bech32 is case-insensitive; an operator pasting an all-uppercase npub
+    // should be treated like one pasting uppercase hex.
+    let npub = valid_npub().to_uppercase();
+    let toml = with_line("instances", &format!(r#"instances = ["  {npub} "]"#));
+
+    let settings = Settings::from_toml_str(&toml).expect("uppercase npub is accepted");
+
+    assert_eq!(
+        settings.indexer.instances,
+        ["82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390"]
+    );
+}
+
+#[test]
+fn rejects_an_npub_with_a_bad_checksum() {
+    let mut npub = valid_npub();
+    npub.pop();
+    npub.push('x');
+    let error = expect_invalid(&with_line(
+        "instances",
+        &format!(r#"instances = ["{npub}"]"#),
+    ));
+
+    assert!(
+        matches!(&error, ValidationError::PubkeyNotNpub { pubkey, .. } if *pubkey == npub),
+        "expected PubkeyNotNpub, got {error:?}"
+    );
+}
+
+#[test]
+fn rejects_a_bech32_string_that_is_not_an_npub() {
+    // `nsec1…` and `note1…` are valid bech32 but are not public keys; the
+    // error should say so rather than complain about hex characters.
+    let nsec = {
+        use nostr_sdk::prelude::{Keys, ToBech32};
+        Keys::generate().secret_key().to_bech32().expect("nsec")
+    };
+    let error = expect_invalid(&with_line(
+        "instances",
+        &format!(r#"instances = ["{nsec}"]"#),
+    ));
+
+    assert!(
+        matches!(error, ValidationError::PubkeyNotNpub { .. }),
+        "expected PubkeyNotNpub, got {error:?}"
+    );
+}
+
+#[test]
+fn accepts_a_per_instance_override_keyed_by_npub_and_looks_it_up_by_hex() {
+    let npub = valid_npub();
+    let toml = format!("{VALID}\n[assumptions.dev_fee_percentage]\n\"{npub}\" = 0.5\n");
+
+    let settings = Settings::from_toml_str(&toml).expect("npub override key is accepted");
+
+    assert_eq!(
+        settings.assumptions.dev_fee_percentage,
+        BTreeMap::from([(
+            "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390".to_string(),
+            0.5
+        )])
+    );
+    assert_eq!(
+        settings.dev_fee_percentage_for(
+            "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390"
+        ),
+        0.5
+    );
+}
+
+#[test]
+fn rejects_a_per_instance_override_given_both_as_hex_and_as_npub() {
+    // While migrating a file from hex to npub an operator may leave both
+    // spellings in place with different values. Neither has precedence, so
+    // the collision is reported rather than one value silently winning.
+    let npub = valid_npub();
+    let hex = "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390";
+    let toml =
+        format!("{VALID}\n[assumptions.dev_fee_percentage]\n\"{hex}\" = 0.5\n\"{npub}\" = 0.6\n");
+
+    let error = expect_invalid(&toml);
+
+    assert_eq!(
+        error,
+        ValidationError::DuplicateDevFeeOverride {
+            pubkey: hex.to_string(),
+            spellings: vec![hex.to_string(), npub],
+        }
+    );
+}
