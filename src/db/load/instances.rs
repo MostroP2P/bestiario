@@ -1,5 +1,12 @@
 //! Instances as the bestiary sees them (`docs/SPEC.md` §6.5): the
-//! `instances` row joined to the latest kind 38385 the instance published.
+//! `instances` row plus what its kind 38385 versions have said about it.
+//!
+//! Each optional field is taken from the *latest version that published
+//! it*, not from the latest version wholesale. An instance republishes its
+//! info with whatever tags it has at hand, and a newer event that omits
+//! `fee` is saying nothing about the fee — the same rule `fee_in_force`
+//! applies in `repo::instance_info`. Selecting the newest row as a whole
+//! would let a sparse republication erase a fee the instance still charges.
 
 use sqlx::{Executor, QueryBuilder, Sqlite};
 
@@ -16,19 +23,22 @@ pub async fn profiles<'e, E>(executor: E, scope: &Scope) -> Result<Vec<Profile>,
 where
     E: Executor<'e, Database = Sqlite>,
 {
-    let mut query = QueryBuilder::<Sqlite>::new(
+    let mut query = QueryBuilder::<Sqlite>::new(format!(
         "SELECT i.pubkey, i.name, i.first_seen_at, i.last_seen_at,
-                info.mostro_version, info.protocol_version, info.fee,
-                info.min_order_amount, info.max_order_amount,
-                info.fiat_currencies, info.ln_networks, info.bond_enabled
+                {mostro_version}, {protocol_version}, {fee},
+                {min_order_amount}, {max_order_amount},
+                {fiat_currencies}, {ln_networks}, {bond_enabled}
          FROM instances i
-         LEFT JOIN instance_info info ON info.event_id = (
-             SELECT latest.event_id FROM instance_info latest
-             WHERE latest.pubkey = i.pubkey
-             ORDER BY latest.created_at DESC, latest.event_id ASC LIMIT 1
-         )
          WHERE 1 = 1",
-    );
+        mostro_version = latest_published("mostro_version"),
+        protocol_version = latest_published("protocol_version"),
+        fee = latest_published("fee"),
+        min_order_amount = latest_published("min_order_amount"),
+        max_order_amount = latest_published("max_order_amount"),
+        fiat_currencies = latest_published("fiat_currencies"),
+        ln_networks = latest_published("ln_networks"),
+        bond_enabled = latest_published("bond_enabled"),
+    ));
     scope.apply_instance(&mut query, "i");
     query.push(" ORDER BY i.first_seen_at, i.pubkey");
 
@@ -39,6 +49,19 @@ where
         .into_iter()
         .map(Row::into_profile)
         .collect())
+}
+
+/// The subquery for one optional field: its value in the latest 38385 of
+/// the instance that carried it, aliased to the column's own name.
+///
+/// `column` is one of this module's own literals, never input: it is
+/// spliced into SQL.
+fn latest_published(column: &str) -> String {
+    format!(
+        "(SELECT v.{column} FROM instance_info v
+           WHERE v.pubkey = i.pubkey AND v.{column} IS NOT NULL
+           ORDER BY v.created_at DESC, v.event_id ASC LIMIT 1) AS {column}"
+    )
 }
 
 #[derive(sqlx::FromRow)]

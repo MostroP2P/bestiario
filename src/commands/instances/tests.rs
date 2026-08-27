@@ -73,6 +73,7 @@ async fn seeded() -> SqlitePool {
 
 fn query(pubkey: Option<&str>) -> Query {
     Query {
+        network_narrowed: false,
         range: Range::resolve(Some(FROM), Some(UNTIL), NOW).expect("window"),
         scope: Scope {
             pubkey: pubkey.map(str::to_string),
@@ -129,6 +130,20 @@ async fn the_profile_reports_the_instance_and_its_share() {
     assert_eq!(value(&report, "volume.sats"), &Value::Sats(300));
     assert_eq!(value(&report, "share.orders"), &Value::Ratio(0.5));
     assert_eq!(value(&report, "share.volume"), &Value::Ratio(0.3));
+}
+
+#[tokio::test]
+async fn a_network_narrowed_profile_reports_disputes_as_missing() {
+    let pool = seeded().await;
+    let query = Query {
+        network_narrowed: true,
+        ..query(Some(ALPHA))
+    };
+
+    let report = profile_report(&pool, &query, NOW).await.expect("report");
+
+    assert_eq!(value(&report, "disputes.opened"), &Value::Missing);
+    assert_eq!(value(&report, "orders.completed"), &Value::Count(1));
 }
 
 #[tokio::test]

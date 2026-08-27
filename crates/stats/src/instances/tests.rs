@@ -159,7 +159,7 @@ fn the_profile_view_reports_the_instance_share_of_the_network() {
         &own,
         &network,
         &DevFeeData::default(),
-        &DisputeData::default(),
+        Some(&DisputeData::default()),
         WINDOW,
         NOW,
     );
@@ -183,7 +183,7 @@ fn a_share_of_nothing_is_missing() {
         &[],
         &[],
         &DevFeeData::default(),
-        &DisputeData::default(),
+        Some(&DisputeData::default()),
         WINDOW,
         NOW,
     );
@@ -199,10 +199,27 @@ fn every_bestiary_metric_is_observed() {
         &[],
         &[],
         &DevFeeData::default(),
-        &DisputeData::default(),
+        Some(&DisputeData::default()),
         WINDOW,
         NOW,
     );
 
     assert!(metrics.iter().all(|metric| !metric.is_inferred()));
+}
+
+#[test]
+fn a_profile_whose_scope_cannot_reach_disputes_reports_them_as_missing() {
+    let metrics = profile(
+        &alpha(),
+        &[],
+        &[],
+        &DevFeeData::default(),
+        None,
+        WINDOW,
+        NOW,
+    );
+
+    assert_eq!(value(&metrics, "disputes.opened"), &Value::Missing);
+    assert_eq!(value(&metrics, "disputes.open_now"), &Value::Missing);
+    assert_eq!(value(&metrics, "orders.created"), &Value::Count(0));
 }

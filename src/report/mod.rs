@@ -72,6 +72,27 @@ impl Report {
             Format::Json => json::render(self),
         }
     }
+
+    /// [`render`](Self::render), with the table pivoted: one row per
+    /// `<prefix>.<key>`, one column per name in `columns`.
+    ///
+    /// For the views whose natural shape is a grid — one row per instance
+    /// with its figures side by side — where a row per metric would stack
+    /// seven lines per instance. The JSON is unchanged: it is the same flat
+    /// record list every report emits, and the pivot is a way of reading
+    /// it, not a second contract.
+    pub fn render_rows(
+        &self,
+        format: Format,
+        row_label: &str,
+        prefix: &str,
+        columns: &[&str],
+    ) -> String {
+        match format {
+            Format::Table => table::render_rows(self, row_label, prefix, columns),
+            Format::Json => json::render(self),
+        }
+    }
 }
 
 /// How a metric name reads in a table: `(inf)` after an inferred one.

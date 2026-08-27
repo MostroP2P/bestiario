@@ -21,12 +21,17 @@ pub async fn run(context: &Context<'_>, now: i64) -> Result<()> {
 
 pub async fn report(pool: &SqlitePool, query: &Query, now: i64) -> Result<Report> {
     let orders = load::activity::orders(pool, &query.scope).await?;
-    let disputes = load::disputes::load(pool, &query.scope).await?;
+    // Disputes carry no network tag: under `--network` the count is missing.
+    let disputes = if query.network_narrowed {
+        None
+    } else {
+        Some(load::disputes::load(pool, &query.scope).await?)
+    };
     let window = Window::new(query.range.from(), query.range.until());
 
     Ok(Report::new(
         query.range,
-        summary::report(&orders, &disputes, window, now),
+        summary::report(&orders, disputes.as_ref(), window, now),
         now,
     ))
 }
