@@ -24,6 +24,8 @@ pub mod sync;
 
 use crate::cli::{Cli, Command, StatsCommand};
 use crate::config::Settings;
+use crate::db::load::Scope;
+use crate::stats::bucket::Coverage;
 
 /// What every command is handed: the validated configuration, an open and
 /// migrated pool, and the invocation itself.
@@ -85,6 +87,22 @@ async fn dispatch(context: &Context<'_>) -> Result<()> {
             }
         },
     }
+}
+
+/// How far back the archive can speak for a report reading `kinds`.
+///
+/// Read once per report rather than assumed: a bucket before the first
+/// event stored of the kinds it reads is a period nobody indexed, and
+/// printing zeros for it would draw a flat line the network never
+/// published (`bestiario_stats::bucket`).
+///
+/// `scope` is the report's own, the one its loader read with, so a
+/// `--instance` report is told how far back *that* instance was indexed
+/// rather than how far back anything was.
+pub async fn coverage(pool: &SqlitePool, kinds: &[u16], scope: &Scope) -> Result<Coverage> {
+    Ok(Coverage::from_earliest(
+        crate::db::repo::events::earliest_created_at(pool, kinds, scope).await?,
+    ))
 }
 
 /// The wall clock every command reports against.

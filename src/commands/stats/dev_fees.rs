@@ -10,6 +10,7 @@ use crate::cli::InstanceOrPeriod;
 use crate::commands::Context;
 use crate::config::AssumptionSettings;
 use crate::db::load;
+use crate::ingest::parse;
 use crate::report::{Format, Report};
 use crate::stats::Window;
 use crate::stats::dev_fees::{self, Dimension};
@@ -46,7 +47,18 @@ pub async fn report(
     let data = load::dev_fees::load(pool, &query.scope).await?;
     let window = Window::new(query.range.from(), query.range.until());
     let pct = |pubkey: &str| assumptions.dev_fee_percentage_for(pubkey);
-    let metrics = dev_fees::report(&data, window, dimension, &pct);
+    let metrics = dev_fees::report(
+        &data,
+        window,
+        dimension,
+        &pct,
+        super::super::coverage(
+            pool,
+            &[parse::dev_fee::KIND, parse::order::KIND],
+            &query.scope,
+        )
+        .await?,
+    );
 
     Ok(Report::new(query.range, metrics, now))
 }
@@ -55,6 +67,7 @@ fn dimension(by: InstanceOrPeriod) -> Dimension {
     match by {
         InstanceOrPeriod::Instance => Dimension::Instance,
         InstanceOrPeriod::Period => Dimension::Month,
+        InstanceOrPeriod::Day => Dimension::Day,
     }
 }
 

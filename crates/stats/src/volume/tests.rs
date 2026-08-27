@@ -1,6 +1,9 @@
 //! A hand-built dataset and hand-computed expected values (`docs/SPEC.md` §12).
 
 use super::*;
+
+/// These datasets are invented whole, so the archive covers them all.
+const ALL: Coverage = Coverage::since(0);
 use crate::activity::Origin;
 
 const WINDOW: Window = Window {
@@ -203,7 +206,7 @@ fn no_completed_orders_is_zero_volume_not_a_missing_one() {
 
 #[test]
 fn the_global_report_names_the_figures_in_order() {
-    let names: Vec<String> = report(&dataset(), WINDOW, None, None)
+    let names: Vec<String> = report(&dataset(), WINDOW, None, None, ALL)
         .into_iter()
         .map(|metric| metric.name)
         .collect();
@@ -232,7 +235,7 @@ fn the_global_report_names_the_figures_in_order() {
 
 #[test]
 fn a_fiat_total_carries_its_currency() {
-    let metrics = report(&dataset(), WINDOW, None, None);
+    let metrics = report(&dataset(), WINDOW, None, None, ALL);
     let total = metrics
         .iter()
         .find(|metric| metric.name == "volume.fiat.USD.total")
@@ -249,14 +252,14 @@ fn a_fiat_total_carries_its_currency() {
 
 #[test]
 fn slices_put_the_key_in_the_name() {
-    let by_kind = report(&dataset(), WINDOW, Some(Dimension::Kind), None);
+    let by_kind = report(&dataset(), WINDOW, Some(Dimension::Kind), None, ALL);
     assert_eq!(by_kind[0].name, "volume.buy.sats");
     assert_eq!(by_kind[0].value, Value::Sats(155_000));
 
-    let by_fiat = report(&dataset(), WINDOW, Some(Dimension::Fiat), None);
+    let by_fiat = report(&dataset(), WINDOW, Some(Dimension::Fiat), None, ALL);
     assert_eq!(by_fiat[0].name, "volume.ARS.sats");
 
-    let by_instance = report(&dataset(), WINDOW, Some(Dimension::Instance), None);
+    let by_instance = report(&dataset(), WINDOW, Some(Dimension::Instance), None, ALL);
     assert_eq!(by_instance[0].name, "volume.Alpha (pk).sats");
 
     // 2026-07-01 to 2026-09-01: two months.
@@ -265,6 +268,7 @@ fn slices_put_the_key_in_the_name() {
         Window::new(1_782_864_000, 1_788_220_800),
         Some(Dimension::Month),
         None,
+        ALL,
     );
     assert_eq!(by_month[0].name, "volume.2026-07.sats");
     assert_eq!(by_month.len(), 2 * 13);
@@ -273,7 +277,7 @@ fn slices_put_the_key_in_the_name() {
 #[test]
 fn every_observed_volume_metric_is_observed() {
     assert!(
-        report(&dataset(), WINDOW, None, None)
+        report(&dataset(), WINDOW, None, None, ALL)
             .iter()
             .all(|metric| !metric.is_inferred())
     );
@@ -334,10 +338,10 @@ fn a_conversion_appends_its_inferred_rows_after_the_observed_ones() {
     };
 
     // Act
-    let metrics = report(&dataset(), WINDOW, None, Some(conversion));
+    let metrics = report(&dataset(), WINDOW, None, Some(conversion), ALL);
 
     // Assert: the observed block is untouched, then the four inferred rows.
-    let observed = report(&dataset(), WINDOW, None, None);
+    let observed = report(&dataset(), WINDOW, None, None, ALL);
     assert_eq!(&metrics[..observed.len()], &observed[..]);
     assert_eq!(metrics.len(), observed.len() + 4);
     let total = &metrics[observed.len()];
@@ -355,7 +359,13 @@ fn a_conversion_is_reported_once_per_slice() {
         code: "USD",
     };
 
-    let by_kind = report(&dataset(), WINDOW, Some(Dimension::Kind), Some(conversion));
+    let by_kind = report(
+        &dataset(),
+        WINDOW,
+        Some(Dimension::Kind),
+        Some(conversion),
+        ALL,
+    );
 
     let names: Vec<&str> = by_kind
         .iter()

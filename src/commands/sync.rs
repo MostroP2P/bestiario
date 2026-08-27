@@ -400,12 +400,13 @@ impl<'a> Sync<'a> {
     /// One filter set per relay, for `kinds`, each resumed from its own
     /// cursor.
     async fn targets(&self, kinds: &[u16]) -> Result<Vec<(RelayUrl, Vec<Filter>)>> {
+        let now = chrono::Utc::now().timestamp();
         let mut targets = Vec::new();
 
         for relay in self.client.relays().to_vec() {
             let mut per_relay = Vec::new();
             for &kind in kinds {
-                per_relay.push(self.filter(&relay, kind).await?);
+                per_relay.push(self.filter(&relay, kind, now).await?);
             }
             targets.push((relay, per_relay));
         }
@@ -414,15 +415,28 @@ impl<'a> Sync<'a> {
     }
 
     /// The filter for one `(relay, kind)`, resumed from its cursor.
-    async fn filter(&self, relay: &RelayUrl, kind: u16) -> Result<Filter> {
+    ///
+    /// Asking is also recorded: a subscription with no cursor asks the relay
+    /// for everything it holds, which is what makes an empty answer a fact
+    /// about the network rather than a kind nobody looked for. See
+    /// [`repo::indexed_kinds`].
+    async fn filter(&self, relay: &RelayUrl, kind: u16, now: i64) -> Result<Filter> {
         let cursor = repo::sync_state::get(self.pool, &relay.to_string(), kind)
             .await
             .with_context(|| format!("reading the cursor for {relay} kind {kind}"))?
             .map(|cursor| cursor.last_created_at);
 
-        let range = resume_from(cursor, self.overlap).map(Range::onwards);
+        let from = resume_from(cursor, self.overlap);
+        repo::indexed_kinds::record(self.pool, kind, from.unwrap_or(0), now)
+            .await
+            .with_context(|| format!("recording that kind {kind} was indexed"))?;
 
-        Ok(filters::for_kind(kind, &self.authors, range, None))
+        Ok(filters::for_kind(
+            kind,
+            &self.authors,
+            from.map(Range::onwards),
+            None,
+        ))
     }
 }
 

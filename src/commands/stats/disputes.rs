@@ -7,6 +7,7 @@ use sqlx::SqlitePool;
 use crate::cli::DisputeDimension;
 use crate::commands::Context;
 use crate::db::load;
+use crate::ingest::parse;
 use crate::network::Network;
 use crate::report::{Format, Report};
 use crate::stats::Window;
@@ -34,7 +35,20 @@ pub async fn report(
 ) -> Result<Report> {
     let data = load::disputes::load(pool, &query.scope).await?;
     let window = Window::new(query.range.from(), query.range.until());
-    let metrics = disputes::report(&data, window, now, dimension);
+    let metrics = disputes::report(
+        &data,
+        window,
+        now,
+        dimension,
+        super::super::coverage(
+            pool,
+            // The rate divides disputes by the orders that left pending, so
+            // a bucket is only answerable when both histories reach it.
+            &[parse::dispute::KIND, parse::order::KIND],
+            &query.scope,
+        )
+        .await?,
+    );
 
     Ok(Report::new(query.range, metrics, now))
 }
@@ -60,6 +74,7 @@ fn dimension(by: DisputeDimension) -> Dimension {
         DisputeDimension::Initiator => Dimension::Initiator,
         DisputeDimension::Instance => Dimension::Instance,
         DisputeDimension::Period => Dimension::Month,
+        DisputeDimension::Day => Dimension::Day,
     }
 }
 

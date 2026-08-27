@@ -6,6 +6,9 @@
 
 use super::*;
 
+/// These datasets are invented whole, so the archive covers them all.
+const ALL: Coverage = Coverage::since(0);
+
 const WINDOW: Window = Window {
     from: 1_000,
     until: 2_000,
@@ -235,7 +238,7 @@ fn the_weekday_histogram_starts_on_monday() {
 
 #[test]
 fn the_global_report_names_the_nine_figures_of_the_spec() {
-    let names: Vec<String> = report(&dataset(), WINDOW, NOW, None)
+    let names: Vec<String> = report(&dataset(), WINDOW, NOW, None, ALL)
         .into_iter()
         .map(|metric| metric.name)
         .collect();
@@ -258,7 +261,7 @@ fn the_global_report_names_the_nine_figures_of_the_spec() {
 
 #[test]
 fn a_sliced_report_puts_the_slice_key_in_the_name() {
-    let metrics = report(&dataset(), WINDOW, NOW, Some(Dimension::Kind));
+    let metrics = report(&dataset(), WINDOW, NOW, Some(Dimension::Kind), ALL);
 
     assert_eq!(metrics[0].name, "orders.buy.created");
     assert_eq!(metrics[0].value, Value::Count(6));
@@ -266,7 +269,7 @@ fn a_sliced_report_puts_the_slice_key_in_the_name() {
 
 #[test]
 fn a_missing_rate_is_reported_as_missing_not_as_zero() {
-    let metrics = report(&dataset(), Window::new(5_000, 6_000), NOW, None);
+    let metrics = report(&dataset(), Window::new(5_000, 6_000), NOW, None, ALL);
     let rate = metrics
         .iter()
         .find(|metric| metric.name == "orders.completion_rate")
@@ -281,7 +284,7 @@ fn a_monthly_report_has_one_block_per_month_in_the_window() {
     let window = Window::new(1_782_864_000, 1_788_220_800);
     let orders = vec![order("x", 1_782_864_000 + 86_400, Status::Pending)];
 
-    let names: Vec<String> = report(&orders, window, NOW, Some(Dimension::Month))
+    let names: Vec<String> = report(&orders, window, NOW, Some(Dimension::Month), ALL)
         .into_iter()
         .map(|metric| metric.name)
         .collect();
@@ -301,7 +304,7 @@ fn every_activity_metric_is_observed() {
     // §6.1 is all counts of published events; nothing here is inferred, and
     // a stray `(inf)` would be a lie about the source.
     assert!(
-        report(&dataset(), WINDOW, NOW, None)
+        report(&dataset(), WINDOW, NOW, None, ALL)
             .iter()
             .all(|metric| !metric.is_inferred())
     );
@@ -309,7 +312,7 @@ fn every_activity_metric_is_observed() {
 
 #[test]
 fn a_histogram_report_names_every_bucket_twice() {
-    let names: Vec<String> = report(&dataset(), WINDOW, NOW, Some(Dimension::Hour))
+    let names: Vec<String> = report(&dataset(), WINDOW, NOW, Some(Dimension::Hour), ALL)
         .into_iter()
         .map(|metric| metric.name)
         .collect();
@@ -319,7 +322,7 @@ fn a_histogram_report_names_every_bucket_twice() {
     assert_eq!(names[1], "orders.hour.00.completed");
     assert_eq!(names[47], "orders.hour.23.completed");
 
-    let weekday = report(&dataset(), WINDOW, NOW, Some(Dimension::Weekday));
+    let weekday = report(&dataset(), WINDOW, NOW, Some(Dimension::Weekday), ALL);
     assert_eq!(weekday.len(), 14);
     assert_eq!(weekday[0].name, "orders.weekday.mon.created");
 }
@@ -335,9 +338,9 @@ fn the_grouping_slicer_has_nothing_to_say_about_windows_or_histograms() {
 
 #[test]
 fn slicing_by_status_fiat_and_method_each_name_the_slice() {
-    let by_status = report(&dataset(), WINDOW, NOW, Some(Dimension::Status));
-    let by_fiat = report(&dataset(), WINDOW, NOW, Some(Dimension::Fiat));
-    let by_method = report(&dataset(), WINDOW, NOW, Some(Dimension::Method));
+    let by_status = report(&dataset(), WINDOW, NOW, Some(Dimension::Status), ALL);
+    let by_fiat = report(&dataset(), WINDOW, NOW, Some(Dimension::Fiat), ALL);
+    let by_method = report(&dataset(), WINDOW, NOW, Some(Dimension::Method), ALL);
 
     assert_eq!(by_status[0].name, "orders.canceled.created");
     assert_eq!(by_fiat[0].name, "orders.ARS.created");
@@ -365,6 +368,7 @@ fn a_monthly_delta_compares_against_the_calendar_month_before_not_the_same_numbe
         Window::new(mar_1, apr_1),
         NOW,
         Some(Dimension::Month),
+        ALL,
     )
     .into_iter()
     .find(|metric| metric.name == "orders.2026-03.created_delta")
@@ -382,4 +386,185 @@ fn a_summary_with_no_previous_window_reports_no_deltas() {
     assert_eq!(activity.created, 6);
     assert_eq!(activity.created_delta, None);
     assert_eq!(activity.completed_delta, None);
+}
+
+// Daily buckets — the `--by day` slice (issue #53).
+
+/// 2026-08-26T00:00:00Z, and the day after it.
+const AUG_26: i64 = 1_787_702_400;
+const DAY: i64 = 86_400;
+
+fn created_on(id: &str, at: i64) -> Order {
+    order(id, at, Status::Pending)
+}
+
+fn day_names(metrics: &[Metric]) -> Vec<&str> {
+    metrics
+        .iter()
+        .map(|metric| metric.name.as_str())
+        .filter(|name| name.ends_with(".created"))
+        .collect()
+}
+
+fn day_value<'a>(metrics: &'a [Metric], name: &str) -> &'a Value {
+    &metrics
+        .iter()
+        .find(|metric| metric.name == name)
+        .unwrap_or_else(|| panic!("`{name}` is in the report"))
+        .value
+}
+
+#[test]
+fn a_day_holds_the_orders_of_its_own_utc_day_to_the_second() {
+    // Arrange: the last second of the 26th, the first of the 27th, and the
+    // last of the 27th. UTC throughout: no zone, no summer time.
+    let orders = vec![
+        created_on("last-second-of-26", AUG_26 + DAY - 1),
+        created_on("first-second-of-27", AUG_26 + DAY),
+        created_on("last-second-of-27", AUG_26 + 2 * DAY - 1),
+    ];
+    let window = Window::new(AUG_26, AUG_26 + 2 * DAY);
+
+    // Act
+    let metrics = report(&orders, window, NOW, Some(Dimension::Day), ALL);
+
+    // Assert
+    assert_eq!(
+        day_value(&metrics, "orders.2026-08-26.created"),
+        &Value::Count(1)
+    );
+    assert_eq!(
+        day_value(&metrics, "orders.2026-08-27.created"),
+        &Value::Count(2)
+    );
+}
+
+#[test]
+fn every_day_of_the_window_gets_a_block_even_the_quiet_ones() {
+    // A day nobody traded is a fact: reported as zero, not skipped, so a
+    // chart cannot draw a straight line across the gap.
+    let orders = vec![created_on("a", AUG_26 + 100)];
+    let window = Window::new(AUG_26, AUG_26 + 3 * DAY);
+
+    let metrics = report(&orders, window, NOW, Some(Dimension::Day), ALL);
+
+    assert_eq!(
+        day_names(&metrics),
+        [
+            "orders.2026-08-26.created",
+            "orders.2026-08-27.created",
+            "orders.2026-08-28.created"
+        ]
+    );
+    assert_eq!(
+        day_value(&metrics, "orders.2026-08-27.created"),
+        &Value::Count(0),
+        "quiet, not absent"
+    );
+}
+
+#[test]
+fn a_day_before_the_archive_begins_is_missing_rather_than_zero() {
+    // The archive starts on the 27th. Reporting the 26th as zero would say
+    // the network published nothing that day, which nobody knows.
+    let orders = vec![created_on("a", AUG_26 + DAY + 100)];
+    let window = Window::new(AUG_26, AUG_26 + 2 * DAY);
+
+    let metrics = report(
+        &orders,
+        window,
+        NOW,
+        Some(Dimension::Day),
+        Coverage::since(AUG_26 + DAY),
+    );
+
+    assert_eq!(
+        day_value(&metrics, "orders.2026-08-26.created"),
+        &Value::Missing,
+        "not zero"
+    );
+    assert_eq!(
+        day_value(&metrics, "orders.2026-08-27.created"),
+        &Value::Count(1)
+    );
+    assert_eq!(
+        day_names(&metrics).len(),
+        2,
+        "the day keeps its row, and its name"
+    );
+}
+
+#[test]
+fn a_withheld_day_keeps_every_row_of_a_day_that_was_counted() {
+    let window = Window::new(AUG_26, AUG_26 + 2 * DAY);
+
+    let metrics = report(
+        &[],
+        window,
+        NOW,
+        Some(Dimension::Day),
+        Coverage::since(AUG_26 + DAY),
+    );
+
+    let rows = |day: &str| -> Vec<String> {
+        metrics
+            .iter()
+            .filter_map(|metric| metric.name.strip_prefix(&format!("orders.{day}.")))
+            .map(str::to_string)
+            .collect()
+    };
+    assert_eq!(rows("2026-08-26"), rows("2026-08-27"));
+    assert!(!rows("2026-08-26").is_empty());
+}
+
+#[test]
+fn a_day_is_compared_against_the_day_before_it() {
+    // Two on the 26th, three on the 27th: half as many again.
+    let orders = vec![
+        created_on("a", AUG_26 + 10),
+        created_on("b", AUG_26 + 20),
+        created_on("c", AUG_26 + DAY + 10),
+        created_on("d", AUG_26 + DAY + 20),
+        created_on("e", AUG_26 + DAY + 30),
+    ];
+    let window = Window::new(AUG_26, AUG_26 + 2 * DAY);
+
+    let metrics = report(&orders, window, NOW, Some(Dimension::Day), ALL);
+
+    assert!(matches!(
+        day_value(&metrics, "orders.2026-08-27.created_delta"),
+        Value::Ratio(delta) if (delta - 0.5).abs() < 1e-12
+    ));
+}
+
+#[test]
+fn the_first_day_of_the_archive_has_no_day_to_have_grown_from() {
+    let orders = vec![created_on("a", AUG_26 + 10)];
+    let window = Window::new(AUG_26, AUG_26 + 2 * DAY);
+
+    let metrics = report(
+        &orders,
+        window,
+        NOW,
+        Some(Dimension::Day),
+        Coverage::since(AUG_26),
+    );
+
+    assert_eq!(
+        day_value(&metrics, "orders.2026-08-26.created_delta"),
+        &Value::Missing,
+        "the day before it is a day nobody indexed"
+    );
+}
+
+#[test]
+fn a_daily_report_leaves_the_now_figures_out_as_a_monthly_one_does() {
+    let window = Window::new(AUG_26, AUG_26 + DAY);
+
+    let metrics = report(&dataset(), window, NOW, Some(Dimension::Day), ALL);
+
+    assert!(
+        !metrics.iter().any(|metric| metric.name.ends_with("_now")),
+        "a figure about now belongs to no day"
+    );
 }

@@ -13,10 +13,11 @@
 use std::collections::BTreeMap;
 
 use crate::activity::{self, Direction, Order, Status};
+use crate::bucket::{self, Coverage};
 use crate::metric::{Metric, Value};
 use crate::percentile::percentile;
 use crate::rates::RateBook;
-use crate::window::Window;
+use crate::window::{Period, Window};
 
 /// The size buckets of §6.2 — `<10k`, `10k–50k`, `50k–200k`, `200k–1M`,
 /// `>1M` — as `(label, inclusive upper bound in sats)`; the last one has
@@ -52,6 +53,10 @@ pub enum Dimension {
     Instance,
     /// Calendar months inside the window, each reported as its own window.
     Month,
+    /// Calendar days inside the window, likewise: one block per day, empty
+    /// days included, and days the archive predates reported as missing
+    /// rather than as zero (see [`crate::bucket`]).
+    Day,
 }
 
 /// The fiat side of one currency.
@@ -204,6 +209,7 @@ pub fn report(
     window: Window,
     dimension: Option<Dimension>,
     conversion: Option<Conversion<'_>>,
+    coverage: Coverage,
 ) -> Vec<Metric> {
     let block = |prefix: &str, orders: &[Order], window: Window| {
         let mut block = metrics(prefix, &summarise(orders, window));
@@ -218,17 +224,21 @@ pub fn report(
 
     match dimension {
         None => block("volume", orders, window),
-        Some(Dimension::Month) => window
-            .months()
-            .into_iter()
-            .flat_map(|(key, month)| block(&format!("volume.{key}"), orders, month))
-            .collect(),
+        Some(period @ (Dimension::Month | Dimension::Day)) => {
+            let period = match period {
+                Dimension::Day => Period::Day,
+                _ => Period::Month,
+            };
+            bucket::walk(window, period, coverage, |key, bucket, _| {
+                block(&format!("volume.{key}"), orders, bucket)
+            })
+        }
         Some(grouping) => {
             let by = match grouping {
                 Dimension::Kind => activity::Dimension::Kind,
                 Dimension::Fiat => activity::Dimension::Fiat,
                 Dimension::Instance => activity::Dimension::Instance,
-                Dimension::Month => unreachable!("handled above"),
+                Dimension::Month | Dimension::Day => unreachable!("handled above"),
             };
             activity::slice(orders, by)
                 .into_iter()

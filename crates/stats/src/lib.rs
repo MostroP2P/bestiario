@@ -30,6 +30,7 @@
 //! hand-computed expected value.
 
 pub mod activity;
+pub mod bucket;
 pub mod compare;
 pub mod dev_fees;
 pub mod disputes;
