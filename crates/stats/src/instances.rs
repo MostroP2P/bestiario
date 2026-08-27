@@ -93,13 +93,14 @@ pub fn list(profiles: &[Profile], orders: &[Order], window: Window, now: i64) ->
 ///
 /// `own` are the instance's orders and `network` everyone's, the instance
 /// included; the shares are `own / network`, or missing when the network
-/// did nothing.
+/// did nothing. `disputes` is `None` when the scope cannot reach them —
+/// see [`disputes::unavailable`] — and the block is reported as missing.
 pub fn profile(
     profile: &Profile,
     own: &[Order],
     network: &[Order],
     fees: &DevFeeData,
-    disputes: &DisputeData,
+    disputes: Option<&DisputeData>,
     window: Window,
     now: i64,
 ) -> Vec<Metric> {
@@ -115,10 +116,12 @@ pub fn profile(
         "dev_fees",
         &dev_fees::summarise(fees, window),
     ));
-    metrics.extend(disputes::metrics(
-        "disputes",
-        &disputes::summarise(disputes, window, now),
-    ));
+    metrics.extend(match disputes {
+        Some(disputes) => {
+            disputes::metrics("disputes", &disputes::summarise(disputes, window, now))
+        }
+        None => disputes::unavailable("disputes"),
+    });
 
     let network_activity = activity::summarise(network, window, now);
     metrics.push(Metric::observed(
