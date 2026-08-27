@@ -184,6 +184,31 @@ async fn orders_come_back_oldest_first() {
 }
 
 #[tokio::test]
+async fn completed_in_reads_only_the_orders_settled_inside_the_bounds() {
+    // Arrange: settled before, inside, and at the upper bound; one open.
+    let pool = migrated().await;
+    for (id, at) in [
+        ("before", T0 - 10),
+        ("inside", T0 + 10),
+        ("at_until", T0 + 100),
+    ] {
+        ingest(&pool, &version(id, ALPHA, at - 5, Status::Pending)).await;
+        ingest(&pool, &version(id, ALPHA, at, Status::Success)).await;
+    }
+    ingest(&pool, &version("open", ALPHA, T0 + 20, Status::Pending)).await;
+
+    // Act
+    let orders = completed_in(&pool, &mainnet(), T0, T0 + 100)
+        .await
+        .expect("load");
+
+    // Assert
+    let ids: Vec<&str> = orders.iter().map(|order| order.order_id.as_str()).collect();
+    assert_eq!(ids, ["inside"]);
+    assert_eq!(orders[0].success_at, Some(T0 + 10));
+}
+
+#[tokio::test]
 async fn price_type_and_range_come_from_the_first_version() {
     // Arrange: a market-price range order — `amt = 0`, `fa = [10, 100]` —
     // taken and settled at 21 000 sats for a fixed 50.
