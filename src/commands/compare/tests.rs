@@ -7,6 +7,7 @@ use crate::db::load::Scope;
 use crate::db::repo::events::{self, EventRecord};
 use crate::db::repo::{instances, orders};
 use crate::ingest::parse::order::{Direction, FiatAmount, OrderVersion, Status};
+use crate::ingest::pipeline::seed_fixtures;
 use crate::network::Network;
 use crate::stats::Value;
 
@@ -55,6 +56,7 @@ async fn settled(pool: &SqlitePool, id: &str, pubkey: &str, at: i64, sats: i64) 
 
 fn query() -> Query {
     Query {
+        network_narrowed: false,
         range: Range::resolve(Some(FROM), Some(UNTIL), NOW).expect("window"),
         scope: Scope {
             pubkey: None,
@@ -99,5 +101,79 @@ async fn one_row_per_instance_from_the_seeded_database() {
     assert_eq!(
         value(&report, &format!("compare.{BETA}.completed")),
         &Value::Count(1)
+    );
+}
+
+/// One row per instance of the real corpus. Hand-counted: Fostro testing
+/// completed the one `success` order (1361 sats, on regtest); Mostro Brasil
+/// had one canceled and nothing completed, so its rate is 0%; Mostro's
+/// four orders are all still open, so it has no rate at all.
+#[tokio::test]
+async fn the_comparison_over_the_real_corpus_matches_the_hand_count() {
+    // Arrange
+    let pool = connect_and_migrate("sqlite::memory:")
+        .await
+        .expect("migrate");
+    let now = 1_787_800_000;
+    seed_fixtures(&pool, now).await;
+    let query = Query {
+        network_narrowed: false,
+        range: Range::resolve(Some(1_787_500_000), Some(now), now).expect("window"),
+        scope: Scope {
+            pubkey: None,
+            networks: vec![Network::Mainnet, Network::Regtest],
+        },
+    };
+
+    // Act
+    let report = report(&pool, &query, now).await.expect("report");
+
+    // Assert
+    assert_eq!(
+        value(&report, "compare.Fostro testing (17b520bd).completed"),
+        &Value::Count(1)
+    );
+    assert_eq!(
+        value(&report, "compare.Fostro testing (17b520bd).volume_sats"),
+        &Value::Sats(1_361)
+    );
+    assert_eq!(
+        value(&report, "compare.Mostro Brasil (00037abd).completion_rate"),
+        &Value::Ratio(0.0)
+    );
+    assert_eq!(
+        value(&report, "compare.Mostro (82fa8cb9).completion_rate"),
+        &Value::Missing
+    );
+
+    // And the table is a grid: one line per instance, not seven.
+    let table = report.render_rows(Format::Table, "instance", "compare", &compare::COLUMNS);
+    let fostro: Vec<&str> = table
+        .lines()
+        .filter(|line| line.contains("Fostro testing"))
+        .collect();
+    assert_eq!(fostro.len(), 1, "{table}");
+    assert!(fostro[0].contains("1361 sats"), "{table}");
+}
+
+#[tokio::test]
+async fn a_network_narrowed_comparison_leaves_dispute_rates_missing() {
+    let pool = connect_and_migrate("sqlite::memory:")
+        .await
+        .expect("migrate");
+    settled(&pool, "a1", ALPHA, FROM + 100, 300).await;
+    instances::upsert(&pool, ALPHA, Some("Alpha"), FROM)
+        .await
+        .expect("alpha");
+    let query = Query {
+        network_narrowed: true,
+        ..query()
+    };
+
+    let report = report(&pool, &query, NOW).await.expect("report");
+
+    assert_eq!(
+        value(&report, "compare.Alpha (82fa8cb9).dispute_rate"),
+        &Value::Missing
     );
 }

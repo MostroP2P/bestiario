@@ -13,21 +13,35 @@ use crate::metric::{Metric, Value};
 use crate::volume;
 use crate::window::Window;
 
+/// The figures of one row, in the order a table shows them. The metric
+/// names are `compare.<instance>.<column>`.
+pub const COLUMNS: [&str; 7] = [
+    "completed",
+    "volume_sats",
+    "completion_rate",
+    "fee",
+    "dev_fees_sats",
+    "dispute_rate",
+    "version",
+];
+
 /// The comparison, one block per profile in the order given.
 ///
 /// `orders`, `fees` and `disputes` are the whole network's; each block
 /// takes its own by instance label, which is what the loaders put on every
-/// row and what [`Profile::label`] holds.
+/// row and what [`Profile::label`] holds. `disputes` is `None` when the
+/// scope cannot reach them (a `--network` narrowing: dispute events carry
+/// no network tag), and every dispute rate is then missing.
 pub fn report(
     profiles: &[Profile],
     orders: &[Order],
     fees: &DevFeeData,
-    disputes: &DisputeData,
+    disputes: Option<&DisputeData>,
     window: Window,
     now: i64,
 ) -> Vec<Metric> {
     let fees_by_instance = dev_fees::by_instance(fees);
-    let disputes_by_instance = disputes::by_instance(disputes);
+    let disputes_by_instance = disputes.map(disputes::by_instance);
 
     profiles
         .iter()
@@ -43,7 +57,8 @@ pub fn report(
                 .get(&profile.label)
                 .map_or(0, |fees| dev_fees::summarise(fees, window).total_sats);
             let dispute_rate = disputes_by_instance
-                .get(&profile.label)
+                .as_ref()
+                .and_then(|by_instance| by_instance.get(&profile.label))
                 .and_then(|disputes| disputes::summarise(disputes, window, now).rate);
 
             let observed =

@@ -5,6 +5,7 @@ use crate::db::connect_and_migrate;
 use crate::db::repo::events::{self, EventRecord};
 use crate::ingest::parse::dev_fee::DevFee;
 use crate::ingest::parse::order::{Direction, OrderVersion, Status};
+use crate::ingest::pipeline::seed_fixtures;
 use crate::network::Network;
 use crate::stats::Value;
 
@@ -121,4 +122,39 @@ async fn an_unknown_order_is_an_error_not_an_empty_report() {
     let error = report(&pool, "nope", NOW).await.expect_err("unknown");
 
     assert!(error.to_string().contains("nope"), "{error}");
+}
+
+/// The lifecycle of an order of the real corpus: `in_progress.json`, one
+/// version, published by Mostro at 2026-08-26T10:39:05Z.
+#[tokio::test]
+async fn the_lifecycle_of_a_real_order_shows_its_published_version() {
+    // Arrange
+    let pool = connect_and_migrate("sqlite::memory:")
+        .await
+        .expect("migrate");
+    seed_fixtures(&pool, NOW).await;
+
+    // Act
+    let report = report(&pool, "aac4b221-bcd0-47e2-bea8-b0251fc5bb89", NOW)
+        .await
+        .expect("report");
+
+    // Assert
+    assert_eq!(value(&report, "order.versions"), &Value::Count(1));
+    assert_eq!(
+        value(&report, "order.1.at"),
+        &Value::Text("2026-08-26T10:39:05+00:00".into())
+    );
+    assert_eq!(
+        value(&report, "order.1.status"),
+        &Value::Text("in-progress".into())
+    );
+    assert_eq!(value(&report, "order.1.amount"), &Value::Sats(101_446));
+    assert_eq!(
+        value(&report, "order.1.fiat"),
+        &Value::Fiat {
+            amount: 75_000.0,
+            code: "ARS".into()
+        }
+    );
 }
