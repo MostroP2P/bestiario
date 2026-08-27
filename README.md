@@ -1096,6 +1096,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 `docs/SPEC.md` is the source of truth for event formats, the data model,
 the metrics and the CLI; `docs/ROADMAP.md` is the plan, one row per pull
-request. The aggregation layer is a separate crate, `crates/stats`, with no
-I/O dependencies — a compile error, not a convention — so that the same
-figures can be served over HTTP later without touching them.
+request. `docs/NOSTR-PUBLICATION.md` specifies one planned feature in full —
+publishing the figures as signed Nostr events, so a reader trusts a pubkey
+rather than a host — and is scheduled as phase 7 of the roadmap. The
+aggregation layer is a separate crate, `crates/stats`, with no I/O
+dependencies — a compile error, not a convention — so that the same figures
+can be served over HTTP, or signed onto a relay, without touching them.

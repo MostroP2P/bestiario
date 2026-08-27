@@ -701,6 +701,11 @@ bestiario rebuild                            # regenerate projections from event
 Default output is a table; `--json` emits `{ "generated_at", "range",
 "metrics": [ { "name", "kind": "observed|inferred", "value", "error": … } ] }`.
 
+That envelope is also what `bestiario publish` puts on a relay: the Nostr
+publication of §13.6 carries these records verbatim rather than defining a
+second shape for the same figures. See
+[`docs/NOSTR-PUBLICATION.md`](NOSTR-PUBLICATION.md) §6.
+
 ## 11. Dependencies (latest versions on crates.io as of 2026-08-25)
 
 | Crate | Version | Use |
@@ -752,8 +757,8 @@ Default output is a table; `--json` emits `{ "generated_at", "range",
 ## 13. Phases
 
 High-level ordering only. The PR-by-PR breakdown lives in
-`docs/ROADMAP.md`, which splits these five into seven numbered phases
-(0–6, since the foundations below come before phase 1 here) with
+`docs/ROADMAP.md`, which splits these six into eight numbered phases
+(0–7, since the foundations below come before phase 1 here) with
 dependencies; when the two disagree, the roadmap is the operational
 plan and this section is the intent.
 
@@ -778,6 +783,20 @@ plan and this section is the intent.
    tests for code that is about to change.
 5. **Exposure**: HTTP API over the aggregation crate (out of this spec's
    scope).
+6. **Publication**: the figures published as signed Nostr events, so that a
+   client reads them from a pubkey rather than from a host — specified in
+   full in [`docs/NOSTR-PUBLICATION.md`](NOSTR-PUBLICATION.md), which is
+   normative for that feature the way this document is for the rest. It is
+   long enough to be its own document and self-contained enough not to
+   interleave with the sections above: a new event kind, a document
+   addressing grammar, and a client contract, none of which the daemon needs
+   in order to compute a single figure.
+
+   It comes last and does not depend on phase 5: publication distributes the
+   report envelope of §10 and the observed/inferred distinction of §5, so it
+   wants those to have stopped moving, and it wants nothing from the HTTP
+   API. The two are alternative transports for the same aggregations, not a
+   sequence.
 
 ## 14. Open questions
 

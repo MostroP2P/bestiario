@@ -1,0 +1,443 @@
+# bestiario — Nostr publication
+
+Status: draft v0.1 (2026-08-27). Companion to `docs/SPEC.md`, which stays the
+source of truth for schema, metrics and report formats. This document
+specifies one feature in full — publishing the computed figures as signed
+Nostr events — and is referenced from SPEC §13 as a phase of its own.
+
+Section numbers of the form §N without a document name refer to this
+document. References into the main specification are written `SPEC §N`.
+
+## 1. Purpose and trust model
+
+The daemon publishes the figures it has computed as signed Nostr events, so
+that a client — the static site at `mostro.world`, a mobile app, a
+third-party dashboard — can read them without an HTTP API and without
+trusting whoever serves the page.
+
+The consequence worth stating plainly: a reader trusts **one pubkey**, not a
+host. A mirror of the site on another domain, on IPFS, or bundled in an app
+shows the same figures or fails signature verification. The publisher's
+pubkey is the root of trust and MUST be verified by every client; a client
+that renders unverified content is not conformant.
+
+What this does *not* establish is that the figures are correct. The signature
+proves bestiario published them, nothing more. The `observed` / `inferred`
+distinction of SPEC §5 travels with the data (§6) and MUST survive into any
+rendering.
+
+### 1.1 The relay is not the archive
+
+Relays may prune, may enforce retention, and may refuse to store an
+ever-growing set of documents. The SQLite archive remains the sole source of
+truth, exactly as it is for the raw Mostro events bestiario indexes. Nostr is
+a **distribution** channel here, not storage.
+
+It follows that the daemon MUST be able to reconstruct and republish every
+document it has ever published, from the archive alone, with no state kept
+outside it (§9.3).
+
+## 2. Event kind
+
+All documents use a single addressable kind:
+
+```
+30666
+```
+
+Addressable (30000 ≤ kind < 40000): relays keep only the latest event per
+`(pubkey, kind, d)`, so a republication supersedes its predecessor and the
+archive on the relay does not grow with revisions.
+
+One kind for every document type, with the `d` tag carrying all
+discrimination. The alternative — a kind per report — buys a coarse filter
+that `#d` already provides, and spends kind numbers that are a shared global
+resource. The cost of the single-kind choice is that a client cannot
+subscribe to "any bestiario document" and get only the index; it must name
+the `d` values it wants, which it must do anyway (§4.1).
+
+30666 is unassigned in the kind table of `nostr-protocol/nips` as of
+2026-08-27; the neighbouring assignments are 30617/30618 (repository
+announcements, NIP-34) and 30818/30819 (wiki, NIP-54). That table records
+only what was registered, so an unregistered application kind may exist in
+the wild — the risk is a client of *another* application mistaking bestiario
+documents for its own, which the `d` grammar of §3 and the `alt` tag make
+recoverable.
+
+The number is `30000 + 666`. A bestiary catalogues monsters, *mostro* is
+Italian for monster, and 666 is the number of the beast: the one candidate a
+reader remembers without consulting this document.
+
+MostroP2P SHOULD register 30666 upstream, as it did for 38383 and 38386, once
+the format below stops moving.
+
+Per NIP-31 every event carries an `alt` tag, so clients that do not know the
+kind can say something truthful about it rather than rendering JSON.
+
+## 3. Addressing: the `d` tag
+
+The `d` value is the document's stable name. It is the only thing a client
+needs to construct in order to fetch a document, so its grammar is normative
+and MUST NOT be extended without a `schema_version` bump.
+
+```
+d          = index-doc / window-doc / series-doc
+
+index-doc  = "index" [ ":" year ]
+
+window-doc = report ":" window [ scope ]
+
+series-doc = "series:" report ":" resolution ":" bucket [ scope ]
+
+report     = "summary" / "orders" / "volume" / "market" / "disputes"
+           / "dev-fees" / "instances" / "compare"
+
+window     = "24h" / "7d" / "30d" / "90d" / "all"
+
+resolution = "daily" / "weekly" / "monthly"
+
+bucket     = YYYY "-" MM        ; for daily and weekly partitions
+           / YYYY               ; for monthly partitions
+
+scope      = ":i:" pubkey       ; one instance, 64 lowercase hex
+           / ":n:" network      ; one network, e.g. "mainnet"
+
+year       = YYYY
+```
+
+Examples:
+
+```
+index
+summary:30d
+orders:7d
+volume:30d:n:mainnet
+series:orders:daily:2026-01
+series:volume:monthly:2026
+series:orders:daily:2026-01:i:6320ee5e…d425
+```
+
+The instance scope uses the full pubkey, not a prefix. A prefix is a
+collision waiting to be found by whoever wants to find it, and `d` values are
+not length-constrained.
+
+Rules:
+
+- `d` values are lowercase and MUST match the grammar exactly. A client
+  constructs them; a typo must be a miss, not a fuzzy match.
+- Buckets are UTC. Weekly partitions are grouped into the month their **first
+  day** falls in, so a week spanning a month boundary lives in one partition
+  only.
+- Windows are relative to the publishing moment, so window documents are
+  perpetually restated by design. Series partitions are absolute and change
+  only under restatement (§8).
+
+## 4. Filters
+
+### 4.1 Fetching a range
+
+Nostr tag filters match on equality; there is no range predicate, and relays
+index only single-letter tags. A time range is therefore fetched by
+**enumerating the partitions that cover it**, which is why the index exists
+(§5).
+
+Fourteen months of daily series, in one subscription:
+
+```json
+{
+  "kinds": [30666],
+  "authors": ["<publisher pubkey>"],
+  "#d": [
+    "series:orders:daily:2026-01",
+    "series:orders:daily:2026-02",
+    "…",
+    "series:orders:daily:2027-02"
+  ]
+}
+```
+
+Multiple values in a tag filter are OR'd, so the cost is one `REQ` and N
+events, N being the number of partitions, not the number of data points.
+
+### 4.2 Live updates
+
+A client subscribes to the hot documents it renders and receives replacements
+as they are published. There is no polling and no `generated_at` to trust:
+`created_at` is signed, so staleness is computed by the client from the event
+itself rather than reported by the publisher about itself.
+
+## 5. The index
+
+`d = index`. The first document a client fetches and the only `d` it needs to
+know a priori, together with the publisher pubkey.
+
+```json
+{
+  "schema_version": 1,
+  "snapshot_id": "01J8Z…",
+  "generated_at": "2026-08-27T03:05:00Z",
+  "publisher": { "name": "bestiario", "version": "0.4.0" },
+  "coverage": {
+    "first_event_at": "2026-02-14T11:20:03Z",
+    "last_event_at": "2026-08-27T03:04:51Z"
+  },
+  "resolutions": {
+    "daily":   { "from": "2026-02", "until": "2026-08" },
+    "monthly": { "from": "2026",    "until": "2026" }
+  },
+  "documents": [
+    {
+      "d": "summary:30d",
+      "hash": "3f9a…",
+      "revision": 1,
+      "updated_at": "2026-08-27T03:05:00Z"
+    },
+    {
+      "d": "series:orders:daily:2026-01",
+      "hash": "b710…",
+      "revision": 2,
+      "updated_at": "2026-08-27T03:05:00Z",
+      "restated_at": "2026-08-27T03:05:00Z",
+      "restated_because": "backfill"
+    }
+  ]
+}
+```
+
+The index answers three questions, each of which a client cannot answer
+otherwise:
+
+1. **What exists.** Which partitions were published, at which resolutions,
+   from when. Without it a client guesses and requests months that were never
+   published, and cannot distinguish "no data" from "not published".
+2. **What changed.** `hash` is the SHA-256 of the document's `content`
+   string, hex, lowercase. A client compares it against what it has cached and
+   fetches only the differences. Closed partitions are otherwise
+   indistinguishable from restated ones.
+3. **What is current.** `snapshot_id` is the atomicity token of §7.
+
+`coverage` states the archive's real extent. A client MUST NOT render a
+period outside it as zero; see §6.3.
+
+### 5.1 Index growth
+
+The index grows with the number of partitions: roughly one entry per report
+per month. It will eventually approach the size limit of §9.1. When it does,
+it shards by year — `index:2026`, `index:2027` — with the unqualified `index`
+listing the hot documents, the resolutions available, and the year shards.
+The client algorithm (§10) is written so that this change is additive.
+
+## 6. Document formats
+
+Two shapes, chosen by what the document holds. Both are JSON in `content`,
+UTF-8, uncompressed and not base64-encoded: an event that is unreadable in a
+generic Nostr client throws away most of the reason to publish on Nostr.
+
+### 6.1 Window documents
+
+The report envelope already specified in SPEC §10, plus `snapshot_id`:
+`generated_at`, `range`, `metrics`, one flat record per figure with `name`,
+`kind`, `unit`, `value`. No second format for the same thing.
+
+### 6.2 Series partitions
+
+The flat form repeats the envelope of every metric on every row, which for
+365 days is mostly overhead. Series partitions are columnar:
+
+```json
+{
+  "schema_version": 1,
+  "snapshot_id": "01J8Z…",
+  "revision": 2,
+  "generated_at": "2026-08-27T03:05:00Z",
+  "period": { "from": "2026-01-01T00:00:00Z", "until": "2026-02-01T00:00:00Z" },
+  "resolution": "daily",
+  "columns": [
+    { "name": "date",        "unit": "date" },
+    { "name": "created",     "kind": "observed", "unit": "count" },
+    { "name": "completed",   "kind": "observed", "unit": "count" },
+    { "name": "volume_sats", "kind": "observed", "unit": "sats" },
+    { "name": "volume_usd",  "kind": "inferred", "unit": "usd",
+      "error": "rate snapshot at or before success_at; see SPEC §5" }
+  ],
+  "rows": [
+    ["2026-01-01", 12, 7, 1361000, 980.4],
+    ["2026-01-02", 0, 0, 0, null]
+  ]
+}
+```
+
+`kind` and `error` are declared once per column rather than once per cell, so
+the observed/inferred distinction survives compaction intact. `rows` is
+ordered ascending by bucket, one entry per bucket in the period, none
+skipped.
+
+### 6.3 Absence
+
+`null` means absence and never zero, throughout, matching the `—` of the
+tables:
+
+- A bucket with no activity has real zeros for counts and `null` for rates.
+- A bucket **outside `coverage`** has `null` for every column, including
+  counts. A relay keeps orders for about a fortnight, so a series reaching
+  back before the first backfill would otherwise draw a flat line at zero
+  across a period when the network was trading — the single most misleading
+  output this system could produce.
+- A partition entirely outside coverage is not published at all, and is
+  absent from the index.
+
+## 7. Atomicity
+
+A snapshot is a few dozen documents and cannot be one event, so publication
+is not atomic. A client that requests `summary:30d` and `volume:30d` while
+the daemon is mid-publication can receive one from each of two snapshots and
+render two figures that do not reconcile.
+
+Every document carries the `snapshot_id` it was computed under, as content
+and as an indexed `s` tag. The index declares the current one. A conformant
+client:
+
+1. Reads the index, takes its `snapshot_id`.
+2. Renders only documents bearing that `snapshot_id`.
+3. On a mismatch, marks that panel as updating and waits for the replacement
+   — it MUST NOT mix snapshots silently.
+
+`snapshot_id` is monotonic and unique per publication run. The daemon
+publishes the index **last**, so an index that names a snapshot implies its
+documents are already on the relay.
+
+## 8. Restatement
+
+A closed month is not immutable in practice. A later backfill discovers older
+events, a `rebuild` recomputes projections, a dev fee arrives late. Published
+partitions will change.
+
+That is allowed, and it MUST NOT be silent:
+
+- `revision` starts at 1 and increments on every content change.
+- `restated_at` and `restated_because` (`backfill` / `rebuild` /
+  `schema` / `correction`) accompany any revision above 1.
+- The index carries the same fields, so a client detects a restatement
+  without fetching the partition.
+- A client that has cached a partition and sees a higher revision SHOULD
+  surface that the figure changed, not just swap it.
+
+A republication with an unchanged hash is not a revision and MUST be skipped
+entirely: the daemon does not re-sign documents that did not change.
+
+## 9. Size
+
+### 9.1 Limits
+
+A relay advertises `limitation.max_content_length` in its NIP-11 document.
+The daemon MUST read it at startup for each configured relay and MUST
+validate every document against the smallest of them and against its own
+configured ceiling (`[publish].max_content_bytes`, default 64 KiB,
+conservative on purpose).
+
+A document that exceeds the ceiling is a **startup or publish error naming
+the document**, never a silent relay rejection. This mirrors the existing
+rule that a bad configuration value is an error naming the key.
+
+### 9.2 The resolution ladder
+
+Partitioning bounds the size of each document; the ladder bounds how many a
+client fetches. Daily buckets are grouped by month, weekly by month, monthly
+by year, so:
+
+| Range requested | Resolution | Partitions |
+| --- | --- | --- |
+| < 90 days | daily | ≤ 4 |
+| < 2 years | weekly | ≤ 24 |
+| ≥ 2 years | monthly | ≤ 10 for a decade |
+
+A ten-year range costs ten events. The client picks the resolution from the
+requested span and from `resolutions` in the index; the daemon publishes all
+three for the periods it covers.
+
+### 9.3 Republication
+
+`bestiario publish --republish [--from <bucket>] [--until <bucket>]`
+regenerates and publishes every document for a range from the archive,
+independent of what any relay holds. This is the recovery path for a pruned
+relay, a new relay, or a schema migration, and it is what makes §1.1 true
+rather than aspirational.
+
+Series partitions MUST NOT carry a NIP-40 `expiration` tag. Hot window
+documents MAY.
+
+## 10. Client algorithm
+
+Normative for `mostro.world` and recommended for any other consumer:
+
+1. Fetch `index` for the known publisher pubkey. Verify the signature; abort
+   on failure.
+2. Take `snapshot_id`, `coverage`, `resolutions`.
+3. For the visible panels, request the hot documents by `d`; subscribe for
+   live replacement.
+4. For a requested range: choose a resolution (§9.2), enumerate the
+   partitions covering it, drop those with a cached `hash` matching the
+   index, request the rest in one `REQ`.
+5. Verify every event's signature and that its `s` tag matches the index's
+   `snapshot_id`. Drop and re-request otherwise.
+6. Render `inferred` figures visually distinct from `observed` ones, with the
+   column's `error` text reachable. Render `null` as absence, never as zero.
+7. Show the age of the data, computed from `created_at`, and warn beyond a
+   configured threshold.
+
+Closed partitions with an unchanged hash are immutable and MAY be cached
+indefinitely.
+
+## 11. Tags
+
+| Tag | Indexed | Value |
+| --- | --- | --- |
+| `d` | yes | Document address, §3 |
+| `s` | yes | `snapshot_id`, §7 |
+| `t` | yes | `bestiario` — discovery |
+| `alt` | no | Human-readable description, NIP-31 |
+| `resolution` | no | `daily` / `weekly` / `monthly`, series only |
+| `period` | no | `<from>` `<until>`, RFC3339, series only |
+| `revision` | no | Integer, §8 |
+| `schema_version` | no | Integer |
+
+Only single-letter tags are relay-indexed; the rest are for clients that hold
+the event.
+
+## 12. CLI
+
+```
+bestiario publish [--dry-run] [--out <dir>] [--republish] [--from …] [--until …]
+```
+
+- Computes an entire snapshot in one pass over the archive, so all documents
+  share a consistent view. It does not shell out to the report commands.
+- `--dry-run` prints what would be published, with sizes and hashes, and
+  signs nothing.
+- `--out` also writes the documents as files, for the static fallback
+  snapshot the site serves before the relay connection is live.
+- Signing key from `[publish].nsec` or a file path; never from a flag.
+- Publishes to `[publish].relays`, which defaults to `[nostr].relays` but is
+  configured separately: reading and writing are different trust decisions.
+
+Aggregation stays in `crates/stats`, with no I/O, as everywhere else.
+
+## 13. Open questions
+
+1. **Upstream registration of 30666** — when to open the PR against
+   `nostr-protocol/nips`. Proposal: after the first production snapshot, so
+   the registered description matches something that exists.
+2. **Relay retention** — whether MostroP2P should run a relay that guarantees
+   the historical partitions, given §1.1. Cheap on the same VPS; the
+   alternative is accepting that history may need republishing.
+3. **Auth** — relays requiring NIP-42 complicate every client for no benefit
+   here. Proposal: the default relay set excludes them, and the daemon warns
+   when a configured relay advertises it.
+4. **Per-instance series** — the full cross product (report × resolution ×
+   bucket × instance) is a large number of documents. Proposal: publish
+   per-instance series only for `orders` and `volume`, at monthly resolution,
+   and let the site fetch network-wide detail only.
+5. **Signature verification in-browser** — which library, and whether the
+   site fails closed (render nothing) or degrades to the static snapshot with
+   a visible warning. Proposal: fail closed for signature failure, degrade for
+   connection failure.

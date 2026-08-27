@@ -26,8 +26,8 @@ source of truth for formats, schema and metrics. This document only answers
   on. A row therefore names the *ends* of the chains it needs, not every
   ancestor. PR 45, the last required row, names enough of them to reach every
   row before it — checked, not assumed, by the script in
-  [Verifying the graph](#verifying-the-graph). Phase 6 comes after it and is
-  optional, so it is deliberately outside that guarantee.
+  [Verifying the graph](#verifying-the-graph). Phases 6 and 7 come after it
+  and are optional, so they are deliberately outside that guarantee.
 - `Depends` lists PRs that must be merged first. PRs with no shared dependency
   can be developed in parallel branches.
 - Deliberate bundling: some rows group several trivial tasks (e.g. all four
@@ -46,13 +46,18 @@ source of truth for formats, schema and metrics. This document only answers
 | 4 | Discovery, series and market views | 39–44 | `series`, `market <FIAT>`, relay/instance discovery |
 | 5 | Hardening | 45 | Coverage ≥ 95% overall and 100% across `crates/stats` and `ingest::parse` (SPEC §12) |
 | 6 | Exposure (HTTP API) | 46–49 | `bestiario-stats` served over HTTP without touching the aggregation layer |
+| 7 | Publication (Nostr) | 50–55 | `bestiario publish` puts a verifiable snapshot on the relays; a client renders it from a pubkey, not a host |
 
 Phases 0–2 produce the first genuinely useful release (`v0.1.0`): counts,
 dev fees and disputes, all observed, no inference — and, in PR 31, the README
 that makes it usable by someone who did not write it. Phase 3 is what makes
 the numbers comparable across currencies. Phase 4 is breadth. Phase 5 raises
-the coverage floor, once the metric catalog has stopped moving. Phase 6 is out
-of `SPEC.md` scope and stays optional.
+the coverage floor, once the metric catalog has stopped moving. Phases 6 and 7
+both come after it and are both optional: they are two transports for the same
+aggregations, and neither depends on the other. Phase 6 is out of `SPEC.md`
+scope entirely; phase 7 has a specification of its own,
+[`docs/NOSTR-PUBLICATION.md`](NOSTR-PUBLICATION.md), which SPEC §13.6 points
+at.
 
 ---
 
@@ -188,6 +193,26 @@ and the metric set has stopped moving.
 
 ---
 
+## Phase 7 — Publication over Nostr (optional)
+
+Specified in full in [`docs/NOSTR-PUBLICATION.md`](NOSTR-PUBLICATION.md), and
+referenced from SPEC §13.6. Independent of phase 6: the HTTP API and the
+signed documents are two transports for the same aggregations, and a project
+may ship either, both or neither. What both want is a metric catalog that has
+stopped moving, which is why they follow PR 45 rather than interleave with it.
+
+Section references in the `Scope` column below are to
+`docs/NOSTR-PUBLICATION.md` unless they say `SPEC`.
+
+| # | Title | Size | Depends | Scope |
+|---|---|---|---|---|
+| 50 | `feat(publish): the document model` | M | 44 | The `d` grammar of §3 as a type that parses and renders, the tag set of §11, and `schema_version`. Pure functions over plain data, no relay and no database, so the grammar is testable as a grammar. A `d` value is the only thing a client constructs, so a typo must be a parse failure and never a fuzzy match — which is a property worth a test table rather than a code review. |
+| 51 | `feat(publish): a snapshot in one pass` | L | 50, 42 | Every document of a snapshot computed from one read of the archive, sharing one `snapshot_id` (§7): window documents carrying the SPEC §10 envelope verbatim, series partitions in the columnar form of §6.2. Absence follows §6.3 — a bucket outside coverage is `null` in every column, counts included, which is the same rule the daily reports already apply and the single most misleading thing this feature could get wrong. Depends on 42 because a series partition is a series, and computing it a second way would be two answers under one heading. |
+| 52 | `feat(publish): the index` | M | 51 | `d = index` (§5): what exists, what changed and what is current. Content hash per document, `revision`, `coverage` from the archive's real extent, and the `resolutions` a client picks from. Written to be shardable by year later without a client change (§5.1). |
+| 53 | `feat(cmd): publish --dry-run` | M | 52 | The command, the `[publish]` configuration section, and the size gate of §9.1: NIP-11 `limitation.max_content_length` read per relay at startup, checked against the configured ceiling, and a document over it is an error naming the document rather than a silent relay rejection. `--dry-run` prints sizes and hashes; `--out` writes the files the site serves before its relay connection is live. Signs nothing, publishes nothing: the whole snapshot is reviewable before a key is involved. |
+| 54 | `feat(publish): signing and relay publication` | M | 53 | The signing key from `[publish].nsec` or a file path, never from a flag, and publication to `[publish].relays` — configured separately from `[nostr].relays` because reading and writing are different trust decisions. The index goes last, so an index naming a snapshot implies its documents are already there (§7). |
+| 55 | `feat(publish): restatement and --republish` | M | 54 | `revision`, `restated_at` and `restated_because` (§8), and the rule that an unchanged hash is not a revision and is not re-signed. `--republish [--from] [--until]` regenerates a range from the archive alone, which is what makes "the relay is not the archive" (§1.1) true rather than aspirational: the recovery path for a pruned relay, a new relay or a schema migration. |
+
 ## Verifying the graph
 
 Two properties are worth checking mechanically rather than by reading, because
@@ -198,8 +223,8 @@ both failed review at least once:
 2. **Every row before PR 45 is reachable from it.** The hardening pass
    measures coverage of the finished project, so anything earlier that it does
    not transitively depend on could legitimately land after it — which would
-   make the coverage figure a measurement of an incomplete tree. Phase 6 is
-   optional and comes afterwards by design, so it is excluded.
+   make the coverage figure a measurement of an incomplete tree. Phases 6 and
+   7 are optional and come afterwards by design, so they are excluded.
 3. **The detailed tables match the phase map.** The map is the declared
    contents of the plan; checking the tables against their own length would
    let a whole phase be deleted without complaint.
