@@ -66,6 +66,7 @@ cp settings.toml.example settings.toml
 | Key | What it does |
 |---|---|
 | `[nostr].relays` | Relays to read from. `wss://relay.mostro.network` carries every instance. |
+| `[nostr].discover_relays` | `true` to also dial the relays the instances say they publish to (NIP-65, kind 10002). Off by default. |
 | `[indexer].instances` | Pubkeys to follow, as hex or `npub1…`. |
 | `[indexer].accept_unknown_instances` | `true` to index every pubkey that publishes Mostro events, whether listed or not. Events from other platforms on the same relays (they exist) are turned away either way. |
 | `[indexer].networks` | Which networks count: `mainnet` alone by default. |
@@ -75,6 +76,32 @@ cp settings.toml.example settings.toml
 `bestiario` reads `settings.toml` from the current directory; `--config`
 points it elsewhere. Every value is validated at startup, and a bad one is
 an error naming the key rather than a report with a hole in it.
+
+### Relay discovery
+
+Each instance publishes a NIP-65 relay list saying where it reads and where
+it writes. bestiario records the relays it *writes* to — an instance's
+events are only fetchable where it publishes them, and a relay it merely
+reads from holds nothing of its own — and, with `discover_relays = true`,
+dials them alongside the configured ones.
+
+Discovery is additive and never subtractive: the configured relays always
+come first and are never dropped, since they are the operator's decision
+while a discovered relay is a third party's claim. Only the relays an
+instance says it *writes* to are taken, which NIP-65 spells as an `r` tag
+with no marker or with `write`; an entry marked anything else carries no
+such claim and is dropped, like a URL that cannot be dialled. With the flag
+off the connection set is exactly what `settings.toml` lists, whatever the
+instances have advertised. A relay list carries no `y` tag, so bestiario
+takes one only from a pubkey it already knows as an instance — the same
+rule that guards rate snapshots.
+
+The connection set is not fixed at startup. A relay list read during a
+`backfill` is followed by that same invocation — the run walks the relays it
+discovers rather than leaving them for a second one — and a `sync` that
+stores one rebuilds its subscription over the wider set there and then, so a
+process meant to run for months does not go on dialling only the relays it
+happened to know about on the day it started.
 
 ## First backfill
 
