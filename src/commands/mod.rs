@@ -71,7 +71,9 @@ async fn dispatch(context: &Context<'_>) -> Result<()> {
             StatsCommand::DevFees { by } => {
                 stats::dev_fees::run(context, *by, Utc::now().timestamp()).await
             }
-            StatsCommand::Disputes { .. } => not_yet("stats disputes", 26),
+            StatsCommand::Disputes { by } => {
+                stats::disputes::run(context, *by, Utc::now().timestamp()).await
+            }
             StatsCommand::Rates { .. } => not_yet("stats rates", 38),
         },
     }

@@ -8,6 +8,7 @@
 //! no trait: a submodule per family with its own `run` is the whole of it.
 
 pub mod dev_fees;
+pub mod disputes;
 pub mod orders;
 
 #[cfg(test)]

@@ -31,6 +31,7 @@
 
 pub mod activity;
 pub mod dev_fees;
+pub mod disputes;
 pub mod metric;
 pub mod percentile;
 pub mod window;
