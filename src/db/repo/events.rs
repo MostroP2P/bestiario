@@ -88,6 +88,18 @@ where
     Ok(found.is_some())
 }
 
+/// Whether nothing has been stored yet — a database that was migrated
+/// and never backfilled.
+pub async fn is_empty<'e, E>(executor: E) -> Result<bool, sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM events")
+        .fetch_one(executor)
+        .await?;
+    Ok(count == 0)
+}
+
 /// Every archived event, oldest first.
 ///
 /// Ordered so that a replay applies versions in the order the network

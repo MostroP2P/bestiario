@@ -91,6 +91,12 @@ dev fees for about a year and orders for about a fortnight, so on a fresh
 archive expect fees for orders you will never see; the reports call those
 *orphans*.
 
+Every report needs this step: over a database that holds no events yet,
+a report refuses to run and says so, rather than printing a table of
+zeros that reads like an answer. The database path in `settings.toml` is
+relative to the directory you run from, so a backfill and a report have
+to be run from the same place.
+
 To keep the archive current afterwards:
 
 ```sh

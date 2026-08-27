@@ -8,6 +8,7 @@ use crate::cli::Cli;
 use crate::commands::Context;
 use crate::config::Settings;
 use crate::db::connect_and_migrate;
+use crate::db::repo::events::{self, EventRecord};
 
 const ALPHA: &str = "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390";
 const NOW: i64 = 1_787_800_000;
@@ -35,10 +36,31 @@ fn cli(args: &[&str]) -> Cli {
         .expect("the invocation parses")
 }
 
-/// Resolves `args` against a database holding one named instance.
+/// One stored event, so that the database is not empty.
+async fn seed_event(pool: &SqlitePool) {
+    events::insert_if_new(
+        pool,
+        &EventRecord {
+            id: "e".to_string(),
+            pubkey: ALPHA.to_string(),
+            kind: 38385,
+            created_at: NOW - 1,
+            d_tag: Some(ALPHA.to_string()),
+            raw_json: "{}".to_string(),
+            relay_url: "wss://relay.mostro.network".to_string(),
+            seen_at: NOW - 1,
+        },
+    )
+    .await
+    .expect("event");
+}
+
+/// Resolves `args` against a database holding one named instance and one
+/// event.
 async fn resolve(args: &[&str]) -> Result<Query> {
     let settings = Settings::from_toml_str(SETTINGS).expect("valid settings");
     let pool = migrated().await;
+    seed_event(&pool).await;
     instances::upsert(&pool, ALPHA, Some("Alpha"), NOW - 1)
         .await
         .expect("instance");
@@ -109,4 +131,30 @@ async fn the_window_flags_become_the_range() {
 
     assert_eq!(query.range.from(), 1_000);
     assert_eq!(query.range.until(), 2_000);
+}
+
+#[tokio::test]
+async fn a_database_with_no_events_refuses_to_report_and_says_what_to_run() {
+    // Arrange: migrated, never backfilled — a table of zeros would read as
+    // an answer, and it is not one.
+    let settings = Settings::from_toml_str(SETTINGS).expect("valid settings");
+    let pool = migrated().await;
+    let cli = cli(&["stats", "orders"]);
+
+    // Act
+    let error = Query::resolve(
+        &Context {
+            settings: &settings,
+            pool: &pool,
+            cli: &cli,
+        },
+        NOW,
+    )
+    .await
+    .expect_err("an empty database is refused");
+
+    // Assert
+    let message = error.to_string();
+    assert!(message.contains("no events"), "{message}");
+    assert!(message.contains("bestiario backfill"), "{message}");
 }
