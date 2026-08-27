@@ -153,10 +153,13 @@ pub enum StatsCommand {
         by: Option<MarketDimension>,
     },
 
-    /// How long each stage of an order takes (SPEC §6.4).
+    /// How long each stage of an order takes, and the funnel (SPEC §6.4, §7).
+    ///
+    /// Without `--by` the figures cover the whole window; with it, one
+    /// block per slice.
     Timing {
-        #[arg(long, value_enum, default_value_t = TimingDimension::Fiat)]
-        by: TimingDimension,
+        #[arg(long, value_enum)]
+        by: Option<TimingDimension>,
     },
 
     /// Dev fees sent to the development fund (SPEC §6.6).

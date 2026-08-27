@@ -72,7 +72,7 @@ async fn dispatch(context: &Context<'_>) -> Result<()> {
                 stats::volume::run(context, *by, convert_to.as_deref(), now()).await
             }
             StatsCommand::Market { by } => stats::market::run(context, *by, now()).await,
-            StatsCommand::Timing { .. } => not_yet("stats timing", 38),
+            StatsCommand::Timing { by } => stats::timing::run(context, *by, now()).await,
             StatsCommand::DevFees { by } => stats::dev_fees::run(context, *by, now()).await,
             StatsCommand::Disputes { by } => stats::disputes::run(context, *by, now()).await,
             StatsCommand::Rates { .. } => not_yet("stats rates", 39),

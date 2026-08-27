@@ -12,4 +12,5 @@ pub mod dev_fees;
 pub mod disputes;
 pub mod market;
 pub mod orders;
+pub mod timing;
 pub mod volume;

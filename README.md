@@ -352,6 +352,55 @@ Here the one completed order settled hours before the first rate snapshot
 was captured, so there is nothing to price it with: the total is `—`, not
 `0.00 USD`, and the excluded sats are counted.
 
+### Timing
+
+```console
+$ bestiario stats timing --from 2026-08-23 --until 2026-08-27
+2026-08-23T00:00:00+00:00 — 2026-08-27T00:00:00+00:00
+┌──────────────────────────────────────┬───────┐
+│ metric                               ┆ value │
+╞══════════════════════════════════════╪═══════╡
+│ timing.filled                        ┆ 0     │
+│ timing.time_to_fill_p50              ┆ —     │
+│ timing.time_to_fill_p90              ┆ —     │
+│ timing.completed                     ┆ 0     │
+│ timing.time_to_complete_p50          ┆ —     │
+│ timing.time_to_complete_p90          ┆ —     │
+│ timing.full_cycle_p50                ┆ —     │
+│ timing.full_cycle_p90                ┆ —     │
+│ timing.canceled                      ┆ 0     │
+│ timing.time_to_cancel_p50            ┆ —     │
+│ timing.time_to_cancel_p90            ┆ —     │
+│ timing.book_size                     ┆ 4     │
+│ timing.book_age_avg                  ┆ 16.9h │
+│ timing.funnel.created                ┆ 8     │
+│ timing.funnel.taken                  ┆ 1     │
+│ timing.funnel.taken_share            ┆ 12.5% │
+│ timing.funnel.canceled_untaken       ┆ 1     │
+│ timing.funnel.canceled_untaken_share ┆ 12.5% │
+│ timing.funnel.canceled_taken         ┆ 0     │
+│ timing.funnel.completed              ┆ 1     │
+│ timing.funnel.open                   ┆ 6     │
+└──────────────────────────────────────┴───────┘
+```
+
+Every duration is the gap between two published versions of the same
+order: time to fill (`in-progress − pending`), time to complete
+(`success − in-progress`), the full cycle and time to cancel, as nearest-
+rank p50/p90 over the orders whose gap *ended* in the window, each with
+its count. `book_size` and `book_age_avg` are about now — the live
+`pending` orders and their mean age — not about the window. The funnel is
+over the orders *created* in the window: how many found a taker, how many
+were canceled or expired without one, how many after one, how many
+completed and how many are still open. `--by fiat`, `--by method`,
+`--by kind` and `--by instance` slice it.
+
+An order first seen already `in-progress` or already settled has no
+earlier stage to measure from and yields no duration rather than a zero —
+a backfill catches many orders mid-flight, and every order of this corpus
+was captured in a single version, which is why the durations above are
+all `—` while the funnel still knows what each order became.
+
 ### Market
 
 ```console
