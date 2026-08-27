@@ -17,6 +17,7 @@ pub mod query;
 pub mod range;
 pub mod rebuild;
 mod relays;
+pub mod series;
 pub mod stats;
 pub mod summary;
 pub mod sync;
@@ -64,7 +65,9 @@ async fn dispatch(context: &Context<'_>) -> Result<()> {
         Command::Instances => instances::list(context, now()).await,
         Command::Instance { instance } => instances::profile(context, instance, now()).await,
         Command::Compare => compare::run(context, now()).await,
-        Command::Series { .. } => not_yet("series", 42),
+        Command::Series { metric, by, split } => {
+            series::run(context, metric, *by, *split, now()).await
+        }
         Command::Market { fiat } => market::run(context, fiat, now()).await,
         Command::Orders { order_id } => order::run(context, order_id, now()).await,
         Command::Rebuild { from_raw } => rebuild::run(context, *from_raw).await,
@@ -96,12 +99,4 @@ fn now() -> i64 {
         .ok()
         .and_then(|value| value.parse().ok())
         .unwrap_or_else(|| Utc::now().timestamp())
-}
-
-/// The CLI surface is complete from the first release so that the shape of the
-/// tool is reviewable as a whole, but the commands arrive over several phases.
-/// An unimplemented one says which roadmap entry will bring it rather than
-/// panicking or, worse, printing an empty report.
-fn not_yet(command: &str, roadmap_pr: u16) -> Result<()> {
-    anyhow::bail!("`{command}` is not implemented yet; it arrives in roadmap PR {roadmap_pr}")
 }

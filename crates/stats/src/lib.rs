@@ -39,10 +39,11 @@ pub mod market;
 pub mod metric;
 pub mod percentile;
 pub mod rates;
+pub mod series;
 pub mod summary;
 pub mod timing;
 pub mod volume;
 pub mod window;
 
 pub use metric::{Metric, MetricKind, Value};
-pub use window::Window;
+pub use window::{Period, Window};
