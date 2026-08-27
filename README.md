@@ -450,18 +450,33 @@ priced when taken; `range_share` the share published as `[min, max]`, with
 the mean *relative* width `(max − min) ÷ max` — a block that holds ARS
 beside EUR cannot average their widths, and the relative form compares.
 Currencies and payment methods are ranked by orders created and by sats
-completed, with the top-three share and the Herfindahl–Hirschman index of
-each ranking, and `new_fiats` / `new_methods` list what was seen for the
-first time in the window — the first eight, and a count of the rest. The
+completed, and `new_fiats` / `new_methods` list what was seen for the
+first time in the window — the first eight, and a count of the rest; `—`
+on those two rows means none were, not that none could be counted. The
 methods counted are those of an order's first version, what the maker put
 on the book: a `pm` amended days later was not on offer at creation, and
 dated by that order it would hide a genuine first sighting.
+
+An order names one currency and may name several payment methods, and it
+is credited in full to each method it names — above, one completed order
+of 1 361 sats offered over two methods shows 1 361 against each, so the
+method rows add up to more than the volume traded. The sats are
+attributed to a method, not divided between them; dividing them would
+invent a figure nobody published. That is why only the currencies carry
+the concentration rows: the top-three share, and the
+Herfindahl–Hirschman index — an index between `1/n` and `1` rather than a
+share of anything, shown as a percentage for the column it sits in.
 
 `--by fiat`, `--by kind` and `--by instance` slice it. A fiat slice drops
 the currency ranking, which says nothing about one currency, and gains
 `range_width_fiat_avg`: the mean `max − min` in that currency, which only
 a single-currency block can state — relative width alone would call
-`[10, 100]` wider than `[900, 1000]`.
+`[10, 100]` wider than `[900, 1000]`. Every row of a slice is that
+slice's own, the first sightings included: `market.buy.new_methods` names
+the methods whose first *buy* order fell in the window, so a method a
+seller has offered for a year is new to the `buy` block the day a buyer
+first names it, and `market.<instance>.new_fiats` names what is new to
+that instance.
 
 ### Dev fees
 

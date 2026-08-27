@@ -445,3 +445,123 @@ fn the_range_width_is_relative_everywhere_and_absolute_only_within_one_fiat() {
         Some(Value::fiat(90.0, "USD"))
     );
 }
+
+#[test]
+fn a_book_of_i64_max_orders_still_reports_a_share() {
+    // `amt` is only checked for being non-negative, so an instance can
+    // publish `i64::MAX` sats. Two of them summed in `i64` panic in debug
+    // and wrap negative in release, which would report the buy share of a
+    // 50/50 book as missing.
+    let buy = completed(
+        1_100,
+        1.0,
+        order("a", Direction::Buy, "ARS", 1_050, i64::MAX),
+    );
+    let sell = completed(
+        1_200,
+        1.0,
+        order("b", Direction::Sell, "ARS", 1_060, i64::MAX),
+    );
+
+    let market = summarise(&[buy, sell], WINDOW);
+
+    assert!(approx(market.buy_volume_share, 0.5));
+    assert_eq!(
+        market.fiats_by_volume.entries,
+        vec![("ARS".to_string(), 2 * i128::from(i64::MAX))]
+    );
+}
+
+#[test]
+fn a_zero_ended_range_counts_as_a_range_and_not_in_the_widths() {
+    // `fa = [0, 0]` passes the parser — a fiat amount is only checked for
+    // being finite and non-negative — and has no relative width to take.
+    let orders = vec![
+        Order {
+            fiat_range: Some((0.0, 0.0)),
+            ..order("zero", Direction::Buy, "ARS", 1_100, 1_000)
+        },
+        Order {
+            fiat_range: Some((10.0, 100.0)),
+            ..order("wide", Direction::Buy, "ARS", 1_200, 1_000)
+        },
+    ];
+
+    let market = summarise(&orders, WINDOW);
+
+    // Both are ranges; only one has a width.
+    assert!(approx(market.range_share, 1.0));
+    assert!(approx(market.range_width_avg, 0.9));
+    assert!(approx(market.range_width_fiat_avg, 90.0));
+}
+
+#[test]
+fn a_slice_dates_its_first_sightings_against_its_own_orders() {
+    // `pix` has been on the book as a sell since before the window; a
+    // buyer names it for the first time inside it. Globally that is not a
+    // first sighting; in the `buy` block it is.
+    let orders = vec![
+        on_book(
+            &["pix"],
+            Order {
+                payment_methods: vec!["pix".into()],
+                ..order("old-sell", Direction::Sell, "BRL", 500, 1_000)
+            },
+        ),
+        on_book(
+            &["pix"],
+            Order {
+                payment_methods: vec!["pix".into()],
+                ..order("new-buy", Direction::Buy, "BRL", 1_100, 1_000)
+            },
+        ),
+    ];
+
+    assert!(summarise(&orders, WINDOW).new_methods.is_empty());
+
+    let by_kind = report(&orders, WINDOW, Some(Dimension::Kind));
+    let value = |name: &str| {
+        &by_kind
+            .iter()
+            .find(|metric| metric.name == name)
+            .expect("present")
+            .value
+    };
+
+    assert_eq!(value("market.buy.new_methods"), &Value::Text("pix".into()));
+    assert_eq!(value("market.sell.new_methods"), &Value::Missing);
+}
+
+#[test]
+fn an_order_is_credited_to_every_method_it_names() {
+    // One completed order of 1 361 sats offered over two methods shows
+    // 1 361 against each: the sats are attributed, not split, so the
+    // method ranking adds up to more than the volume traded.
+    let orders = vec![on_book(
+        &["Efectivo", "EnZona"],
+        Order {
+            payment_methods: vec!["Efectivo".into(), "EnZona".into()],
+            ..completed(
+                1_100,
+                0.0,
+                order("one", Direction::Sell, "CUP", 1_050, 1_361),
+            )
+        },
+    )];
+
+    let market = summarise(&orders, WINDOW);
+
+    assert_eq!(
+        market.methods_by_volume.entries,
+        vec![
+            ("Efectivo".to_string(), 1_361),
+            ("EnZona".to_string(), 1_361)
+        ]
+    );
+    // The currency ranking, which an order contributes to exactly once,
+    // still adds up to the volume.
+    assert_eq!(
+        market.fiats_by_volume.entries,
+        vec![("CUP".to_string(), 1_361)]
+    );
+}
