@@ -263,9 +263,10 @@ pub async fn run(context: &Context<'_>, kind: Option<u16>, now: i64) -> Result<(
     let from = context.cli.from.unwrap_or(settings.indexer.backfill_from);
     let range = Range::resolve(Some(from), context.cli.until, now)?;
 
-    let client = RelayClient::connect(&settings.nostr.relays)
+    let relays = super::relays::connection_set(context.pool, settings, now).await?;
+    let client = RelayClient::connect(&relays)
         .await
-        .context("connecting to the configured relays")?;
+        .context("connecting to the relays")?;
 
     let pipeline = Pipeline::new(context.pool.clone(), Policy::from(&settings.indexer));
     let counts = Backfill::new(&client, &pipeline)

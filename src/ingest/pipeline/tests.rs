@@ -37,6 +37,7 @@ async fn count(pool: &SqlitePool, sql: &'static str) -> i64 {
 }
 
 const EVENTS: &str = "SELECT COUNT(*) FROM events";
+const RELAYS: &str = "SELECT COUNT(*) FROM relays";
 const ORDER_VERSIONS: &str = "SELECT COUNT(*) FROM order_versions";
 const INSTANCES: &str = "SELECT COUNT(*) FROM instances";
 const INSTANCE_INFO: &str = "SELECT COUNT(*) FROM instance_info";
@@ -284,9 +285,12 @@ async fn instance_info_lands_and_names_the_instance() {
 
 #[tokio::test]
 async fn a_kind_with_no_parser_is_rejected_but_stays_in_the_archive() {
-    // Arrange
+    // Arrange: a plain note. A relay can send anything; nothing here reads
+    // a kind 1.
     let pool = migrated().await;
-    let event = load(10002, "typical");
+    let event = EventBuilder::new(Kind::from_u16(1), "hello")
+        .finalize(&Keys::generate())
+        .expect("signing");
 
     // Act
     let outcome = pipeline(&pool, open_policy())
@@ -297,13 +301,60 @@ async fn a_kind_with_no_parser_is_rejected_but_stays_in_the_archive() {
     // Assert
     assert_eq!(
         outcome,
-        IngestOutcome::Rejected(Rejection::UnsupportedKind { kind: 10002 })
+        IngestOutcome::Rejected(Rejection::UnsupportedKind { kind: 1 })
     );
-    // Archived on purpose: 30078 and 10002 are part of the corpus, they just
-    // have no parser yet. Keeping the raw event is what lets a later
-    // `rebuild --from-raw` read them without going back to the relays.
+    // Archived on purpose: keeping the raw event is what lets a later
+    // `rebuild --from-raw` read it if a parser ever lands.
     assert_eq!(count(&pool, EVENTS).await, 1);
     assert_eq!(count(&pool, ORDER_VERSIONS).await, 0);
+}
+
+#[tokio::test]
+async fn a_relay_list_from_a_vouched_instance_records_where_it_publishes() {
+    // Arrange: the instance is listed, so its untagged 10002 is taken.
+    let pool = migrated().await;
+    let event = load(10002, "typical");
+    let policy = Policy::new(vec![event.pubkey.to_hex()], false, [Network::Mainnet]);
+
+    // Act
+    let outcome = pipeline(&pool, policy)
+        .ingest(&event, RELAY, NOW)
+        .await
+        .expect("ingest");
+
+    // Assert
+    assert_eq!(outcome, IngestOutcome::Stored);
+    let relays = repo::relays::all(&pool).await.expect("relays");
+    assert_eq!(
+        relays
+            .iter()
+            .map(|relay| relay.url.as_str())
+            .collect::<Vec<_>>(),
+        ["wss://nos.lol", "wss://relay.mostro.network"]
+    );
+    assert!(relays.iter().all(|relay| relay.source
+        == repo::relays::Source::Nip65 {
+            pubkey: event.pubkey.to_hex()
+        }));
+}
+
+#[tokio::test]
+async fn a_relay_list_from_a_publisher_nobody_vouches_for_is_refused() {
+    // A 10002 carries no `y` tag, so an unlisted, unproven publisher could
+    // otherwise name any relay for bestiario to dial.
+    let pool = migrated().await;
+    let event = load(10002, "typical");
+
+    let outcome = pipeline(&pool, open_policy())
+        .ingest(&event, RELAY, NOW)
+        .await
+        .expect("ingest");
+
+    assert!(matches!(
+        outcome,
+        IngestOutcome::Rejected(Rejection::UnvouchedPublisher { kind: 10002, .. })
+    ));
+    assert_eq!(count(&pool, RELAYS).await, 0);
 }
 
 #[tokio::test]

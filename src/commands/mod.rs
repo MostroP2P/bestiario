@@ -15,6 +15,7 @@ pub mod order;
 pub mod query;
 pub mod range;
 pub mod rebuild;
+mod relays;
 pub mod stats;
 pub mod summary;
 pub mod sync;
