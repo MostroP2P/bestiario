@@ -35,6 +35,7 @@ pub mod dev_fees;
 pub mod disputes;
 pub mod instances;
 pub mod lifecycle;
+pub mod market;
 pub mod metric;
 pub mod percentile;
 pub mod rates;

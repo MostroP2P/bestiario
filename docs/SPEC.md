@@ -405,10 +405,10 @@ Convention: `∑` = aggregate; `%` = proportion; `p50/p90` = percentiles;
 | Average / p50 premium | by `fiat` and `kind`, over completed |
 | Premium spread | `p50(premium sell) − p50(premium buy)` per fiat |
 | Market vs. fixed | % of market-price orders |
-| Range orders | % with `[min,max]`; and average range width |
+| Range orders | % with `[min,max]`; and average range width, relative — mean `(max − min) / max`, since a block may mix currencies. A single-currency block (`--by fiat`) also carries the absolute mean `max − min`, in that currency |
 | Fiat ranking | by # orders and by volume; top-3 concentration and HHI |
-| Payment-method ranking | by # and volume; per fiat |
-| New currencies / methods | first sighting in the period |
+| Payment-method ranking | by # and volume; per fiat. Over the `pm` of the order's **first** version — what was on the book — not of the projection, which a later amendment moves |
+| New currencies / methods | first sighting in the period, dated by the creation of the first order to publish it (same first-version rule as the ranking) |
 
 ### 6.4 Timing
 

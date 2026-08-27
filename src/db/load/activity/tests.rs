@@ -90,8 +90,12 @@ async fn a_completed_order_carries_its_whole_lifecycle() {
             direction: activity::Direction::Sell,
             fiat_code: "VES".to_string(),
             payment_methods: vec!["face to face".to_string(), "bank".to_string()],
+            created_payment_methods: vec!["face to face".to_string(), "bank".to_string()],
             amount_sats: 21_000,
             fiat_amount: Some(100.0),
+            premium: 5.0,
+            is_market_price: false,
+            fiat_range: None,
             taken_at: Some(T0 + 600),
             success_at: Some(T0 + 1_200),
             canceled_at: None,
@@ -203,4 +207,76 @@ async fn completed_in_reads_only_the_orders_settled_inside_the_bounds() {
     let ids: Vec<&str> = orders.iter().map(|order| order.order_id.as_str()).collect();
     assert_eq!(ids, ["inside"]);
     assert_eq!(orders[0].success_at, Some(T0 + 10));
+}
+
+#[tokio::test]
+async fn price_type_and_range_come_from_the_first_version() {
+    // Arrange: a market-price range order — `amt = 0`, `fa = [10, 100]` —
+    // taken and settled at 21 000 sats for a fixed 50.
+    let pool = migrated().await;
+    ingest(
+        &pool,
+        &OrderVersion {
+            amount_sats: 0,
+            fiat: FiatAmount::Range {
+                min: 10.0,
+                max: 100.0,
+            },
+            ..version("o1", ALPHA, T0, Status::Pending)
+        },
+    )
+    .await;
+    ingest(
+        &pool,
+        &OrderVersion {
+            fiat: FiatAmount::Fixed(50.0),
+            ..version("o1", ALPHA, T0 + 600, Status::Success)
+        },
+    )
+    .await;
+
+    // Act
+    let orders = orders(&pool, &mainnet()).await.expect("load");
+
+    // Assert
+    assert!(orders[0].is_market_price);
+    assert_eq!(orders[0].fiat_range, Some((10.0, 100.0)));
+    assert_eq!(
+        orders[0].amount_sats, 21_000,
+        "sats from the latest version"
+    );
+    assert_eq!(orders[0].fiat_amount, Some(50.0));
+}
+
+#[tokio::test]
+async fn the_payment_methods_of_the_book_come_from_the_first_version() {
+    // Arrange: an order published with `cash` that later advertises `pix`
+    // as well. §6.3 counts what was on the book, §6.1 what it says now.
+    let pool = migrated().await;
+    ingest(
+        &pool,
+        &OrderVersion {
+            payment_methods: vec!["cash".to_string()],
+            ..version("o1", ALPHA, T0, Status::Pending)
+        },
+    )
+    .await;
+    ingest(
+        &pool,
+        &OrderVersion {
+            payment_methods: vec!["cash".to_string(), "pix".to_string()],
+            ..version("o1", ALPHA, T0 + 600, Status::Success)
+        },
+    )
+    .await;
+
+    // Act
+    let orders = orders(&pool, &mainnet()).await.expect("load");
+
+    // Assert
+    assert_eq!(orders[0].created_payment_methods, vec!["cash".to_string()]);
+    assert_eq!(
+        orders[0].payment_methods,
+        vec!["cash".to_string(), "pix".to_string()]
+    );
 }

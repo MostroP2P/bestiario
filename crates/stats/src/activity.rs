@@ -79,7 +79,14 @@ pub struct Order {
     pub status: Status,
     pub direction: Direction,
     pub fiat_code: String,
+    /// From the latest version: what the order advertises now, which is
+    /// what a `--by method` slice of §6.1 asks about.
     pub payment_methods: Vec<String>,
+    /// From the first version: what the maker put on the book. The §6.3
+    /// rankings and first sightings count these, since a method added to
+    /// an order days later was not on offer when the order was created —
+    /// and, dated by the order, would fake an earlier first sighting.
+    pub created_payment_methods: Vec<String>,
     /// From the latest version. Not a §6.1 figure, but what a share of the
     /// network's volume (§6.5) and the summary's sats volume (§6.10) are
     /// summed from; see [`crate::volume`].
@@ -87,6 +94,13 @@ pub struct Order {
     /// From the latest version; `None` for a range order, which names no
     /// single amount and so contributes nothing to a fiat sum (§6.2).
     pub fiat_amount: Option<f64>,
+    /// The premium over the market price, in percent, as published.
+    pub premium: f64,
+    /// `amt = 0` on the first version: the sats are set at market price
+    /// when the order is taken (§4 `price_type`).
+    pub is_market_price: bool,
+    /// `[min, max]` of the first version, for a range order (§4 `range`).
+    pub fiat_range: Option<(f64, f64)>,
     /// `created_at` of the first `in-progress` version — when a taker arrived.
     pub taken_at: Option<i64>,
     /// `created_at` of the first `success` version.
