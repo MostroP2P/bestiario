@@ -3,16 +3,21 @@
 use sqlx::{Executor, Sqlite};
 
 use crate::db::repo;
-use crate::stats::rates::{RateBook, Snapshot};
+use crate::stats::rates::{MAX_AGE_SECS, RateBook, Snapshot};
 
-/// Every snapshot stored, from every instance: the fallback of
-/// [`RateBook::rate_at`] needs the others' snapshots, so the book is never
-/// scoped to one instance.
-pub async fn book<'e, E>(executor: E) -> Result<RateBook, sqlx::Error>
+/// The snapshots that can price the orders completed in `[from, until)`,
+/// from every instance: the fallback of [`RateBook::rate_at`] needs the
+/// others' snapshots, so the book is never scoped to one instance — only
+/// to the time it can be asked about.
+///
+/// A quote qualifies for up to [`MAX_AGE_SECS`] after it is published, so
+/// the floor is that much below the window's; nothing published from
+/// `until` onwards can price an order that completed before it.
+pub async fn book<'e, E>(executor: E, from: i64, until: i64) -> Result<RateBook, sqlx::Error>
 where
     E: Executor<'e, Database = Sqlite>,
 {
-    let snapshots = repo::rates::all(executor)
+    let snapshots = repo::rates::published_between(executor, from - MAX_AGE_SECS, until)
         .await?
         .into_iter()
         .map(|snapshot| Snapshot {
@@ -42,7 +47,9 @@ mod tests {
         let mostro = "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390";
 
         // Act
-        let book = book(&pool).await.expect("book");
+        let book = book(&pool, 1_787_740_000, 1_787_800_000)
+            .await
+            .expect("book");
         let own = book.rate_at(mostro, "USD", 1_787_741_000).expect("a rate");
         let other = book
             .rate_at("nobody", "USD", 1_787_741_000)

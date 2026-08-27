@@ -45,6 +45,23 @@ const PLATFORM_TAGGED: [u16; 4] = [
     parse::info::KIND,
 ];
 
+/// The kinds that carry no `y` tag, and so cannot be vouched for by the
+/// platform filter of step 4.
+///
+/// `accept_unknown_instances` is safe for the tagged kinds because the tag
+/// is what makes an unlisted publisher recognisably Mostro's. A rate
+/// snapshot carries no such tag, while being the number every converted
+/// figure of phase 3 is multiplied by — so for these kinds the toggle alone
+/// is not enough: the publisher is either listed in `[indexer].instances` or
+/// has already been seen publishing a platform-tagged event
+/// (`repo::instances::is_platform_proven`).
+///
+/// Ordering works out in practice because [`INDEXED_KINDS`] walks rates last,
+/// so an instance's orders are archived before its snapshot is judged.
+///
+/// [`INDEXED_KINDS`]: crate::nostr::filters::INDEXED_KINDS
+const UNTAGGED_KINDS: [u16; 1] = [parse::rates::KIND];
+
 /// The kinds that carry a `network` tag and so pass the filter of step 5.
 const NETWORK_TAGGED: [u16; 2] = [parse::order::KIND, parse::dev_fee::KIND];
 
@@ -124,6 +141,12 @@ pub enum Rejection {
     UnknownInstance { pubkey: String },
 
     #[error(
+        "`{pubkey}` is not a configured instance and has published no Mostro-tagged event, \
+         so kind {kind}, which carries no `y` tag, is not taken from it"
+    )]
+    UnvouchedPublisher { pubkey: String, kind: u16 },
+
+    #[error(
         "published by {}, not by `{MOSTRO}`",
         .platform.as_deref().map_or_else(|| "no single platform".to_string(), |name| format!("`{name}`"))
     )]
@@ -171,7 +194,13 @@ impl Policy {
 
     /// Whether `pubkey` is one this indexer follows (step 3).
     fn accepts_instance(&self, pubkey: &str) -> bool {
-        self.accept_unknown_instances || self.instances.contains(&pubkey.to_lowercase())
+        self.accept_unknown_instances || self.lists_instance(pubkey)
+    }
+
+    /// Whether `pubkey` was listed by hand in `[indexer].instances`, which is
+    /// the only evidence [`CONFIGURED_PUBLISHERS_ONLY`] accepts.
+    fn lists_instance(&self, pubkey: &str) -> bool {
+        self.instances.contains(&pubkey.to_lowercase())
     }
 
     /// Whether `network` is one this indexer counts (step 5).
@@ -232,6 +261,11 @@ impl Pipeline {
         now: i64,
     ) -> Result<IngestOutcome, sqlx::Error> {
         if let Some(rejection) = self.admit(event) {
+            tracing::debug!(id = %event.id, %rejection, "rejected");
+            return Ok(IngestOutcome::Rejected(rejection));
+        }
+
+        if let Some(rejection) = self.vouched_for(event).await? {
             tracing::debug!(id = %event.id, %rejection, "rejected");
             return Ok(IngestOutcome::Rejected(rejection));
         }
@@ -335,11 +369,13 @@ impl Pipeline {
         }
 
         let pubkey = event.pubkey.to_hex();
+        let kind = event.kind.as_u16();
+
+        // An untagged kind is judged again in `vouched_for`, which needs the
+        // archive; here it only has to clear the allow-list like any other.
         if !self.policy.accepts_instance(&pubkey) {
             return Some(Rejection::UnknownInstance { pubkey });
         }
-
-        let kind = event.kind.as_u16();
 
         if PLATFORM_TAGGED.contains(&kind) && !parse::is_mostro(event) {
             return Some(Rejection::OtherPlatform {
@@ -364,6 +400,28 @@ impl Pipeline {
         }
 
         None
+    }
+
+    /// The one admission rule the event alone cannot answer: whether an
+    /// untagged kind's publisher is one this indexer has reason to believe.
+    ///
+    /// Not archived when it fails, unlike a parse error: the point is that
+    /// nothing is known about the signer, so keeping its payload would fill
+    /// the archive with whatever any key chose to publish under `d`.
+    async fn vouched_for(&self, event: &Event) -> Result<Option<Rejection>, sqlx::Error> {
+        let kind = event.kind.as_u16();
+        if !UNTAGGED_KINDS.contains(&kind) {
+            return Ok(None);
+        }
+
+        let pubkey = event.pubkey.to_hex();
+        if self.policy.lists_instance(&pubkey)
+            || repo::instances::is_platform_proven(&self.pool, &pubkey).await?
+        {
+            return Ok(None);
+        }
+
+        Ok(Some(Rejection::UnvouchedPublisher { pubkey, kind }))
     }
 
     /// Step 7's first half: the event's kind decides which parser reads it.

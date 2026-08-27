@@ -98,6 +98,31 @@ where
     Ok(())
 }
 
+/// Whether this pubkey has ever published an event that identified itself as
+/// Mostro's — an order, a dev fee, a dispute or an instance info.
+///
+/// Those four kinds carry the `y` tag the platform filter checks, so a row in
+/// any of their tables is evidence the pipeline verified once. The `instances`
+/// table is deliberately not consulted: it grows from every indexed kind,
+/// rate snapshots included, so a publisher could vouch for itself with the
+/// very event being judged.
+pub async fn is_platform_proven<'e, E>(executor: E, pubkey: &str) -> Result<bool, sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
+    sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (
+           SELECT 1 FROM order_versions WHERE pubkey = ?1
+           UNION ALL SELECT 1 FROM dev_fees WHERE pubkey = ?1
+           UNION ALL SELECT 1 FROM dispute_versions WHERE pubkey = ?1
+           UNION ALL SELECT 1 FROM instance_info WHERE pubkey = ?1
+         )",
+    )
+    .bind(pubkey)
+    .fetch_one(executor)
+    .await
+}
+
 /// The instance with this pubkey, if it has ever been seen.
 pub async fn find<'e, E>(executor: E, pubkey: &str) -> Result<Option<Instance>, sqlx::Error>
 where

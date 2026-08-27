@@ -267,3 +267,70 @@ async fn an_order_older_than_every_rate_leaves_the_converted_total_missing() {
     );
     assert_eq!(value(&report, "volume.in.USD.orders"), &Value::Count(0));
 }
+
+/// A signed rate event as an instance would publish it.
+fn rate_event(keys: &nostr_sdk::prelude::Keys, at: i64, usd: f64) -> nostr_sdk::prelude::Event {
+    use nostr_sdk::prelude::{EventBuilder, FinalizeEvent, Kind, Tag, Timestamp};
+
+    EventBuilder::new(
+        Kind::from_u16(crate::ingest::parse::rates::KIND),
+        format!(r#"{{"BTC":{{"USD":{usd}}}}}"#),
+    )
+    .tags([
+        Tag::parse(["d", "mostro-rates"]).expect("tag"),
+        Tag::parse(["published_at", &at.to_string()]).expect("tag"),
+    ])
+    .custom_created_at(Timestamp::from_secs(at as u64))
+    .finalize(keys)
+    .expect("signing")
+}
+
+#[tokio::test]
+async fn a_rate_from_an_unvouched_key_cannot_move_the_converted_total() {
+    // Arrange: the whole path, not a hand-inserted row — a stranger's
+    // snapshot has to pass admission before it can price anything, and in
+    // unknown-instance mode nothing about kind 30078 vouches for its
+    // signer. Its quote is 1000× the real one, so if it ever reached the
+    // book the total could not be mistaken for the honest figure.
+    use crate::ingest::pipeline::{Pipeline, Policy};
+
+    let pool = connect_and_migrate("sqlite::memory:")
+        .await
+        .expect("migrate");
+    settled(&pool, "a", FROM + 100, 5_000, FiatAmount::Fixed(50.0)).await;
+    quoted(&pool, ALPHA, FROM, 50_000.0).await;
+
+    let stranger = nostr_sdk::prelude::Keys::generate();
+    let pipeline = Pipeline::new(
+        pool.clone(),
+        Policy::new(Vec::<String>::new(), true, [Network::Mainnet]),
+    );
+
+    // Act
+    let outcome = pipeline
+        .ingest(
+            &rate_event(&stranger, FROM + 50, 50_000_000.0),
+            "wss://r",
+            NOW,
+        )
+        .await
+        .expect("ingest");
+
+    // Assert: turned away, and the figure is the one the honest snapshot gives.
+    assert!(
+        matches!(
+            outcome,
+            crate::ingest::pipeline::IngestOutcome::Rejected(
+                crate::ingest::pipeline::Rejection::UnvouchedPublisher { .. }
+            )
+        ),
+        "{outcome:?}"
+    );
+    let report = report(&pool, &query(), None, Some("USD"), NOW)
+        .await
+        .expect("report");
+    assert_eq!(
+        value(&report, "volume.in.USD.total"),
+        &Value::fiat(2.5, "USD")
+    );
+}
