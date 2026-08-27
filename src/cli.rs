@@ -154,9 +154,12 @@ pub enum StatsCommand {
     },
 
     /// Dev fees sent to the development fund (SPEC §6.6).
+    ///
+    /// Without `--by` the figures cover the whole window; with it, one
+    /// block per instance or per calendar month.
     DevFees {
-        #[arg(long, value_enum, default_value_t = InstanceOrPeriod::Instance)]
-        by: InstanceOrPeriod,
+        #[arg(long, value_enum)]
+        by: Option<InstanceOrPeriod>,
     },
 
     /// Disputes by status, initiator and outcome (SPEC §6.7).

@@ -30,7 +30,9 @@
 //! hand-computed expected value.
 
 pub mod activity;
+pub mod dev_fees;
 pub mod metric;
+pub mod percentile;
 pub mod window;
 
 pub use metric::{Metric, MetricKind, Value};

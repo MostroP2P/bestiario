@@ -7,6 +7,7 @@
 //! the report layer. The families share nothing else, which is why there is
 //! no trait: a submodule per family with its own `run` is the whole of it.
 
+pub mod dev_fees;
 pub mod orders;
 
 #[cfg(test)]
