@@ -40,17 +40,20 @@ fn snapshot(pubkey: &str, published_at: i64, usd: f64) -> Snapshot {
     }
 }
 
-/// alpha publishes at 1000 (50k) and 2000 (52k); beta at 1500 (51k).
+/// alpha publishes at 1000 (50k), 1800 (50k again) and 2000 (52k); beta
+/// at 1500 (51k).
 fn book() -> RateBook {
     RateBook::new(vec![
         snapshot("alpha", 1_000, 50_000.0),
         snapshot("beta", 1_500, 51_000.0),
+        snapshot("alpha", 1_800, 50_000.0),
         snapshot("alpha", 2_000, 52_000.0),
     ])
 }
 
-/// Four of alpha's orders, all priced at its 1000 snapshot: 5k, 30k, 150k
-/// and 2M sats at 50k USD/BTC are 2.5, 15, 75 and 1000 USD.
+/// Four of alpha's orders, all priced at 50k USD/BTC — the first three on
+/// its 1000 snapshot, the last on its 1800 one: 5k, 30k, 150k and 2M sats
+/// are 2.5, 15, 75 and 1000 USD.
 fn priced() -> Vec<Order> {
     vec![
         order("a", "alpha", 1_100, 5_000),
@@ -77,9 +80,9 @@ fn the_total_is_each_order_at_the_rate_its_instance_knew_when_it_settled() {
 fn the_rate_age_reported_is_the_oldest_quote_used() {
     let converted = convert(&priced(), WINDOW, &book(), "USD");
 
-    // `d` settled at 1900 on the snapshot from 1000; alpha's 2000 one is
-    // in the future for it.
-    assert_eq!(converted.rate_age_max_secs, Some(900));
+    // `c` settled at 1300 on the snapshot from 1000, the oldest quote used;
+    // `d` at 1900 is on the 1800 one.
+    assert_eq!(converted.rate_age_max_secs, Some(300));
 }
 
 #[test]
@@ -155,7 +158,7 @@ fn every_converted_metric_is_inferred_and_carries_the_rate_age() {
         .expect("the total");
     assert_eq!(total.value, Value::fiat(1_092.5, "USD"));
     assert!(
-        total.error().expect("error").contains("900"),
+        total.error().expect("error").contains("300"),
         "the rate age is in the error: {:?}",
         total.error()
     );
@@ -177,7 +180,7 @@ fn the_metrics_name_the_priced_count_the_unpriced_sats_and_the_age() {
     );
     assert_eq!(metrics[1].value, Value::Count(4));
     assert_eq!(metrics[2].value, Value::Sats(0));
-    assert_eq!(metrics[3].value, Value::Seconds(900));
+    assert_eq!(metrics[3].value, Value::Seconds(300));
 }
 
 #[test]

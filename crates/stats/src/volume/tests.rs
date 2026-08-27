@@ -210,12 +210,15 @@ fn every_observed_volume_metric_is_observed() {
     );
 }
 
+/// 50k USD/BTC, published at 1000 and again at 1800 so that every order
+/// of the dataset settles within five minutes of a snapshot.
 fn usd_book() -> crate::rates::RateBook {
-    crate::rates::RateBook::new(vec![crate::rates::Snapshot {
+    let at = |published_at| crate::rates::Snapshot {
         pubkey: "pk".into(),
-        published_at: 1_000,
+        published_at,
         rates: std::collections::BTreeMap::from([("USD".to_string(), 50_000.0)]),
-    }])
+    };
+    crate::rates::RateBook::new(vec![at(1_000), at(1_800)])
 }
 
 #[test]
