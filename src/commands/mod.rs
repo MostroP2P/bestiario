@@ -71,7 +71,7 @@ async fn dispatch(context: &Context<'_>) -> Result<()> {
             StatsCommand::Volume { by, convert_to } => {
                 stats::volume::run(context, *by, convert_to.as_deref(), now()).await
             }
-            StatsCommand::Market { .. } => not_yet("stats market", 37),
+            StatsCommand::Market { by } => stats::market::run(context, *by, now()).await,
             StatsCommand::Timing { .. } => not_yet("stats timing", 38),
             StatsCommand::DevFees { by } => stats::dev_fees::run(context, *by, now()).await,
             StatsCommand::Disputes { by } => stats::disputes::run(context, *by, now()).await,

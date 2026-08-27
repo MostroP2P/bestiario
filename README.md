@@ -352,6 +352,52 @@ Here the one completed order settled hours before the first rate snapshot
 was captured, so there is nothing to price it with: the total is `—`, not
 `0.00 USD`, and the excluded sats are counted.
 
+### Market
+
+```console
+$ bestiario stats market --from 2026-08-23 --until 2026-08-27
+2026-08-23T00:00:00+00:00 — 2026-08-27T00:00:00+00:00
+┌───────────────────────────────┬──────────────────────────────────────────────────────────────────────────────┐
+│ metric                        ┆ value                                                                        │
+╞═══════════════════════════════╪══════════════════════════════════════════════════════════════════════════════╡
+│ market.orders                 ┆ 8                                                                            │
+│ market.buy_orders_share       ┆ 50.0%                                                                        │
+│ market.buy_volume_share       ┆ 0.0%                                                                         │
+│ market.premium_avg            ┆ 10.0%                                                                        │
+│ market.premium_p50            ┆ 10.0%                                                                        │
+│ market.premium_p50_buy        ┆ —                                                                            │
+│ market.premium_p50_sell       ┆ 10.0%                                                                        │
+│ market.premium_spread         ┆ —                                                                            │
+│ market.market_price_share     ┆ 50.0%                                                                        │
+│ market.range_share            ┆ 50.0%                                                                        │
+│ market.range_width_avg        ┆ 82.8%                                                                        │
+│ market.fiat_top3_by_orders    ┆ ARS 2, BRL 2, EUR 2                                                          │
+│ market.fiat_top3_orders_share ┆ 75.0%                                                                        │
+│ market.fiat_hhi_orders        ┆ 21.9%                                                                        │
+│ market.fiat_top3_by_volume    ┆ CUP 1361 sats                                                                │
+│ market.fiat_top3_volume_share ┆ 100.0%                                                                       │
+│ market.fiat_hhi_volume        ┆ 100.0%                                                                       │
+│ market.method_top3_by_orders  ┆ CBU 2, CVU 2, BBVA Efectivo Móvil 1                                          │
+│ market.method_top3_by_volume  ┆ Efectivo 1361 sats, EnZona 1361 sats                                         │
+│ market.new_fiats              ┆ ARS, BRL, CUP, EUR, USD                                                      │
+│ market.new_methods            ┆ BBVA Efectivo Móvil, Belo, CBU, CVU, DePix, Efectivo, EnZona, Lemon, +7 more │
+└───────────────────────────────┴──────────────────────────────────────────────────────────────────────────────┘
+```
+
+Which way the book leans and at what price. Pressure is the buy share of
+the orders created in the window and of the sats completed in it; the
+premiums are those of the completed orders — an open order's premium is
+only an ask — as average, median, median by side and the spread between
+the sides. `market_price_share` is the share of orders born with `amt = 0`,
+priced when taken; `range_share` the share published as `[min, max]`, with
+the mean relative width `(max − min) ÷ max`. Currencies and payment methods
+are ranked by orders created and by sats completed, with the top-three
+share and the Herfindahl–Hirschman index of each ranking, and `new_fiats`
+/ `new_methods` list what was seen for the first time in the window — the
+first eight, and a count of the rest. `--by fiat`, `--by kind` and
+`--by instance` slice it; a fiat slice drops the currency ranking, which
+says nothing about one currency.
+
 ### Dev fees
 
 ```console

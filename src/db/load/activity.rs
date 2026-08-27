@@ -1,9 +1,11 @@
 //! Orders as `stats::activity` sees them (`docs/SPEC.md` §6.1).
 //!
-//! One row per order, read from the projection plus the two facts the
+//! One row per order, read from the projection plus the facts the
 //! projection does not keep: when a taker arrived, which is the first
-//! `in-progress` version, and the expiry of the latest version, which
-//! decides whether a `pending` order is still open.
+//! `in-progress` version; the expiry of the latest version, which decides
+//! whether a `pending` order is still open; and the sats and fiat range of
+//! the first version, which say whether the order was priced at market and
+//! whether it was a range (§4 `price_type`, `range`).
 
 use sqlx::{Executor, QueryBuilder, Sqlite};
 
@@ -25,8 +27,17 @@ where
     let mut query = QueryBuilder::<Sqlite>::new(
         "SELECT o.order_id, o.pubkey, i.name AS instance_name,
                 o.first_seen_at AS created_at, o.final_status AS status, o.kind,
-                o.fiat_code, o.payment_methods, o.amount_sats, o.fiat_amount, o.success_at,
-                o.canceled_at,
+                o.fiat_code, o.payment_methods, o.amount_sats, o.fiat_amount, o.premium,
+                o.success_at, o.canceled_at,
+                (SELECT v.amount_sats FROM order_versions v
+                  WHERE v.order_id = o.order_id
+                  ORDER BY v.created_at ASC, v.event_id ASC LIMIT 1) AS first_amount_sats,
+                (SELECT v.fiat_min FROM order_versions v
+                  WHERE v.order_id = o.order_id
+                  ORDER BY v.created_at ASC, v.event_id ASC LIMIT 1) AS first_fiat_min,
+                (SELECT v.fiat_max FROM order_versions v
+                  WHERE v.order_id = o.order_id
+                  ORDER BY v.created_at ASC, v.event_id ASC LIMIT 1) AS first_fiat_max,
                 (SELECT MIN(v.created_at) FROM order_versions v
                   WHERE v.order_id = o.order_id AND v.status = 'in-progress') AS taken_at,
                 (SELECT v.expires_at FROM order_versions v
@@ -61,6 +72,10 @@ struct Row {
     payment_methods: String,
     amount_sats: i64,
     fiat_amount: Option<f64>,
+    premium: f64,
+    first_amount_sats: Option<i64>,
+    first_fiat_min: Option<f64>,
+    first_fiat_max: Option<f64>,
     success_at: Option<i64>,
     canceled_at: Option<i64>,
     taken_at: Option<i64>,
@@ -82,6 +97,9 @@ impl Row {
             payment_methods: csv::split(&self.payment_methods),
             amount_sats: self.amount_sats,
             fiat_amount: self.fiat_amount,
+            premium: self.premium,
+            is_market_price: self.first_amount_sats == Some(0),
+            fiat_range: self.first_fiat_min.zip(self.first_fiat_max),
             taken_at: self.taken_at,
             success_at: self.success_at,
             canceled_at: self.canceled_at,

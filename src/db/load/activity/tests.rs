@@ -92,6 +92,9 @@ async fn a_completed_order_carries_its_whole_lifecycle() {
             payment_methods: vec!["face to face".to_string(), "bank".to_string()],
             amount_sats: 21_000,
             fiat_amount: Some(100.0),
+            premium: 5.0,
+            is_market_price: false,
+            fiat_range: None,
             taken_at: Some(T0 + 600),
             success_at: Some(T0 + 1_200),
             canceled_at: None,
@@ -178,4 +181,43 @@ async fn orders_come_back_oldest_first() {
 
     let ids: Vec<&str> = loaded.iter().map(|order| order.order_id.as_str()).collect();
     assert_eq!(ids, vec!["early", "late"]);
+}
+
+#[tokio::test]
+async fn price_type_and_range_come_from_the_first_version() {
+    // Arrange: a market-price range order — `amt = 0`, `fa = [10, 100]` —
+    // taken and settled at 21 000 sats for a fixed 50.
+    let pool = migrated().await;
+    ingest(
+        &pool,
+        &OrderVersion {
+            amount_sats: 0,
+            fiat: FiatAmount::Range {
+                min: 10.0,
+                max: 100.0,
+            },
+            ..version("o1", ALPHA, T0, Status::Pending)
+        },
+    )
+    .await;
+    ingest(
+        &pool,
+        &OrderVersion {
+            fiat: FiatAmount::Fixed(50.0),
+            ..version("o1", ALPHA, T0 + 600, Status::Success)
+        },
+    )
+    .await;
+
+    // Act
+    let orders = orders(&pool, &mainnet()).await.expect("load");
+
+    // Assert
+    assert!(orders[0].is_market_price);
+    assert_eq!(orders[0].fiat_range, Some((10.0, 100.0)));
+    assert_eq!(
+        orders[0].amount_sats, 21_000,
+        "sats from the latest version"
+    );
+    assert_eq!(orders[0].fiat_amount, Some(50.0));
 }

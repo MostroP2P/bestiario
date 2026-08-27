@@ -87,6 +87,13 @@ pub struct Order {
     /// From the latest version; `None` for a range order, which names no
     /// single amount and so contributes nothing to a fiat sum (§6.2).
     pub fiat_amount: Option<f64>,
+    /// The premium over the market price, in percent, as published.
+    pub premium: f64,
+    /// `amt = 0` on the first version: the sats are set at market price
+    /// when the order is taken (§4 `price_type`).
+    pub is_market_price: bool,
+    /// `[min, max]` of the first version, for a range order (§4 `range`).
+    pub fiat_range: Option<(f64, f64)>,
     /// `created_at` of the first `in-progress` version — when a taker arrived.
     pub taken_at: Option<i64>,
     /// `created_at` of the first `success` version.

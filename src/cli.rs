@@ -145,9 +145,12 @@ pub enum StatsCommand {
     },
 
     /// Market structure: pressure, premium, concentration (SPEC §6.3).
+    ///
+    /// Without `--by` the figures cover the whole window; with it, one
+    /// block per slice.
     Market {
-        #[arg(long, value_enum, default_value_t = MarketDimension::Fiat)]
-        by: MarketDimension,
+        #[arg(long, value_enum)]
+        by: Option<MarketDimension>,
     },
 
     /// How long each stage of an order takes (SPEC §6.4).
