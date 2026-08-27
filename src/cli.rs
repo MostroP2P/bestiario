@@ -123,9 +123,12 @@ pub enum Command {
 #[derive(Debug, Subcommand)]
 pub enum StatsCommand {
     /// Activity: created, completed, canceled, rates (SPEC §6.1).
+    ///
+    /// Without `--by` the nine figures are reported for the whole window;
+    /// with it, once per slice.
     Orders {
-        #[arg(long, value_enum, default_value_t = OrderDimension::Status)]
-        by: OrderDimension,
+        #[arg(long, value_enum)]
+        by: Option<OrderDimension>,
     },
 
     /// Traded volume in sats and fiat (SPEC §6.2).
@@ -179,7 +182,12 @@ pub enum OrderDimension {
     Fiat,
     Method,
     Instance,
+    /// Calendar months inside the window.
     Period,
+    /// Hour of day (UTC): the histogram of §6.1.
+    Hour,
+    /// Day of week (UTC): the other histogram of §6.1.
+    Weekday,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

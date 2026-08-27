@@ -33,7 +33,8 @@ pub enum Value {
     /// A plain count. Signed: a delta against the previous period is one.
     Count(i64),
     Sats(i64),
-    /// A fraction in `0..=1`, rendered as a percentage.
+    /// A fraction, rendered as a percentage. Usually in `0..=1`; a growth
+    /// figure against the previous period can be negative or exceed one.
     Ratio(f64),
     Seconds(i64),
     Fiat {

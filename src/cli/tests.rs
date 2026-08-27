@@ -160,11 +160,18 @@ fn a_dimension_that_does_not_apply_to_a_family_is_rejected() {
 
 #[test]
 fn stats_families_have_the_documented_defaults() {
+    // No `--by` is the global report, not a slice by some default dimension.
     let cli = expect_parse(&["stats", "orders"]);
     assert!(matches!(
         cli.command,
+        Command::Stats(StatsCommand::Orders { by: None })
+    ));
+
+    let cli = expect_parse(&["stats", "orders", "--by", "weekday"]);
+    assert!(matches!(
+        cli.command,
         Command::Stats(StatsCommand::Orders {
-            by: OrderDimension::Status
+            by: Some(OrderDimension::Weekday)
         })
     ));
 

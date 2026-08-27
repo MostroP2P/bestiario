@@ -612,7 +612,7 @@ bestiario series <metric> [--by month|week|day] [--split instance|kind|fiat]
 bestiario market <FIAT>                      # buy/sell pressure, premium, methods, time to fill
 
 # Metric families (§6.1–6.8) with free slicing
-bestiario stats orders    [--by status|kind|fiat|method|instance|period]
+bestiario stats orders    [--by status|kind|fiat|method|instance|period|hour|weekday]
 bestiario stats volume    [--by kind|fiat|instance|period] [--in USD]
 bestiario stats market    [--by fiat|kind|instance]
 bestiario stats timing    [--by fiat|method|kind|instance]

@@ -11,6 +11,7 @@ use sqlx::SqlitePool;
 pub mod backfill;
 pub mod range;
 pub mod rebuild;
+pub mod stats;
 pub mod sync;
 
 use crate::cli::{Cli, Command, StatsCommand};
@@ -61,7 +62,9 @@ async fn dispatch(context: &Context<'_>) -> Result<()> {
         Command::Orders { .. } => not_yet("orders", 29),
         Command::Rebuild { from_raw } => rebuild::run(context, *from_raw).await,
         Command::Stats(stats) => match stats {
-            StatsCommand::Orders { .. } => not_yet("stats orders", 24),
+            StatsCommand::Orders { by } => {
+                stats::orders::run(context, *by, Utc::now().timestamp()).await
+            }
             StatsCommand::Volume { .. } => not_yet("stats volume", 33),
             StatsCommand::Market { .. } => not_yet("stats market", 36),
             StatsCommand::Timing { .. } => not_yet("stats timing", 37),

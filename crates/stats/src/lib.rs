@@ -29,6 +29,9 @@
 //! is also what makes them testable against a hand-built dataset and a
 //! hand-computed expected value.
 
+pub mod activity;
 pub mod metric;
+pub mod window;
 
 pub use metric::{Metric, MetricKind, Value};
+pub use window::Window;
