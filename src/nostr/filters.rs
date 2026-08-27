@@ -17,6 +17,7 @@ use nostr_sdk::prelude::{Filter, Kind, PublicKey, Timestamp};
 
 use crate::commands::range::Range;
 use crate::ingest::parse::{dev_fee, dispute, info, order, rates, relay_list};
+use crate::ingest::pipeline::UNTAGGED_KINDS;
 
 /// The kinds the pipeline can parse (`docs/SPEC.md` §2.1–§2.6).
 ///
@@ -33,19 +34,43 @@ pub const INDEXED_KINDS: [u16; 6] = [
     relay_list::KIND,
 ];
 
-/// A filter for one kind, optionally narrowed to `authors` and to `range`.
+/// A filter for one kind, narrowed to `range` and to whichever author set
+/// that kind is entitled to; `None` when this run must not ask for it at
+/// all.
 ///
-/// An empty `authors` slice means *any* author, which is what
-/// `accept_unknown_instances` asks for: the platform filter of SPEC §8.1
-/// step 4 then decides what is really a Mostro event. Listing no authors is
-/// not the same as listing none of them — a filter with an empty author list
-/// would match nothing at all — so the field is left off entirely.
+/// # Which authors
+///
+/// A tagged kind gets `authors`, where an empty slice means *any* author —
+/// what `accept_unknown_instances` asks for, with the platform filter of
+/// SPEC §8.1 step 4 deciding afterwards what is really a Mostro event.
+/// Listing no authors is not the same as listing none of them — a filter
+/// with an empty author list would match nothing at all — so the field is
+/// left off entirely.
+///
+/// An untagged kind gets `vouched`, whatever `authors` says. Step 4b takes
+/// a kind 30078 or 10002 only from a publisher already listed or already
+/// seen publishing a `y = mostro` event, so every other answer would be
+/// downloaded, verified and thrown away. For 10002 that is not merely
+/// wasteful: it is the kind *every* Nostr user publishes, and asking for it
+/// of no author in particular turns relay discovery into a crawl of the
+/// network's whole NIP-65 index. With nobody vouched yet there is no such
+/// request to make, and the kind is skipped rather than asked of everyone.
 pub fn for_kind(
     kind: u16,
     authors: &[PublicKey],
+    vouched: &[PublicKey],
     range: Option<Range>,
     limit: Option<usize>,
-) -> Filter {
+) -> Option<Filter> {
+    let authors = if UNTAGGED_KINDS.contains(&kind) {
+        if vouched.is_empty() {
+            return None;
+        }
+        vouched
+    } else {
+        authors
+    };
+
     let mut filter = Filter::new().kind(Kind::from_u16(kind));
 
     // Kind 30078 is NIP-78's generic application-data kind, shared by every
@@ -71,22 +96,28 @@ pub fn for_kind(
         }
     }
 
-    match limit {
+    Some(match limit {
         Some(limit) => filter.limit(limit),
         None => filter,
-    }
+    })
 }
 
-/// One filter per kind in [`INDEXED_KINDS`], in that order.
+/// One filter per kind in [`INDEXED_KINDS`], in that order, leaving out the
+/// kinds this run has nobody to ask about.
 ///
 /// One filter per kind rather than a single filter listing all four, because
 /// the resume cursor of `repo::sync_state` is per `(relay, kind)`: a shared
 /// filter would have to use the oldest cursor of the four and re-read
 /// everything the other three had already covered.
-pub fn per_kind(authors: &[PublicKey], range: Option<Range>, limit: Option<usize>) -> Vec<Filter> {
+pub fn per_kind(
+    authors: &[PublicKey],
+    vouched: &[PublicKey],
+    range: Option<Range>,
+    limit: Option<usize>,
+) -> Vec<Filter> {
     INDEXED_KINDS
         .iter()
-        .map(|&kind| for_kind(kind, authors, range, limit))
+        .filter_map(|&kind| for_kind(kind, authors, vouched, range, limit))
         .collect()
 }
 

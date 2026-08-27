@@ -123,6 +123,29 @@ where
     .await
 }
 
+/// Every pubkey [`is_platform_proven`] would say yes to, sorted.
+///
+/// The same evidence, asked of the whole table at once: who this archive
+/// has already seen publishing as a Mostro instance. It is what a request
+/// for an untagged kind is narrowed to — kind 10002 asked of *any* author
+/// is a request for the relay list of every Nostr user alive, and §8.1
+/// step 4b would throw all but these away after downloading and verifying
+/// them.
+pub async fn platform_proven<'e, E>(executor: E) -> Result<Vec<String>, sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    sqlx::query_scalar::<_, String>(
+        "SELECT pubkey FROM order_versions
+         UNION SELECT pubkey FROM dev_fees
+         UNION SELECT pubkey FROM dispute_versions
+         UNION SELECT pubkey FROM instance_info
+         ORDER BY pubkey",
+    )
+    .fetch_all(executor)
+    .await
+}
+
 /// The instance with this pubkey, if it has ever been seen.
 pub async fn find<'e, E>(executor: E, pubkey: &str) -> Result<Option<Instance>, sqlx::Error>
 where

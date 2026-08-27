@@ -94,7 +94,12 @@ such claim and is dropped, like a URL that cannot be dialled. With the flag
 off the connection set is exactly what `settings.toml` lists, whatever the
 instances have advertised. A relay list carries no `y` tag, so bestiario
 takes one only from a pubkey it already knows as an instance — the same
-rule that guards rate snapshots.
+rule that guards rate snapshots — and it *asks* only about those pubkeys
+too, even with `accept_unknown_instances = true`. Kind 10002 is the kind
+every Nostr user publishes: requesting it of no author in particular would
+download the network's whole NIP-65 index to throw all but a handful of it
+away. Until something has vouched for a publisher, the two untagged kinds
+are not requested at all.
 
 The connection set is not fixed at startup. A relay list read during a
 `backfill` is followed by that same invocation — the run walks the relays it
@@ -107,7 +112,7 @@ happened to know about on the day it started.
 
 ```console
 $ bestiario backfill
-backfill: 21 stored, 4 already known, 5 rejected
+backfill: 21 stored, 5 already known, 3 rejected
 ```
 
 `backfill` walks each relay's history backwards, from now down to
