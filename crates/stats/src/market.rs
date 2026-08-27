@@ -49,6 +49,7 @@ use crate::metric::{Metric, Value};
 use crate::percentile::percentile;
 use crate::window::Window;
 
+pub mod fiat;
 pub mod ranking;
 
 pub use ranking::Ranking;
