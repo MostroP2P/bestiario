@@ -9,7 +9,7 @@
 //! transaction when the pipeline needs several tables to move together
 //! (`docs/SPEC.md` §8.1 step 7).
 
-mod csv;
+pub(crate) mod csv;
 
 pub mod dev_fees;
 pub mod disputes;
