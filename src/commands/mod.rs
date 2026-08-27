@@ -14,6 +14,7 @@ pub mod query;
 pub mod range;
 pub mod rebuild;
 pub mod stats;
+pub mod summary;
 pub mod sync;
 
 use crate::cli::{Cli, Command, StatsCommand};
@@ -55,7 +56,7 @@ async fn dispatch(context: &Context<'_>) -> Result<()> {
     match &context.cli.command {
         Command::Backfill { kind } => backfill::run(context, *kind, Utc::now().timestamp()).await,
         Command::Sync => sync::run(context).await,
-        Command::Summary => not_yet("summary", 28),
+        Command::Summary => summary::run(context, Utc::now().timestamp()).await,
         Command::Instances => instances::list(context, Utc::now().timestamp()).await,
         Command::Instance { instance } => {
             instances::profile(context, instance, Utc::now().timestamp()).await
