@@ -78,6 +78,19 @@ pub enum ValidationError {
     #[error("[indexer].instances contains `{pubkey}`: not a valid npub ({reason})")]
     PubkeyNotNpub { pubkey: String, reason: String },
 
+    /// The same instance appears more than once in
+    /// `[assumptions.dev_fee_percentage]`, spelled differently (hex and
+    /// npub). Neither spelling has precedence, so the file is ambiguous.
+    #[error(
+        "[assumptions.dev_fee_percentage] names `{pubkey}` more than once ({}): \
+         keep a single entry per instance",
+        spellings.join(", ")
+    )]
+    DuplicateDevFeeOverride {
+        pubkey: String,
+        spellings: Vec<String>,
+    },
+
     #[error(
         "[indexer].instances is empty and accept_unknown_instances is false: \
          nothing would ever be indexed"
@@ -253,12 +266,7 @@ impl Settings {
             .iter()
             .map(|p| canonical_pubkey(p))
             .collect::<Result<Vec<_>, _>>()?;
-        let dev_fee_percentage = self
-            .assumptions
-            .dev_fee_percentage
-            .iter()
-            .map(|(k, v)| canonical_pubkey(k).map(|k| (k, *v)))
-            .collect::<Result<BTreeMap<_, _>, _>>()?;
+        let dev_fee_percentage = canonical_dev_fee_overrides(&self.assumptions.dev_fee_percentage)?;
 
         Ok(Self {
             indexer: IndexerSettings {
@@ -388,6 +396,31 @@ fn canonical_pubkey(raw: &str) -> Result<String, ValidationError> {
             pubkey: value,
             reason: error.to_string(),
         })
+}
+
+/// Folds the keys of `[assumptions.dev_fee_percentage]` to hex, rejecting
+/// two spellings of the same instance rather than letting one silently win.
+///
+/// TOML already refuses a literally repeated key, so a collision can only
+/// come from an alias (hex plus npub of the same pubkey), which is easy to
+/// leave behind while migrating a file from one form to the other.
+fn canonical_dev_fee_overrides(
+    raw: &BTreeMap<String, f64>,
+) -> Result<BTreeMap<String, f64>, ValidationError> {
+    let mut spellings: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut folded = BTreeMap::new();
+    for (key, value) in raw {
+        let pubkey = canonical_pubkey(key)?;
+        spellings
+            .entry(pubkey.clone())
+            .or_default()
+            .push(key.trim().to_string());
+        folded.insert(pubkey, *value);
+    }
+    if let Some((pubkey, spellings)) = spellings.into_iter().find(|(_, s)| s.len() > 1) {
+        return Err(ValidationError::DuplicateDevFeeOverride { pubkey, spellings });
+    }
+    Ok(folded)
 }
 
 /// Whether `value` has the `<hrp>1<data>` shape of a bech32 string with a

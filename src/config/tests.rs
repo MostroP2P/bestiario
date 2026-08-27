@@ -597,3 +597,24 @@ fn accepts_a_per_instance_override_keyed_by_npub_and_looks_it_up_by_hex() {
         0.5
     );
 }
+
+#[test]
+fn rejects_a_per_instance_override_given_both_as_hex_and_as_npub() {
+    // While migrating a file from hex to npub an operator may leave both
+    // spellings in place with different values. Neither has precedence, so
+    // the collision is reported rather than one value silently winning.
+    let npub = valid_npub();
+    let hex = "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390";
+    let toml =
+        format!("{VALID}\n[assumptions.dev_fee_percentage]\n\"{hex}\" = 0.5\n\"{npub}\" = 0.6\n");
+
+    let error = expect_invalid(&toml);
+
+    assert_eq!(
+        error,
+        ValidationError::DuplicateDevFeeOverride {
+            pubkey: hex.to_string(),
+            spellings: vec![hex.to_string(), npub],
+        }
+    );
+}
