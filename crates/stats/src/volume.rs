@@ -15,6 +15,7 @@ use std::collections::BTreeMap;
 use crate::activity::{self, Direction, Order, Status};
 use crate::metric::{Metric, Value};
 use crate::percentile::percentile;
+use crate::rates::RateBook;
 use crate::window::Window;
 
 /// The size buckets of §6.2 — `<10k`, `10k–50k`, `50k–200k`, `200k–1M`,
@@ -186,15 +187,41 @@ fn fiat_volume(amounts: &[f64]) -> FiatVolume {
     }
 }
 
+/// What `stats volume --in <CURRENCY>` asks for: the book to price the
+/// orders from, and the currency to price them in.
+#[derive(Debug, Clone, Copy)]
+pub struct Conversion<'a> {
+    pub book: &'a RateBook,
+    pub code: &'a str,
+}
+
 /// The report for `stats volume --by <dimension>`, or the global one when
-/// `dimension` is `None`. Names follow [`crate::activity::report`].
-pub fn report(orders: &[Order], window: Window, dimension: Option<Dimension>) -> Vec<Metric> {
+/// `dimension` is `None`. Names follow [`crate::activity::report`]. With a
+/// `conversion`, the inferred rows of [`converted`] follow the observed
+/// ones of every block.
+pub fn report(
+    orders: &[Order],
+    window: Window,
+    dimension: Option<Dimension>,
+    conversion: Option<Conversion<'_>>,
+) -> Vec<Metric> {
+    let block = |prefix: &str, orders: &[Order], window: Window| {
+        let mut block = metrics(prefix, &summarise(orders, window));
+        if let Some(Conversion { book, code }) = conversion {
+            block.extend(converted::metrics(
+                prefix,
+                &converted::convert(orders, window, book, code),
+            ));
+        }
+        block
+    };
+
     match dimension {
-        None => metrics("volume", &summarise(orders, window)),
+        None => block("volume", orders, window),
         Some(Dimension::Month) => window
             .months()
             .into_iter()
-            .flat_map(|(key, month)| metrics(&format!("volume.{key}"), &summarise(orders, month)))
+            .flat_map(|(key, month)| block(&format!("volume.{key}"), orders, month))
             .collect(),
         Some(grouping) => {
             let by = match grouping {
@@ -207,7 +234,7 @@ pub fn report(orders: &[Order], window: Window, dimension: Option<Dimension>) ->
                 .into_iter()
                 .flat_map(|(key, group)| {
                     let group: Vec<Order> = group.into_iter().cloned().collect();
-                    metrics(&format!("volume.{key}"), &summarise(&group, window))
+                    block(&format!("volume.{key}"), &group, window)
                 })
                 .collect()
         }
@@ -266,6 +293,8 @@ pub fn metrics(prefix: &str, volume: &Volume) -> Vec<Metric> {
 
     metrics
 }
+
+pub mod converted;
 
 #[cfg(test)]
 mod tests;
