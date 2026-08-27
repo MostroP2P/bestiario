@@ -142,3 +142,28 @@ fn the_wrong_kind_is_refused_before_anything_is_read() {
         }
     );
 }
+
+#[test]
+fn a_publication_time_before_the_epoch_is_an_error() {
+    // The phase-3 lookup picks the newest snapshot at or before an order's
+    // timestamp. A snapshot dated before the epoch would sort below every
+    // order, so it could end up the only quote on offer and be reported with
+    // an age of decades. `expires_at` on orders is guarded the same way.
+    let event = rates_event(
+        r#"{"BTC":{"USD":1.0}}"#,
+        &[("d", "mostro-rates"), ("published_at", "-1")],
+    );
+
+    let error = parse(&event).expect_err("negative time");
+
+    assert!(
+        matches!(
+            error,
+            ParseError::OutOfRange {
+                tag: "published_at",
+                ..
+            }
+        ),
+        "{error}"
+    );
+}

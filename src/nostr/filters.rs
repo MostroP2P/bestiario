@@ -18,12 +18,12 @@ use nostr_sdk::prelude::{Filter, Kind, PublicKey, Timestamp};
 use crate::commands::range::Range;
 use crate::ingest::parse::{dev_fee, dispute, info, order, rates};
 
-/// The kinds the pipeline can parse today (`docs/SPEC.md` §2.1–§2.4).
+/// The kinds the pipeline can parse today (`docs/SPEC.md` §2.1–§2.5).
 ///
-/// Kinds 30078 and 10002 are in the spec but have no parser yet, so they are
-/// deliberately absent: subscribing to events nothing can read would spend a
-/// relay's bandwidth to fill the rejected counter. [`for_kind`] takes any
-/// kind, so they cost one line each when their parsers land.
+/// Kind 10002 is in the spec but has no parser yet, so it is deliberately
+/// absent: subscribing to events nothing can read would spend a relay's
+/// bandwidth to fill the rejected counter. [`for_kind`] takes any kind, so it
+/// costs one line when its parser lands.
 pub const INDEXED_KINDS: [u16; 5] = [
     order::KIND,
     dev_fee::KIND,

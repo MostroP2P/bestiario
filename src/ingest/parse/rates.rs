@@ -6,6 +6,16 @@
 //! that a completed order can be valued at the rate *in force when it
 //! completed* (phase 3) rather than at today's.
 //!
+//! # Why every snapshot is stored locally
+//!
+//! Kind 30078 is addressable (NIP-01): a relay keeps only the newest event
+//! per `(pubkey, kind, d)`, and `d` is the fixed `mostro-rates`, so a relay
+//! holds exactly one snapshot per instance — the last one. The history that
+//! phase 3 values orders against therefore only exists in the `rates` table
+//! this parser feeds: what is not captured while it is the current event is
+//! gone from that relay. That is what makes `repo::rates` an archive rather
+//! than a cache, and why a snapshot is never overwritten or pruned.
+//!
 //! The content is validated as strictly as a tag would be: a rate that is
 //! not a finite, positive number is not a rate, and one that slipped through
 //! would multiply every converted figure by nonsense.
@@ -14,7 +24,7 @@ use std::collections::BTreeMap;
 
 use nostr_sdk::prelude::Event;
 
-use super::{ParseError, expect_kind, number, optional, required};
+use super::{ParseError, expect_kind, non_negative, number, optional, required};
 
 /// The kind this parser accepts.
 pub const KIND: u16 = 30078;
@@ -54,7 +64,11 @@ pub fn parse(event: &Event) -> Result<RateSnapshot, ParseError> {
 
     let created_at = event.created_at.as_secs() as i64;
     let published_at = match optional(event, "published_at")? {
-        Some(value) => number("published_at", &value, "a unix timestamp")?,
+        Some(value) => non_negative(
+            "published_at",
+            number::<i64>("published_at", &value, "a unix timestamp")?,
+            "a unix timestamp",
+        )?,
         None => created_at,
     };
 
