@@ -206,6 +206,41 @@ fn a_currency_nobody_quotes_has_no_disparity() {
 }
 
 #[test]
+fn two_quotes_whose_quotient_is_not_a_number_report_no_ratio() {
+    // Both rates are finite and positive — the domain `Feed::rate` admits —
+    // but `f64::MAX / f64::MIN_POSITIVE` is infinity, and an infinity is
+    // not a disparity.
+    let extremes = vec![
+        feed("Dear", NOW - 60, f64::MAX),
+        feed("Cheap", NOW - 61, f64::MIN_POSITIVE),
+    ];
+
+    let disparity = disparity(&extremes, "USD", NOW).expect("both quote USD");
+
+    assert_eq!(disparity.comparable, 2);
+    assert_eq!(disparity.low, Some(f64::MIN_POSITIVE), "still observed");
+    assert_eq!(disparity.high, Some(f64::MAX));
+    assert_eq!(disparity.ratio, None);
+
+    let metrics = report(&extremes, Some("USD"), NOW);
+    assert_eq!(value(&metrics, "USD.disparity"), &Value::Missing);
+}
+
+#[test]
+fn a_finite_disparity_between_far_apart_quotes_is_still_reported() {
+    // The guard rejects only what is not a number: a ratio of a million
+    // is a disparity, however implausible, and stays one.
+    let far = vec![
+        feed("Dear", NOW - 60, 1_000_000.0),
+        feed("Cheap", NOW - 61, 1.0),
+    ];
+
+    let disparity = disparity(&far, "USD", NOW).expect("both quote USD");
+
+    assert_eq!(disparity.ratio, Some(999_999.0));
+}
+
+#[test]
 fn the_global_report_names_every_bucket_then_every_feed() {
     let metrics = report(&feeds(), None, NOW);
     let names: Vec<&str> = metrics.iter().map(|metric| metric.name.as_str()).collect();

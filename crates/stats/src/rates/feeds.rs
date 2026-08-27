@@ -183,7 +183,9 @@ pub struct Disparity {
     /// The cheapest and dearest of *those*; `None` when none is fresh.
     pub low: Option<f64>,
     pub high: Option<f64>,
-    /// `high / low − 1`; `None` unless two quotes are comparable.
+    /// `high / low − 1`; `None` unless two quotes are comparable, and
+    /// `None` too when the two are so far apart that the quotient is no
+    /// longer a number.
     pub ratio: Option<f64>,
 }
 
@@ -215,10 +217,13 @@ pub fn disparity(feeds: &[Feed], fiat: &str, now: i64) -> Option<Disparity> {
         high,
         // One voice disagrees with nobody: a disparity needs two quotes
         // standing at the same instant, and without them there is no
-        // answer rather than a zero.
+        // answer rather than a zero. Two finite quotes far enough apart
+        // divide to infinity, which is no answer either — `low` and
+        // `high` are the observation there, and the ratio is not one.
         ratio: (comparable.len() > 1)
             .then(|| Some(high? / low? - 1.0))
-            .flatten(),
+            .flatten()
+            .filter(|ratio| ratio.is_finite()),
     })
 }
 
