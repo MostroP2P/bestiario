@@ -1,69 +1,226 @@
-//! Observed volume — the one row of `docs/SPEC.md` §6.2 phase 2 needs.
+//! Observed volume — `docs/SPEC.md` §6.2, the rows that need no rate.
 //!
-//! The rest of §6.2 (fiat volume, tickets, size buckets, the inferred
-//! conversion) is roadmap PR 34. What the bestiary (§6.5) and the summary
-//! (§6.10) need before then is the sats volume alone: the sum of
-//! `amount_sats` over orders completed in the window, dated by
-//! `success_at` like every completed-side figure in [`crate::activity`].
+//! Everything here is a sum, a percentile or a count over the orders that
+//! reached `success` in the window, dated by `success_at` like every
+//! completed-side figure in [`crate::activity`]. The two inferred rows of
+//! §6.2 — the conversion into a reference currency and the volume implied
+//! by dev fees — are roadmap PRs 35 and 36 and live beside this, marked as
+//! what they are.
+//!
+//! Fiat figures are per currency and skip range orders: a range order
+//! names no single fiat amount, so it has sats to add and no fiat to add.
 
-use crate::activity::{Order, Status};
+use std::collections::BTreeMap;
+
+use crate::activity::{self, Direction, Order, Status};
+use crate::metric::{Metric, Value};
+use crate::percentile::percentile;
 use crate::window::Window;
+
+/// The size buckets of §6.2, as `(label, exclusive upper bound in sats)`;
+/// the last one is open.
+pub const BUCKETS: [(&str, i64); 5] = [
+    ("lt_10k", 10_000),
+    ("10k_50k", 50_000),
+    ("50k_200k", 200_000),
+    ("200k_1m", 1_000_000),
+    ("gt_1m", i64::MAX),
+];
+
+/// The ways `stats volume --by` can slice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Dimension {
+    Kind,
+    Fiat,
+    Instance,
+    /// Calendar months inside the window, each reported as its own window.
+    Month,
+}
+
+/// The fiat side of one currency.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FiatVolume {
+    /// `∑ fiat_amount` of completed fixed-amount orders in this currency.
+    pub total: f64,
+    /// How many of them.
+    pub orders: u64,
+    pub ticket_avg: f64,
+    pub ticket_p50: f64,
+    pub ticket_p90: f64,
+}
+
+/// The observed §6.2 figures for one window.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Volume {
+    /// Orders that reached `success` in the window.
+    pub completed: u64,
+    /// `∑ amount_sats` over them.
+    pub sats: i64,
+    /// Ticket sizes in sats; `None` when nothing completed.
+    pub ticket_avg: Option<i64>,
+    pub ticket_p50: Option<i64>,
+    pub ticket_p90: Option<i64>,
+    /// The largest completed order.
+    pub largest: Option<i64>,
+    /// Completed orders per size bucket, in [`BUCKETS`] order.
+    pub buckets: [u64; 5],
+    /// The sats split by the maker's side.
+    pub buy_sats: i64,
+    pub sell_sats: i64,
+    /// Per currency code, over the fixed-amount orders only.
+    pub fiat: BTreeMap<String, FiatVolume>,
+}
 
 /// `∑ amount_sats` of the orders that reached `success` in `window`.
 pub fn observed_sats(orders: &[Order], window: Window) -> i64 {
-    orders
-        .iter()
-        .filter(|order| order.status == Status::Success)
-        .filter(|order| order.success_at.is_some_and(|at| window.contains(at)))
+    completed(orders, window)
         .map(|order| order.amount_sats)
         .sum()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::activity::Direction;
+/// The orders that reached `success` in `window`.
+pub fn completed(orders: &[Order], window: Window) -> impl Iterator<Item = &Order> {
+    orders
+        .iter()
+        .filter(|order| order.status == Status::Success)
+        .filter(move |order| order.success_at.is_some_and(|at| window.contains(at)))
+}
 
-    fn order(id: &str, status: Status, success_at: Option<i64>, amount_sats: i64) -> Order {
-        Order {
-            order_id: id.to_string(),
-            pubkey: "pk".into(),
-            instance: "pk".into(),
-            created_at: 500,
-            status,
-            direction: Direction::Buy,
-            fiat_code: "ARS".into(),
-            payment_methods: vec![],
-            amount_sats,
-            taken_at: None,
-            success_at,
-            canceled_at: None,
-            expires_at: None,
+/// The §6.2 observed figures for `orders` over `window`.
+pub fn summarise(orders: &[Order], window: Window) -> Volume {
+    let done: Vec<&Order> = completed(orders, window).collect();
+    let sizes: Vec<i64> = done.iter().map(|order| order.amount_sats).collect();
+
+    let mut buckets = [0; 5];
+    for &size in &sizes {
+        let index = BUCKETS
+            .iter()
+            .position(|(_, upper)| size < *upper)
+            .expect("the last bucket is open");
+        buckets[index] += 1;
+    }
+
+    let side = |direction: Direction| {
+        done.iter()
+            .filter(|order| order.direction == direction)
+            .map(|order| order.amount_sats)
+            .sum()
+    };
+
+    let mut by_fiat: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+    for order in &done {
+        if let Some(amount) = order.fiat_amount {
+            by_fiat
+                .entry(order.fiat_code.clone())
+                .or_default()
+                .push(amount);
         }
     }
+    let fiat = by_fiat
+        .into_iter()
+        .map(|(code, amounts)| {
+            let total: f64 = amounts.iter().sum();
+            let volume = FiatVolume {
+                total,
+                orders: amounts.len() as u64,
+                ticket_avg: total / amounts.len() as f64,
+                ticket_p50: percentile(&amounts, 0.5).expect("non-empty"),
+                ticket_p90: percentile(&amounts, 0.9).expect("non-empty"),
+            };
+            (code, volume)
+        })
+        .collect();
 
-    #[test]
-    fn volume_sums_the_orders_completed_in_the_window() {
-        // Arrange
-        let orders = vec![
-            order("in", Status::Success, Some(1_500), 100),
-            order("also", Status::Success, Some(1_999), 200),
-            order("before", Status::Success, Some(999), 400),
-            order("open", Status::Pending, None, 800),
-            // Canceled after a taker: never completed, whatever it was worth.
-            order("gone", Status::Canceled, None, 1_600),
-        ];
-
-        // Act
-        let volume = observed_sats(&orders, Window::new(1_000, 2_000));
-
-        // Assert
-        assert_eq!(volume, 300);
-    }
-
-    #[test]
-    fn no_completed_orders_is_zero_volume_not_a_missing_one() {
-        // Unlike a rate, a sum over nothing is a real answer: nothing traded.
-        assert_eq!(observed_sats(&[], Window::new(0, 1)), 0);
+    Volume {
+        completed: done.len() as u64,
+        sats: sizes.iter().sum(),
+        ticket_avg: (!sizes.is_empty()).then(|| sizes.iter().sum::<i64>() / sizes.len() as i64),
+        ticket_p50: percentile(&sizes, 0.5),
+        ticket_p90: percentile(&sizes, 0.9),
+        largest: sizes.iter().copied().max(),
+        buckets,
+        buy_sats: side(Direction::Buy),
+        sell_sats: side(Direction::Sell),
+        fiat,
     }
 }
+
+/// The report for `stats volume --by <dimension>`, or the global one when
+/// `dimension` is `None`. Names follow [`crate::activity::report`].
+pub fn report(orders: &[Order], window: Window, dimension: Option<Dimension>) -> Vec<Metric> {
+    match dimension {
+        None => metrics("volume", &summarise(orders, window)),
+        Some(Dimension::Month) => window
+            .months()
+            .into_iter()
+            .flat_map(|(key, month)| metrics(&format!("volume.{key}"), &summarise(orders, month)))
+            .collect(),
+        Some(grouping) => {
+            let by = match grouping {
+                Dimension::Kind => activity::Dimension::Kind,
+                Dimension::Fiat => activity::Dimension::Fiat,
+                Dimension::Instance => activity::Dimension::Instance,
+                Dimension::Month => unreachable!("handled above"),
+            };
+            activity::slice(orders, by)
+                .into_iter()
+                .flat_map(|(key, group)| {
+                    let group: Vec<Order> = group.into_iter().cloned().collect();
+                    metrics(&format!("volume.{key}"), &summarise(&group, window))
+                })
+                .collect()
+        }
+    }
+}
+
+/// One [`Volume`] as metrics, all observed.
+pub fn metrics(prefix: &str, volume: &Volume) -> Vec<Metric> {
+    let observed = |name: &str, value: Value| Metric::observed(format!("{prefix}.{name}"), value);
+    let sats =
+        |name: &str, value: Option<i64>| observed(name, value.map_or(Value::Missing, Value::Sats));
+
+    let mut metrics = vec![
+        observed("sats", Value::Sats(volume.sats)),
+        observed("completed", Value::Count(volume.completed as i64)),
+        sats("ticket_avg", volume.ticket_avg),
+        sats("ticket_p50", volume.ticket_p50),
+        sats("ticket_p90", volume.ticket_p90),
+        sats("largest", volume.largest),
+    ];
+    for ((label, _), count) in BUCKETS.iter().zip(volume.buckets) {
+        metrics.push(observed(
+            &format!("size.{label}"),
+            Value::Count(count as i64),
+        ));
+    }
+    metrics.push(observed("buy_sats", Value::Sats(volume.buy_sats)));
+    metrics.push(observed("sell_sats", Value::Sats(volume.sell_sats)));
+    for (code, fiat) in &volume.fiat {
+        let fiat_value = |amount: f64| Value::fiat(amount, code.clone());
+        metrics.push(observed(
+            &format!("fiat.{code}.total"),
+            fiat_value(fiat.total),
+        ));
+        metrics.push(observed(
+            &format!("fiat.{code}.orders"),
+            Value::Count(fiat.orders as i64),
+        ));
+        metrics.push(observed(
+            &format!("fiat.{code}.ticket_avg"),
+            fiat_value(fiat.ticket_avg),
+        ));
+        metrics.push(observed(
+            &format!("fiat.{code}.ticket_p50"),
+            fiat_value(fiat.ticket_p50),
+        ));
+        metrics.push(observed(
+            &format!("fiat.{code}.ticket_p90"),
+            fiat_value(fiat.ticket_p90),
+        ));
+    }
+
+    metrics
+}
+
+#[cfg(test)]
+mod tests;

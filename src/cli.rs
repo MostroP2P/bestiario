@@ -132,9 +132,12 @@ pub enum StatsCommand {
     },
 
     /// Traded volume in sats and fiat (SPEC §6.2).
+    ///
+    /// Without `--by` the figures cover the whole window; with it, one
+    /// block per slice.
     Volume {
-        #[arg(long, value_enum, default_value_t = VolumeDimension::Fiat)]
-        by: VolumeDimension,
+        #[arg(long, value_enum)]
+        by: Option<VolumeDimension>,
 
         /// Convert into this currency. Inferred, and reported as such.
         #[arg(long = "in", value_name = "CURRENCY")]

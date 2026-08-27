@@ -84,6 +84,9 @@ pub struct Order {
     /// network's volume (§6.5) and the summary's sats volume (§6.10) are
     /// summed from; see [`crate::volume`].
     pub amount_sats: i64,
+    /// From the latest version; `None` for a range order, which names no
+    /// single amount and so contributes nothing to a fiat sum (§6.2).
+    pub fiat_amount: Option<f64>,
     /// `created_at` of the first `in-progress` version — when a taker arrived.
     pub taken_at: Option<i64>,
     /// `created_at` of the first `success` version.

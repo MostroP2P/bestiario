@@ -68,12 +68,14 @@ async fn dispatch(context: &Context<'_>) -> Result<()> {
         Command::Rebuild { from_raw } => rebuild::run(context, *from_raw).await,
         Command::Stats(stats) => match stats {
             StatsCommand::Orders { by } => stats::orders::run(context, *by, now()).await,
-            StatsCommand::Volume { .. } => not_yet("stats volume", 33),
-            StatsCommand::Market { .. } => not_yet("stats market", 36),
-            StatsCommand::Timing { .. } => not_yet("stats timing", 37),
+            StatsCommand::Volume { by, convert_to } => {
+                stats::volume::run(context, *by, convert_to.as_deref(), now()).await
+            }
+            StatsCommand::Market { .. } => not_yet("stats market", 37),
+            StatsCommand::Timing { .. } => not_yet("stats timing", 38),
             StatsCommand::DevFees { by } => stats::dev_fees::run(context, *by, now()).await,
             StatsCommand::Disputes { by } => stats::disputes::run(context, *by, now()).await,
-            StatsCommand::Rates { .. } => not_yet("stats rates", 38),
+            StatsCommand::Rates { .. } => not_yet("stats rates", 39),
         },
     }
 }

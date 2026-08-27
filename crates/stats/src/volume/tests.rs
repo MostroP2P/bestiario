@@ -1,0 +1,210 @@
+//! A hand-built dataset and hand-computed expected values (`docs/SPEC.md` §12).
+
+use super::*;
+
+const WINDOW: Window = Window {
+    from: 1_000,
+    until: 2_000,
+};
+
+fn order(id: &str, status: Status, success_at: Option<i64>, sats: i64) -> Order {
+    Order {
+        order_id: id.to_string(),
+        pubkey: "pk".into(),
+        instance: "Alpha (pk)".into(),
+        created_at: 500,
+        status,
+        direction: Direction::Buy,
+        fiat_code: "ARS".into(),
+        payment_methods: vec![],
+        amount_sats: sats,
+        fiat_amount: Some(sats as f64 / 100.0),
+        taken_at: None,
+        success_at,
+        canceled_at: None,
+        expires_at: None,
+    }
+}
+
+/// Completed in the window: 5k (buy, ARS 50), 30k (sell, ARS 300), 150k
+/// (buy, USD 15), 2M (sell, range order: no fiat). Outside: one before, one
+/// pending, one canceled.
+fn dataset() -> Vec<Order> {
+    vec![
+        order("a", Status::Success, Some(1_100), 5_000),
+        Order {
+            direction: Direction::Sell,
+            ..order("b", Status::Success, Some(1_200), 30_000)
+        },
+        Order {
+            fiat_code: "USD".into(),
+            fiat_amount: Some(15.0),
+            ..order("c", Status::Success, Some(1_300), 150_000)
+        },
+        Order {
+            direction: Direction::Sell,
+            fiat_amount: None,
+            ..order("d", Status::Success, Some(1_900), 2_000_000)
+        },
+        order("before", Status::Success, Some(999), 999_999),
+        order("open", Status::Pending, None, 999_999),
+        order("gone", Status::Canceled, None, 999_999),
+    ]
+}
+
+#[test]
+fn volume_sums_the_orders_completed_in_the_window() {
+    // Arrange / Act
+    let volume = summarise(&dataset(), WINDOW);
+
+    // Assert
+    assert_eq!(volume.completed, 4);
+    assert_eq!(volume.sats, 2_185_000);
+    assert_eq!(observed_sats(&dataset(), WINDOW), 2_185_000);
+}
+
+#[test]
+fn tickets_are_average_and_nearest_rank_percentiles_in_sats() {
+    let volume = summarise(&dataset(), WINDOW);
+
+    assert_eq!(volume.ticket_avg, Some(546_250));
+    assert_eq!(volume.ticket_p50, Some(30_000));
+    assert_eq!(volume.ticket_p90, Some(2_000_000));
+    assert_eq!(volume.largest, Some(2_000_000));
+}
+
+#[test]
+fn every_completed_order_lands_in_exactly_one_size_bucket() {
+    let volume = summarise(&dataset(), WINDOW);
+
+    // 5k → <10k; 30k → 10k–50k; 150k → 50k–200k; 2M → >1M.
+    assert_eq!(volume.buckets, [1, 1, 1, 0, 1]);
+    assert_eq!(volume.buckets.iter().sum::<u64>(), volume.completed);
+}
+
+#[test]
+fn the_boundaries_of_the_buckets_are_exclusive_above() {
+    let orders = vec![
+        order("a", Status::Success, Some(1_100), 10_000),
+        order("b", Status::Success, Some(1_100), 1_000_000),
+    ];
+
+    assert_eq!(summarise(&orders, WINDOW).buckets, [0, 1, 0, 0, 1]);
+}
+
+#[test]
+fn volume_splits_by_the_maker_s_side() {
+    let volume = summarise(&dataset(), WINDOW);
+
+    assert_eq!(volume.buy_sats, 155_000);
+    assert_eq!(volume.sell_sats, 2_030_000);
+    assert_eq!(volume.buy_sats + volume.sell_sats, volume.sats);
+}
+
+#[test]
+fn fiat_volume_is_per_currency_and_skips_range_orders() {
+    let volume = summarise(&dataset(), WINDOW);
+
+    let ars = &volume.fiat["ARS"];
+    assert_eq!(ars.total, 350.0);
+    assert_eq!(ars.orders, 2, "the range order has no fiat amount");
+    assert_eq!(ars.ticket_avg, 175.0);
+    assert_eq!(ars.ticket_p50, 50.0);
+    assert_eq!(ars.ticket_p90, 300.0);
+    assert_eq!(volume.fiat["USD"].total, 15.0);
+    assert_eq!(volume.fiat.len(), 2);
+}
+
+#[test]
+fn an_empty_window_is_zero_volume_with_no_tickets() {
+    let volume = summarise(&dataset(), Window::new(5_000, 6_000));
+
+    assert_eq!(volume.sats, 0);
+    assert_eq!(volume.ticket_avg, None);
+    assert_eq!(volume.largest, None);
+    assert!(volume.fiat.is_empty());
+    assert_eq!(volume, Volume::default());
+}
+
+#[test]
+fn no_completed_orders_is_zero_volume_not_a_missing_one() {
+    // Unlike a rate, a sum over nothing is a real answer: nothing traded.
+    assert_eq!(observed_sats(&[], Window::new(0, 1)), 0);
+}
+
+#[test]
+fn the_global_report_names_the_figures_in_order() {
+    let names: Vec<String> = report(&dataset(), WINDOW, None)
+        .into_iter()
+        .map(|metric| metric.name)
+        .collect();
+
+    assert_eq!(
+        &names[..13],
+        &[
+            "volume.sats",
+            "volume.completed",
+            "volume.ticket_avg",
+            "volume.ticket_p50",
+            "volume.ticket_p90",
+            "volume.largest",
+            "volume.size.lt_10k",
+            "volume.size.10k_50k",
+            "volume.size.50k_200k",
+            "volume.size.200k_1m",
+            "volume.size.gt_1m",
+            "volume.buy_sats",
+            "volume.sell_sats",
+        ]
+    );
+    assert_eq!(names[13], "volume.fiat.ARS.total");
+    assert_eq!(names.len(), 13 + 2 * 5);
+}
+
+#[test]
+fn a_fiat_total_carries_its_currency() {
+    let metrics = report(&dataset(), WINDOW, None);
+    let total = metrics
+        .iter()
+        .find(|metric| metric.name == "volume.fiat.USD.total")
+        .expect("present");
+
+    assert_eq!(
+        total.value,
+        Value::Fiat {
+            amount: 15.0,
+            code: "USD".into()
+        }
+    );
+}
+
+#[test]
+fn slices_put_the_key_in_the_name() {
+    let by_kind = report(&dataset(), WINDOW, Some(Dimension::Kind));
+    assert_eq!(by_kind[0].name, "volume.buy.sats");
+    assert_eq!(by_kind[0].value, Value::Sats(155_000));
+
+    let by_fiat = report(&dataset(), WINDOW, Some(Dimension::Fiat));
+    assert_eq!(by_fiat[0].name, "volume.ARS.sats");
+
+    let by_instance = report(&dataset(), WINDOW, Some(Dimension::Instance));
+    assert_eq!(by_instance[0].name, "volume.Alpha (pk).sats");
+
+    // 2026-07-01 to 2026-09-01: two months.
+    let by_month = report(
+        &dataset(),
+        Window::new(1_782_864_000, 1_788_220_800),
+        Some(Dimension::Month),
+    );
+    assert_eq!(by_month[0].name, "volume.2026-07.sats");
+    assert_eq!(by_month.len(), 2 * 13);
+}
+
+#[test]
+fn every_observed_volume_metric_is_observed() {
+    assert!(
+        report(&dataset(), WINDOW, None)
+            .iter()
+            .all(|metric| !metric.is_inferred())
+    );
+}

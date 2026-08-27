@@ -38,6 +38,7 @@ fn order(id: &str, instance: &str, status: Status, sats: i64) -> Order {
         fiat_code: "ARS".into(),
         payment_methods: vec![],
         amount_sats: sats,
+        fiat_amount: None,
         taken_at: Some(1_150),
         success_at: (status == Status::Success).then_some(1_200),
         canceled_at: (status == Status::Canceled).then_some(1_200),

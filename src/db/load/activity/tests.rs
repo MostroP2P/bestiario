@@ -91,6 +91,7 @@ async fn a_completed_order_carries_its_whole_lifecycle() {
             fiat_code: "VES".to_string(),
             payment_methods: vec!["face to face".to_string(), "bank".to_string()],
             amount_sats: 21_000,
+            fiat_amount: Some(100.0),
             taken_at: Some(T0 + 600),
             success_at: Some(T0 + 1_200),
             canceled_at: None,

@@ -32,7 +32,7 @@ fn a_single_sample_is_every_percentile() {
 
 #[test]
 fn no_samples_is_no_percentile() {
-    assert_eq!(percentile(&[], 0.5), None);
+    assert_eq!(percentile::<i64>(&[], 0.5), None);
 }
 
 #[test]
@@ -42,4 +42,9 @@ fn the_input_is_left_in_its_own_order() {
     percentile(&samples, 0.5);
 
     assert_eq!(samples, [3, 1, 2]);
+}
+
+#[test]
+fn fiat_amounts_take_percentiles_too() {
+    assert_eq!(percentile(&[10.5, 2.0, 7.25], 0.5), Some(7.25));
 }
