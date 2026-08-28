@@ -28,10 +28,17 @@ workers:
 
     instance_size_slug: apps-s-1vcpu-1gb
 
-    # `sync` follows the relays live, wrapped so the index is restored from
-    # Spaces before it starts and streamed back as it writes. `bestiario sync`
-    # alone still works and still loses the database on every deploy.
-    run_command: bestiario-replicated sync
+    # `backfill` walks the relays' history, `sync` follows them live, and the
+    # daemon needs both: `sync` alone subscribes from roughly now, so a
+    # deployment that skipped the backfill would report on the last few days
+    # and silently call it the network. Both are wrapped so the index is
+    # restored from Spaces before either runs and streamed back as they write.
+    #
+    # The backfill repeats on every restart, which is deliberate. It is
+    # idempotent — events already stored come back as duplicates and are
+    # dropped — and it costs a couple of minutes, in exchange for an index
+    # that repairs itself if the replica is ever lost or truncated.
+    run_command: bestiario-replicated backfill && bestiario-replicated sync
 
     # Not a knob. litestream's lock lives inside the SQLite file, so it cannot
     # see a second container replicating the same bucket prefix; two instances

@@ -111,6 +111,15 @@ optimisation, it is the only way in.
 a `worker` component rather than a `service`: no port, no health check, no
 public URL — and workers require a paid plan.
 
+**Backfill, then sync.** `sync` subscribes to the relays from roughly the
+moment it starts; it does not walk their history. A worker running only
+`sync` therefore reports on the last few days and presents that as the
+network — the quiet failure `docs/SPEC.md` warns about, since nothing errors
+and every number looks plausible. The spec's `run_command` runs `backfill`
+first, on every start. That repeats work, but the backfill is idempotent and
+costs a couple of minutes, and it means the index repairs itself if the
+replica is ever lost or truncated.
+
 **No scheduler.** App Platform `jobs` run `PRE_DEPLOY`, `POST_DEPLOY` or
 `FAILED_DEPLOY`, and nowhere else. There is no cron. The commented-out job in
 `.do/app.yaml` publishes once per deploy, which is a deployment trigger and
