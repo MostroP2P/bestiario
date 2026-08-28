@@ -15,6 +15,7 @@
 pub mod address;
 pub mod document;
 pub mod index;
+pub mod size;
 pub mod snapshot;
 
 pub use address::Address;

@@ -159,6 +159,22 @@ pub async fn earliest_created_at(
     Ok(Some(floor))
 }
 
+/// The latest `created_at` in `scope`, over every kind.
+///
+/// The archive's ceiling, as `docs/NOSTR-PUBLICATION.md` §5 states it.
+/// Unlike the floor it needs no per-kind reasoning: a kind that has been
+/// quiet for a week does not make the archive end a week ago, and the
+/// extent a reader is told about is the extent of what is stored.
+pub async fn latest_created_at(
+    pool: &SqlitePool,
+    scope: &Scope,
+) -> Result<Option<i64>, sqlx::Error> {
+    let mut query = QueryBuilder::<Sqlite>::new("SELECT MAX(created_at) FROM events WHERE 1 = 1");
+    scope.apply_instance(&mut query, "events");
+
+    query.build_query_scalar().fetch_one(pool).await
+}
+
 /// The earliest `created_at` in `scope`, of `kind` or of every kind.
 async fn scoped_min(
     pool: &SqlitePool,

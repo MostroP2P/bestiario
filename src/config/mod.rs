@@ -111,6 +111,18 @@ pub enum ValidationError {
 
     #[error("[report].reference_currency is `{code}`: expected a three-letter currency code")]
     ReferenceCurrencyNotIso { code: String },
+
+    #[error(
+        "[publish].relays contains `{url}`: expected a websocket URL starting with `wss://` \
+         (or `ws://` for a local relay)"
+    )]
+    PublishRelayNotWebsocket { url: String },
+
+    #[error(
+        "[publish].max_content_bytes is 0: a ceiling of zero would refuse every document, \
+         including the index"
+    )]
+    PublishCeilingIsZero,
 }
 
 /// The whole of `settings.toml`, validated.
@@ -124,6 +136,8 @@ pub struct Settings {
     pub database: DatabaseSettings,
     #[serde(default)]
     pub report: ReportSettings,
+    #[serde(default)]
+    pub publish: PublishSettings,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -190,6 +204,39 @@ pub struct ReportSettings {
     /// Currency that inferred volume is converted into.
     #[serde(default = "default_reference_currency")]
     pub reference_currency: String,
+}
+
+/// Where and how the snapshot of `docs/NOSTR-PUBLICATION.md` is published.
+///
+/// Separate from `[nostr]` on purpose: reading a relay and writing to it
+/// are different trust decisions, and an operator who indexes from a dozen
+/// relays does not thereby agree to sign events onto all twelve.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublishSettings {
+    /// Relays to publish to. Empty means `[nostr].relays`, which is the
+    /// useful default and is filled in on load, so every reader after
+    /// validation sees the real list rather than a rule.
+    #[serde(default)]
+    pub relays: Vec<String>,
+    /// The publisher's own ceiling on a document's `content` (§9.1). A
+    /// relay that advertises a smaller `limitation.max_content_length`
+    /// lowers it; none raises it.
+    #[serde(default = "default_max_content_bytes")]
+    pub max_content_bytes: usize,
+}
+
+fn default_max_content_bytes() -> usize {
+    bestiario_stats::publish::size::DEFAULT_MAX_CONTENT_BYTES
+}
+
+impl Default for PublishSettings {
+    fn default() -> Self {
+        Self {
+            relays: Vec::new(),
+            max_content_bytes: default_max_content_bytes(),
+        }
+    }
 }
 
 fn default_resume_overlap_secs() -> u64 {
@@ -280,6 +327,14 @@ impl Settings {
             report: ReportSettings {
                 reference_currency: self.report.reference_currency.trim().to_uppercase(),
             },
+            publish: PublishSettings {
+                relays: if self.publish.relays.is_empty() {
+                    self.nostr.relays.clone()
+                } else {
+                    self.publish.relays
+                },
+                ..self.publish
+            },
             ..self
         })
     }
@@ -294,7 +349,20 @@ impl Settings {
         self.validate_indexer()?;
         self.validate_assumptions()?;
         self.validate_database()?;
-        self.validate_report()
+        self.validate_report()?;
+        self.validate_publish()
+    }
+
+    fn validate_publish(&self) -> Result<(), ValidationError> {
+        for url in &self.publish.relays {
+            if !url.starts_with("wss://") && !url.starts_with("ws://") {
+                return Err(ValidationError::PublishRelayNotWebsocket { url: url.clone() });
+            }
+        }
+        if self.publish.max_content_bytes == 0 {
+            return Err(ValidationError::PublishCeilingIsZero);
+        }
+        Ok(())
     }
 
     fn validate_relays(&self) -> Result<(), ValidationError> {

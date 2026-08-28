@@ -1087,6 +1087,112 @@ Every table except the raw event archive is derived from it. `rebuild`
 recomputes them; `rebuild --from-raw` replays the archive from scratch.
 Neither talks to a relay.
 
+## Publishing
+
+The figures are worth computing because somebody reads them, and this is how
+they leave the machine that computed them: as signed Nostr events, so a
+reader trusts a pubkey rather than a host. The format is specified in full in
+[`docs/NOSTR-PUBLICATION.md`](docs/NOSTR-PUBLICATION.md) — addressable events
+of kind 30666, one document per report and per series partition, and an
+`index` document naming what exists, what changed and what is current.
+
+Where to publish, and how large a document may be, are configured
+separately from the relays the indexer reads:
+
+```toml
+[publish]
+# Defaults to [nostr].relays. Kept apart on purpose: reading a relay and
+# writing to it are different trust decisions.
+relays = ["wss://relay.mostro.network"]
+# The publisher's own ceiling on a document. A relay that advertises a
+# smaller limitation.max_content_length in its NIP-11 document lowers it;
+# none raises it.
+max_content_bytes = 65536
+```
+
+`publish --dry-run` computes the whole snapshot from one reading of the
+archive and prints it — every document, the bytes it would carry and the
+hash of its figures — without writing or signing anything:
+
+```console
+$ bestiario publish --dry-run
+snapshot 20260827T030640Z generated at 2026-08-27T03:06:40+00:00
+archive 2026-08-26T10:39:33+00:00 to 2026-08-26T10:39:33+00:00
+ceiling 65536 bytes ([publish].max_content_bytes), 1 relay(s) asked
+
+orders:24h                          894  de029a0b1d1cbb5a…
+orders:7d                           894  dceddcae74a54487…
+orders:30d                          894  8e97327a09b9bfea…
+orders:90d                          894  3d3bd8fbe4f2524c…
+orders:all                          894  fce82a6cf5f79414…
+series:orders:daily:2026-08        1786  d1f43f5adda5f389…
+series:orders:weekly:2026-08        737  d3e9fddf33c6755f…
+series:orders:monthly:2026          992  89f38aca2c281f54…
+volume:24h                         2249  aca01bc1df0eaf8f…
+volume:7d                          2249  ef1aaa484dd82ba6…
+volume:30d                         2249  9617eb2d7ef78461…
+volume:90d                         2249  53bc38294e0a9e06…
+volume:all                         1712  4426d6bfb170556a…
+series:volume:daily:2026-08        5649  18caae7ecd7bb5f9…
+series:volume:weekly:2026-08       2390  b064212c4cb74d02…
+series:volume:monthly:2026         3240  a3eb341cd38cabe1…
+disputes:24h                       1879  b7ef05bf1054248b…
+disputes:7d                        1894  62c915f52a142f48…
+disputes:30d                       1894  3be340793a876fd4…
+disputes:90d                       1894  3df9b14cb84494c7…
+disputes:all                       1882  160ee920eea6e593…
+series:disputes:daily:2026-08      3931  8e2ac67f7510c252…
+series:disputes:weekly:2026-08     1585  31c7d7503e32f99d…
+series:disputes:monthly:2026       2219  dd293ccd7dbab070…
+dev-fees:24h                       1088  d01c48906d26f616…
+dev-fees:7d                        1088  593dad578a3641ef…
+dev-fees:30d                       1088  b87286c420dd92a7…
+dev-fees:90d                       1088  6f766276181cee35…
+dev-fees:all                       1051  ecf7803980fcf6dd…
+series:dev-fees:daily:2026-08      2944  dcb5f44a0170c293…
+series:dev-fees:weekly:2026-08     1245  853bffa25ad87daf…
+series:dev-fees:monthly:2026       1675  a35138e16cb36269…
+index                              5347  —
+
+33 documents, 63764 bytes
+```
+
+The first three lines are what a review is for. `snapshot` is the run's
+identity, carried by every document as the `s` tag of §7. `archive` is the
+extent the figures rest on, and the reason a client must not read a period
+outside it as zero: a relay keeps orders for about a fortnight, so a chart
+reaching back further would draw a flat line at zero across a period the
+network was trading. `ceiling` is the limit every document was weighed
+against — the configured one, or a smaller one a relay advertises — and a
+document over it is an error naming the document rather than a rejection
+discovered halfway through publishing.
+
+The hash is over the document's `payload` alone, never over the envelope
+around it: `snapshot_id` and the clock change on every run, so a hash over
+them would make every unchanged document look new. That is what lets a
+client cache what it already has, and what makes the index's answer to
+"what changed" worth reading.
+
+The index itself carries a dash where the others carry a digest. It is the
+one document with no envelope and no hash — it is what the hashes are *in*,
+and it is republished on every run by definition. Its size still counts
+against the ceiling, which is why §5.1 shards it by year once it grows
+close to one.
+
+`--out <dir>` writes the same documents as `<d>.json` files — the static
+snapshot a site can serve before its relay connection is live:
+
+```sh
+bestiario publish --out ./snapshot
+```
+
+Signing and publication to the relays arrive with the signing key, which
+§12 of the spec places at `[publish].nsec`. The section takes no such key
+yet: `relays` and `max_content_bytes` are the two it accepts, and a key it
+does not know is a configuration error rather than a setting that waits for
+the feature. Until then an invocation that asks for neither `--dry-run` nor
+`--out` is refused rather than quietly doing nothing.
+
 ## Development
 
 ```sh
