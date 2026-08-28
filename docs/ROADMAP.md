@@ -48,7 +48,7 @@ source of truth for formats, schema and metrics. This document only answers
 | 3 | Valuation and inference | 32–38 | `stats volume --in USD`, inferred vs. observed volume with error margins |
 | 4 | Discovery, series and market views | 39–44 | `series`, `market <FIAT>`, relay/instance discovery |
 | 5 | Hardening | 45 | Coverage ≥ 95% overall and 100% across `crates/stats` and `ingest::parse` (SPEC §12) |
-| 6 | Publication (Nostr) | 46–51 | `bestiario publish` puts a verifiable snapshot on the relays; a client renders it from a pubkey, not a host |
+| 6 | Publication (Nostr) | 46–53 | `bestiario publish` puts a verifiable snapshot on the relays; a client renders it from a pubkey, not a host |
 
 Phases 0–2 produce the first genuinely useful release (`v0.1.0`): counts,
 dev fees and disputes, all observed, no inference — and, in PR 31, the README

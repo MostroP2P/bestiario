@@ -401,9 +401,13 @@ currency it traded:
 ```
 
 Every metric matching `orders.<CODE>.created` is one bar of the chart. The
-currency codes are the three-letter codes instances publish; a currency this
-instance did not trade in the window has **no block at all**, rather than a
-block of zeros.
+currency codes are the three-letter codes instances publish.
+
+A currency has **no block at all** — rather than a block of zeros — when
+every figure the block would carry is zero. So the currencies you see are
+the ones that did something in this window, or have an order live right
+now; enumerate them from the payload rather than assuming a fixed set, and
+treat a missing code as zero on every count.
 
 Each currency block carries the same nine figures as the instance total:
 

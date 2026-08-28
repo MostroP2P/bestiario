@@ -199,17 +199,44 @@ pub fn fiat_counts(orders: &[Order], window: Window, now: i64) -> Vec<Metric> {
         .flat_map(|(code, group)| {
             let group: Vec<Order> = group.into_iter().cloned().collect();
             let activity = activity::summarise(&group, window, now);
-            [
+            let counts = [
                 ("created", activity.created),
                 ("completed", activity.completed),
                 ("canceled", activity.canceled),
                 ("open_now", activity.open_now),
-            ]
-            .map(|(name, count)| {
-                Metric::observed(format!("orders.{code}.{name}"), Value::Count(count as i64))
-            })
+            ];
+            if !traded(counts.iter().map(|(_, count)| *count)) {
+                return Vec::new();
+            }
+            counts
+                .into_iter()
+                .map(|(name, count)| {
+                    Metric::observed(format!("orders.{code}.{name}"), Value::Count(count as i64))
+                })
+                .collect()
         })
         .collect()
+}
+
+/// Whether a currency's block is published at all: whether any figure in
+/// it is above zero.
+///
+/// [`activity::slice`] groups the whole archive in scope and not the
+/// window's orders — the deltas need the period before it and the `_now`
+/// counts need every live order — so a currency whose every order is older
+/// than the window still reaches the grouping. Publishing that group would
+/// put a block of zeros in the document, which is the §6.3 absence rule
+/// broken in the one place it costs the most: `orders:24h` would carry a
+/// block for every code the network has ever traded, growing forever,
+/// which is precisely the size argument these blocks are published under.
+///
+/// The counts handed in are the ones *that document* publishes, so the
+/// question is always "did this currency contribute anything to what is
+/// about to be written" and never a figure the reader cannot see. A
+/// currency the network is trading right now is not zero in `open_now`,
+/// so nothing live is dropped.
+fn traded(counts: impl IntoIterator<Item = u64>) -> bool {
+    counts.into_iter().any(|count| count > 0)
 }
 
 /// The reports published narrowed to one instance (§3 `scope`).
@@ -261,20 +288,32 @@ pub const SCOPED_REPORTS: [Report; 1] = [Report::Orders];
 /// over the same orders, and re-selecting them per window would walk the
 /// network's whole order list five times per instance for an answer that
 /// does not depend on the window at all.
-pub fn instance_metrics(
-    own: &[Order],
-    window: Window,
-    coverage: Coverage,
-    now: i64,
-) -> Vec<Metric> {
+pub fn instance_metrics(own: &[Order], window: Window, now: i64) -> Vec<Metric> {
     let mut metrics = activity::metrics("orders", &activity::summarise(own, window, now));
-    metrics.extend(activity::report(
-        own,
-        window,
-        now,
-        Some(activity::Dimension::Fiat),
-        coverage,
-    ));
+
+    // Sliced here rather than through `activity::report`, which is the
+    // command's entry point and lists every currency in scope — a table an
+    // operator asked for says "ARS: nothing this week" rather than leaving
+    // the row out. A document is under the opposite rule; see [`traded`].
+    metrics.extend(
+        activity::slice(own, activity::Dimension::Fiat)
+            .into_iter()
+            .flat_map(|(code, group)| {
+                let group: Vec<Order> = group.into_iter().cloned().collect();
+                let activity = activity::summarise(&group, window, now);
+                if !traded([
+                    activity.created,
+                    activity.completed,
+                    activity.canceled,
+                    activity.open_now,
+                    activity.in_progress_now,
+                ]) {
+                    return Vec::new();
+                }
+                activity::metrics(&format!("orders.{code}"), &activity)
+            }),
+    );
+
     metrics
 }
 
@@ -580,7 +619,7 @@ impl Snapshot {
             for report in SCOPED_REPORTS {
                 for span in Span::ALL {
                     let window = window_of(span, coverage, now);
-                    let metrics = instance_metrics(&own, window, coverage, now);
+                    let metrics = instance_metrics(&own, window, now);
                     let payload = window_payload(window, &metrics);
                     documents.push(Document {
                         address: Address::Window {

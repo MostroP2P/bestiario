@@ -1098,3 +1098,44 @@ fn the_orders_series_gains_no_column_per_currency() {
         );
     }
 }
+
+#[test]
+fn a_currency_untraded_in_the_window_gets_no_block_in_either_scope() {
+    // `activity::slice` groups the whole archive in scope, not the
+    // window's orders — the deltas need the period before and the `_now`
+    // counts need every live order — so a currency whose every order is
+    // older than the window still reaches the grouping. Publishing it
+    // would put a block of zeros in the document, against the absence
+    // rule of §6.3 and against the size argument these blocks exist
+    // under: every code the network ever traded would accumulate in
+    // `orders:24h` forever.
+    //
+    // The archive here holds only August, and `24h` is the last day
+    // before September.
+    let snapshot = Snapshot::compute(&two_instances(), Coverage::since(JULY), "run", SEPTEMBER);
+
+    for address in [
+        "orders:24h".to_string(),
+        format!("orders:24h:i:{ALPHA}"),
+        format!("orders:24h:i:{BETA}"),
+    ] {
+        let blocks: Vec<String> = metrics_of(&snapshot, &address)
+            .into_iter()
+            .map(|(name, _)| name)
+            .filter(|name| ["ARS", "USD", "COP"].iter().any(|code| name.contains(code)))
+            .collect();
+        assert!(blocks.is_empty(), "{address} carries {blocks:?}");
+    }
+
+    // And the window that does hold them still does, so the rule is
+    // absence and not silence.
+    assert_eq!(count_of(&snapshot, "orders:all", "orders.ARS.created"), 2);
+    assert_eq!(
+        count_of(
+            &snapshot,
+            &format!("orders:all:i:{ALPHA}"),
+            "orders.ARS.created"
+        ),
+        2
+    );
+}

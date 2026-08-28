@@ -367,10 +367,21 @@ methods, which an order names several of and which are therefore attributed
 rather than divided (SPEC §6.3); it is why currencies get blocks and methods
 do not.
 
-A currency the instance never traded in the window has no block at all,
-rather than a block of zeros. Absence here is the §6.3 rule applied to a
-dimension instead of to a bucket: what is not published is what nobody
-published. The same holds for the network's blocks.
+A currency the instance did not trade has no block at all, rather than a
+block of zeros. Absence here is the §6.3 rule applied to a dimension
+instead of to a bucket: what is not published is what nobody published.
+The same holds for the network's blocks.
+
+"Did not trade" is decided on the figures the block would carry: a
+currency is published when any of them is above zero, and omitted when
+every one is zero. The distinction matters because the grouping is over
+the whole archive and not over the window — the deltas need the period
+before it and the `_now` counts need every live order — so a currency
+whose last order closed months ago still reaches it. Without the rule,
+`orders:24h` would carry a block for every code the network has ever
+traded, growing forever, which is the size argument these blocks are
+published under turned on its head. A currency being traded right now is
+not zero in `open_now`, so nothing live is dropped.
 
 Neither reaches the series. `series:orders:*` has no column per currency and
 will not gain one: a column per code per bucket is this same size argument
