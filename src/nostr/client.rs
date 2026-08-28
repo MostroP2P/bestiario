@@ -346,10 +346,23 @@ impl RelayClient {
     /// not a per-relay outcome and would otherwise be reported as every
     /// relay having refused for the same reason.
     pub async fn send(&self, event: &Event) -> Result<Delivery, ClientError> {
+        self.send_to(event, &self.relays).await
+    }
+
+    /// The same, to a chosen subset of the pool.
+    ///
+    /// The index of §7 is the caller for this: it may only go to relays
+    /// that took every document it names, and a relay that took some of
+    /// them is not one of those.
+    pub async fn send_to(
+        &self,
+        event: &Event,
+        relays: &[RelayUrl],
+    ) -> Result<Delivery, ClientError> {
         let output = self
             .client
             .send_event(event)
-            .to(self.relays.clone())
+            .to(relays.to_vec())
             .await
             .map_err(|source| ClientError::Send {
                 event: event.id,

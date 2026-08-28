@@ -704,8 +704,8 @@ fn a_signing_key_is_configured_as_the_name_of_an_environment_variable() {
     let settings = Settings::from_toml_str(&toml).expect("valid");
 
     assert_eq!(
-        settings.publish.nsec.as_ref().map(EnvRef::name),
-        Some("BESTIARIO_PUBLISH_NSEC")
+        settings.publish.nsec.as_ref().map(SecretRef::describe),
+        Some("env:BESTIARIO_PUBLISH_NSEC".to_string())
     );
 }
 

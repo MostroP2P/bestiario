@@ -12,14 +12,8 @@ const NOW: i64 = 1_787_800_000;
 fn publication(coverage: Coverage, ceiling: Ceiling) -> Publication {
     let snapshot = Snapshot::compute(&Data::default(), coverage, &snapshot_id(NOW), NOW);
     let index = snapshot.index(&publisher());
-    let measured = size::measure(
-        &snapshot
-            .documents
-            .iter()
-            .cloned()
-            .chain(std::iter::once(index.clone()))
-            .collect::<Vec<_>>(),
-    );
+    let mut measured = size::measure(&snapshot.documents);
+    measured.push(size::measure_index(&index));
 
     Publication {
         snapshot,
@@ -136,15 +130,16 @@ fn an_empty_archive_says_so_rather_than_printing_two_blanks() {
 fn every_document_is_listed_with_its_size_and_an_abbreviated_hash() {
     let publication = publication(Coverage::since(NOW - 86_400), Ceiling::configured(65_536));
     let first = publication.measured.first().expect("documents");
+    let hash = first.hash.as_deref().expect("a document is hashed");
 
     let listing = listing(&publication);
 
     assert!(
-        listing.contains(&format!("{}…", &first.hash[..16])),
+        listing.contains(&format!("{}…", &hash[..16])),
         "a review is not a 64-character comparison: {listing}"
     );
     assert!(
-        !listing.contains(&first.hash[..]),
+        !listing.contains(hash),
         "the whole digest belongs in the index and in --out, not in a table"
     );
     assert!(
@@ -163,7 +158,7 @@ fn the_index_is_listed_last_because_it_is_published_last() {
 
     let addresses: Vec<String> = publication
         .documents()
-        .map(|document| document.address.to_string())
+        .map(|(address, _)| address)
         .collect();
 
     assert_eq!(
@@ -172,6 +167,30 @@ fn the_index_is_listed_last_because_it_is_published_last() {
         "an index naming a set of hashes implies those documents are already there (§7)"
     );
     assert_eq!(addresses.len(), publication.snapshot.documents.len() + 1);
+}
+
+#[test]
+fn the_index_is_weighed_with_the_rest_and_listed_without_a_hash() {
+    // §9.1 weighs every document, the index included — §5.1 shards it by
+    // year for that very reason. But nothing hashes the index (§6), so
+    // the column that names a digest has none to name.
+    let publication = publication(Coverage::since(NOW - 86_400), Ceiling::configured(65_536));
+    let index = publication
+        .measured
+        .last()
+        .expect("the index, weighed last");
+
+    let listing = listing(&publication);
+
+    assert_eq!(index.address.to_string(), "index");
+    assert!(index.bytes > 0, "the index counts against the ceiling too");
+    assert_eq!(index.hash, None);
+    assert!(
+        listing
+            .lines()
+            .any(|line| line.starts_with("index ") && line.ends_with('—')),
+        "a dash where a digest would go, as everywhere else a figure is absent: {listing}"
+    );
 }
 
 // ---- signing and relay publication (§7, §12)
@@ -211,11 +230,10 @@ async fn every_document_and_the_index_reach_the_relay() {
         .iter()
         .filter_map(|event| event.tags.identifier())
         .collect();
-    for document in publication.documents() {
+    for (address, _) in publication.documents() {
         assert!(
-            addresses.contains(&document.address.to_string()),
-            "{} never reached the relay",
-            document.address
+            addresses.contains(address.as_str()),
+            "{address} never reached the relay"
         );
     }
     assert!(
@@ -244,5 +262,65 @@ async fn a_document_no_relay_took_stops_the_index_that_would_name_it() {
     assert!(
         message.contains("the index naming them was not published"),
         "the operator has to be told the index was withheld: {message}"
+    );
+}
+
+#[test]
+fn the_index_goes_only_to_relays_that_took_every_document() {
+    // §7: an index on a relay promises the documents it names are already
+    // there, and that promise is per relay. A relay that took four of
+    // five documents cannot host an index naming the fifth, however many
+    // other relays took it — `is_published` being true for that document
+    // says the snapshot survives, not that this relay holds it.
+    let a: RelayUrl = "wss://a.example".parse().expect("a url");
+    let b: RelayUrl = "wss://b.example".parse().expect("a url");
+
+    let both = narrow(None, &[a.clone(), b.clone()]);
+    let after_b_refused = narrow(Some(both.clone()), std::slice::from_ref(&a));
+
+    assert_eq!(both, BTreeSet::from([a.clone(), b.clone()]));
+    assert_eq!(
+        after_b_refused,
+        BTreeSet::from([a]),
+        "b refused one document, so an index naming it would be false there"
+    );
+    assert!(
+        !after_b_refused.contains(&b),
+        "a relay is not readmitted by accepting everything after the one it refused"
+    );
+}
+
+#[test]
+fn a_document_every_relay_refused_leaves_nowhere_for_the_index() {
+    let a: RelayUrl = "wss://a.example".parse().expect("a url");
+
+    let none = narrow(Some(BTreeSet::from([a])), &[]);
+
+    assert!(
+        none.is_empty(),
+        "no relay holds the whole snapshot, so there is nowhere the index would be true"
+    );
+}
+
+#[tokio::test]
+async fn the_relays_own_words_survive_into_the_refusal() {
+    // The reasons are gathered as documents go out and were being dropped
+    // on the error path — exactly the path an operator needs them on, to
+    // tell a policy from a size from an authentication failure.
+    let relay = MockRelay::run().await.expect("start the local relay");
+    let url = relay.url().await.to_string();
+    let publication = publication(Coverage::since(NOW - 86_400), Ceiling::configured(65_536));
+
+    let client = RelayClient::connect(&[url]).await.expect("connect");
+    relay.shutdown();
+
+    let refusal = send_to(&publication, &keys(), &client)
+        .await
+        .expect_err("no relay is left to take anything");
+
+    let message = refusal.to_string();
+    assert!(
+        message.contains("publishing") && message.contains("relay(s) as"),
+        "the report gathered before the failure has to travel with it: {message}"
     );
 }

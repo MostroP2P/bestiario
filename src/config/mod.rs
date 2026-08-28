@@ -26,7 +26,7 @@ mod secret;
 #[cfg(test)]
 mod tests;
 
-pub use secret::{EnvRef, Secret};
+pub use secret::{Secret, SecretRef, Unresolved};
 
 /// Environment prefix and separator: `BESTIARIO__DATABASE__URL` overrides
 /// `[database].url`.
@@ -228,13 +228,14 @@ pub struct PublishSettings {
     #[serde(default = "default_max_content_bytes")]
     pub max_content_bytes: usize,
     /// Where the signing key of §12 lives: the *name* of an environment
-    /// variable, written as `nsec = "env:BESTIARIO_PUBLISH_NSEC"`.
+    /// variable (`nsec = "env:BESTIARIO_PUBLISH_NSEC"`) or the path of a
+    /// file holding it (`nsec = "file:/run/secrets/bestiario-nsec"`).
     ///
-    /// Never the key itself — see [`EnvRef`]. The variable is read when a
-    /// run actually signs, so a `stats` invocation on a machine that
-    /// publishes nothing neither needs it nor fails without it.
+    /// Never the key itself — see [`SecretRef`]. It is resolved when a run
+    /// actually signs, so a `stats` invocation on a machine that publishes
+    /// nothing neither needs it nor fails without it.
     #[serde(default)]
-    pub nsec: Option<EnvRef>,
+    pub nsec: Option<SecretRef>,
 }
 
 fn default_max_content_bytes() -> usize {

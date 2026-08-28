@@ -18,6 +18,25 @@ fn refused(input: &str) -> ParseError {
     Address::parse(input).expect_err(&format!("`{input}` should be refused"))
 }
 
+/// A year, for the tests that are about something else. The bounds are
+/// their own test.
+fn year_of(year: i32) -> Year {
+    Year::new(year).expect("a four-digit year")
+}
+
+/// The bucket covering one month, likewise.
+fn month_of(year: i32, month: u32) -> Bucket {
+    Bucket::Month {
+        year: year_of(year),
+        month: Month::new(month).expect("a month of the year"),
+    }
+}
+
+/// The bucket covering one whole year.
+fn year_bucket(year: i32) -> Bucket {
+    Bucket::Year(year_of(year))
+}
+
 #[test]
 fn every_example_of_the_spec_round_trips() {
     // Arrange: the examples §3 lists, verbatim.
@@ -43,9 +62,17 @@ fn every_example_of_the_spec_round_trips() {
 #[test]
 fn the_index_may_be_sharded_by_year() {
     assert_eq!(parses("index"), Address::Index { year: None });
-    assert_eq!(parses("index:2026"), Address::Index { year: Some(2026) });
     assert_eq!(
-        Address::Index { year: Some(2026) }.to_string(),
+        parses("index:2026"),
+        Address::Index {
+            year: Some(year_of(2026)),
+        }
+    );
+    assert_eq!(
+        Address::Index {
+            year: Some(year_of(2026)),
+        }
+        .to_string(),
         "index:2026",
         "and renders back with the year"
     );
@@ -77,14 +104,8 @@ fn a_series_partition_names_its_resolution_and_bucket() {
         parses("series:disputes:weekly:2026-03"),
         Address::Series {
             report: Report::Disputes,
-            partition: Partition::new(
-                Resolution::Weekly,
-                Bucket::Month {
-                    year: 2026,
-                    month: 3
-                }
-            )
-            .expect("a month of weeks"),
+            partition: Partition::new(Resolution::Weekly, month_of(2026, 3))
+                .expect("a month of weeks"),
             scope: None,
         }
     );
@@ -92,7 +113,7 @@ fn a_series_partition_names_its_resolution_and_bucket() {
         parses("series:volume:monthly:2025:n:signet"),
         Address::Series {
             report: Report::Volume,
-            partition: Partition::new(Resolution::Monthly, Bucket::Year(2025))
+            partition: Partition::new(Resolution::Monthly, year_bucket(2025))
                 .expect("a year of months"),
             scope: Some(Scope::Network("signet".to_string())),
         }
@@ -109,18 +130,9 @@ fn a_daily_or_weekly_partition_is_a_month_and_a_monthly_one_is_a_year() {
 
     // And the same rule holds for an address built rather than parsed, so
     // that `Display` can never emit a string `parse` refuses.
-    assert!(Partition::new(Resolution::Daily, Bucket::Year(2026)).is_none());
-    assert!(Partition::new(Resolution::Weekly, Bucket::Year(2026)).is_none());
-    assert!(
-        Partition::new(
-            Resolution::Monthly,
-            Bucket::Month {
-                year: 2026,
-                month: 1
-            }
-        )
-        .is_none()
-    );
+    assert!(Partition::new(Resolution::Daily, year_bucket(2026)).is_none());
+    assert!(Partition::new(Resolution::Weekly, year_bucket(2026)).is_none());
+    assert!(Partition::new(Resolution::Monthly, month_of(2026, 1)).is_none());
 }
 
 #[test]
@@ -217,39 +229,26 @@ fn a_weekly_partition_is_filed_under_the_month_its_first_day_falls_in() {
     let week_start = chrono::NaiveDate::from_ymd_opt(2025, 12, 29).expect("a date");
 
     assert_eq!(
-        Bucket::for_week_starting(week_start),
-        Bucket::Month {
-            year: 2025,
-            month: 12
-        }
+        Bucket::for_week_starting(week_start).expect("a week of the grammar's range"),
+        month_of(2025, 12)
     );
 }
 
 #[test]
 fn a_partition_spans_its_whole_month_or_year_and_december_rolls_the_year() {
     // 2026-08-01 to 2026-09-01; 2026-12-01 to 2027-01-01; 2026 whole.
-    let august = Partition::new(
-        Resolution::Daily,
-        Bucket::Month {
-            year: 2026,
-            month: 8,
-        },
-    )
-    .expect("a month")
-    .window();
+    let august = Partition::new(Resolution::Daily, month_of(2026, 8))
+        .expect("a month")
+        .window();
     assert_eq!((august.from, august.until), (1_785_542_400, 1_788_220_800));
 
-    let december = Bucket::Month {
-        year: 2026,
-        month: 12,
-    }
-    .window();
+    let december = month_of(2026, 12).window();
     assert_eq!(
         (december.from, december.until),
         (1_796_083_200, 1_798_761_600)
     );
 
-    let year = Partition::new(Resolution::Monthly, Bucket::Year(2026))
+    let year = Partition::new(Resolution::Monthly, year_bucket(2026))
         .expect("a year")
         .window();
     assert_eq!((year.from, year.until), (1_767_225_600, 1_798_761_600));
@@ -260,26 +259,19 @@ fn a_partition_spans_its_whole_month_or_year_and_december_rolls_the_year() {
 }
 
 #[test]
-fn a_partition_refuses_a_bucket_no_year_or_month_could_be() {
-    // `fits` is about shape; these have the right shape and a number the
-    // grammar has no spelling for. A month is `01`..`12` and a year is
-    // four digits, so `2026-00` and `-0001` are strings `parse` refuses,
-    // and a built partition must refuse them too.
-    for month in [0, 13, 99] {
-        assert!(
-            Partition::new(Resolution::Daily, Bucket::Month { year: 2026, month }).is_none(),
-            "month {month} is not a month"
-        );
+fn a_year_and_a_month_hold_only_the_numbers_the_grammar_spells() {
+    // §3 spells a year with four digits and a month with two, `01`..`12`.
+    // Nothing else is a year or a month, so nothing else can be built.
+    for refused in [-1, 10_000, i32::MAX] {
+        assert!(Year::new(refused).is_none(), "{refused} is not a year");
+    }
+    for refused in [0, 13, 99] {
+        assert!(Month::new(refused).is_none(), "{refused} is not a month");
     }
 
-    for year in [-1, 10_000] {
-        assert!(
-            Partition::new(Resolution::Monthly, Bucket::Year(year)).is_none(),
-            "year {year} is not four digits"
-        );
-        assert!(
-            Partition::new(Resolution::Weekly, Bucket::Month { year, month: 1 }).is_none(),
-            "year {year} is not four digits"
-        );
-    }
+    assert_eq!(Year::new(2026).expect("a year").get(), 2026);
+    assert_eq!(Month::new(12).expect("a month").get(), 12);
+
+    // A year renders padded, which is what makes `0007` a round trip.
+    assert_eq!(Year::new(7).expect("a year").to_string(), "0007");
 }

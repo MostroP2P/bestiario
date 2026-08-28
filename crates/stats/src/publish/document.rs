@@ -63,7 +63,12 @@ impl Tag {
 /// which month or year the partition covers, and a caller that could
 /// forget the period would eventually sign a document without one. A
 /// window document is relative to the run and has no fixed span to name.
-pub fn tags(address: &Address, run: &Run, revision: u32) -> Vec<Tag> {
+///
+/// `revision` is `None` for the index alone. The tag mirrors the content
+/// field of §8, and the index has none: it carries no payload to restate
+/// and is republished on every run by definition (§6). A tag saying `1`
+/// every night would claim a first publication that never happened.
+pub fn tags(address: &Address, run: &Run, revision: Option<u32>) -> Vec<Tag> {
     let mut tags = vec![
         Tag::single("d", address.to_string()),
         Tag::single("s", run.snapshot_id.clone()),
@@ -80,7 +85,9 @@ pub fn tags(address: &Address, run: &Run, revision: u32) -> Vec<Tag> {
         });
     }
 
-    tags.push(Tag::single("revision", revision.to_string()));
+    if let Some(revision) = revision {
+        tags.push(Tag::single("revision", revision.to_string()));
+    }
     tags.push(Tag::single("schema_version", SCHEMA_VERSION.to_string()));
     tags
 }

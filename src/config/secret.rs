@@ -1,4 +1,5 @@
-//! Secrets, and the `env:NAME` references that stand in for them.
+//! Secrets, and the `env:NAME` and `file:PATH` references that stand in
+//! for them.
 //!
 //! # Why a reference and not the value
 //!
@@ -6,14 +7,25 @@
 //! machines and commit to a private repository. A signing key written in
 //! it is a signing key in every one of those places, and no amount of
 //! care at the point of use undoes that. So the file never holds the key:
-//! it holds the *name of the environment variable* that does, and
-//! [`EnvRef`] is the only shape `[publish].nsec` will deserialize into.
+//! it holds a *reference* to where the key lives, and [`SecretRef`] is
+//! the only shape `[publish].nsec` will deserialize into.
 //!
 //! That is a type-level guarantee rather than a rule in the
 //! documentation. `Settings` cannot carry a secret, because the field
 //! that would carry one cannot be built from a literal.
+//!
+//! # The two places a key lives
+//!
+//! §12 names both: an environment variable and a file path. Neither is a
+//! secret, so both keep the guarantee above, and each is the natural one
+//! somewhere. `env:NAME` is what a systemd unit or a shell profile hands
+//! a process. `file:/run/secrets/nsec` is what Docker and Kubernetes
+//! mount, and it is the better of the two there: an environment is
+//! readable in `/proc/<pid>/environ` and comes back out of
+//! `docker inspect`, while a mounted file has permissions of its own.
 
 use std::fmt;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Deserializer};
 
@@ -24,60 +36,112 @@ const ENV_PREFIX: &str = "env:";
 /// Marker printed instead of a secret.
 const REDACTED: &str = "[redacted]";
 
-/// The name of an environment variable holding a secret, written in the
-/// file as `"env:BESTIARIO_PUBLISH_NSEC"`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EnvRef(String);
+/// Prefix marking a configured string as a path to a file holding a
+/// secret.
+const FILE_PREFIX: &str = "file:";
 
-impl EnvRef {
-    /// The variable's name — safe to print, and the only useful thing to
-    /// say when it turns out not to be set.
-    pub fn name(&self) -> &str {
-        &self.0
+/// Where a secret lives: never the secret, always the way to it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SecretRef {
+    /// The name of an environment variable, written in the file as
+    /// `"env:BESTIARIO_PUBLISH_NSEC"`.
+    Env(String),
+    /// The path of a file whose contents are the secret, written as
+    /// `"file:/run/secrets/bestiario-nsec"`.
+    File(PathBuf),
+}
+
+impl SecretRef {
+    /// The reference as it was written — safe to print, and the only
+    /// useful thing to say when it turns out to lead nowhere. A path is
+    /// not a secret; the file it names is.
+    pub fn describe(&self) -> String {
+        match self {
+            Self::Env(name) => format!("{ENV_PREFIX}{name}"),
+            Self::File(path) => format!("{FILE_PREFIX}{}", path.display()),
+        }
     }
 
-    /// The value the variable holds, through a lookup of the caller's
+    /// The secret the reference leads to, through readers of the caller's
     /// choosing.
     ///
-    /// Taking the lookup rather than reading the process environment
-    /// directly is what makes the resolution testable without a test
-    /// mutating the environment of every other test running beside it.
-    pub fn read<F>(&self, lookup: F) -> Option<Secret>
+    /// Taking the lookups rather than reading the process environment and
+    /// the filesystem directly is what makes the resolution testable
+    /// without a test mutating the environment of every other test
+    /// running beside it.
+    pub fn read<E, F>(&self, from_env: E, from_file: F) -> Result<Secret, Unresolved>
     where
-        F: FnOnce(&str) -> Option<String>,
+        E: FnOnce(&str) -> Option<String>,
+        F: FnOnce(&Path) -> std::io::Result<String>,
     {
-        lookup(&self.0).map(Secret)
+        match self {
+            Self::Env(name) => from_env(name).map(Secret).ok_or(Unresolved::NotSet),
+            // Trimmed because a file written with `echo` ends in a
+            // newline, and a key that differs from the operator's by one
+            // invisible byte is the least debuggable failure there is.
+            Self::File(path) => from_file(path)
+                .map(|raw| Secret(raw.trim().to_string()))
+                .map_err(|source| Unresolved::Unreadable {
+                    reason: source.to_string(),
+                }),
+        }
     }
 
-    /// The value the variable holds in this process.
-    pub fn read_env(&self) -> Option<Secret> {
-        self.read(|name| std::env::var(name).ok())
+    /// The secret the reference leads to in this process.
+    pub fn resolve(&self) -> Result<Secret, Unresolved> {
+        self.read(
+            |name| std::env::var(name).ok(),
+            |path| std::fs::read_to_string(path),
+        )
     }
 }
 
-/// Refuses anything that is not an `env:NAME` reference, so a key pasted
-/// into the file is a configuration error and never a working setup that
-/// happens to leak.
-impl<'de> Deserialize<'de> for EnvRef {
+/// Why a reference led to no secret. Carries no value and no path
+/// contents — only what an operator needs in order to fix it.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum Unresolved {
+    #[error("it is not set")]
+    NotSet,
+    #[error("it could not be read: {reason}")]
+    Unreadable { reason: String },
+}
+
+/// Refuses anything that is neither an `env:NAME` nor a `file:PATH`
+/// reference, so a key pasted into the file is a configuration error and
+/// never a working setup that happens to leak.
+impl<'de> Deserialize<'de> for SecretRef {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let raw = String::deserialize(deserializer)?;
-        let name = raw.strip_prefix(ENV_PREFIX).ok_or_else(|| {
-            serde::de::Error::custom(format!(
-                "expected an environment-variable reference of the form \
-                 `{ENV_PREFIX}NAME`, so that the secret itself is not written \
-                 into the configuration file"
-            ))
-        })?;
-        if name.trim().is_empty() {
-            return Err(serde::de::Error::custom(format!(
-                "`{ENV_PREFIX}` names no variable"
-            )));
+
+        if let Some(name) = raw.strip_prefix(ENV_PREFIX) {
+            let name = name.trim();
+            if name.is_empty() {
+                return Err(serde::de::Error::custom(format!(
+                    "`{ENV_PREFIX}` names no variable"
+                )));
+            }
+            return Ok(Self::Env(name.to_string()));
         }
-        Ok(Self(name.trim().to_string()))
+
+        if let Some(path) = raw.strip_prefix(FILE_PREFIX) {
+            let path = path.trim();
+            if path.is_empty() {
+                return Err(serde::de::Error::custom(format!(
+                    "`{FILE_PREFIX}` names no file"
+                )));
+            }
+            return Ok(Self::File(PathBuf::from(path)));
+        }
+
+        Err(serde::de::Error::custom(format!(
+            "expected a reference of the form `{ENV_PREFIX}NAME` or \
+             `{FILE_PREFIX}PATH`, so that the secret itself is not written \
+             into the configuration file"
+        )))
     }
 }
 
-/// A secret value, read from the environment.
+/// A secret value, read from wherever its reference pointed.
 ///
 /// `Debug` prints a marker: a secret that reaches a log line reaches
 /// every place that log line is pasted. [`Secret::expose`] is the one way

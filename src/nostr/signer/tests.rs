@@ -1,7 +1,7 @@
 //! What a key may be spelled as, and what a signed document carries.
 
 use super::*;
-use crate::config::EnvRef;
+use crate::config::SecretRef;
 use crate::stats::bucket::Coverage;
 use crate::stats::publish::snapshot::Snapshot;
 use crate::stats::series::Data;
@@ -78,10 +78,10 @@ fn a_public_key_is_not_a_signing_key() {
 // ---- where the key comes from (§12)
 
 /// `[publish].nsec = "env:NAME"`, parsed the way the configuration does.
-fn reference(name: &str) -> EnvRef {
+fn reference(name: &str) -> SecretRef {
     #[derive(serde::Deserialize)]
     struct Holder {
-        nsec: EnvRef,
+        nsec: SecretRef,
     }
     toml::from_str::<Holder>(&format!("nsec = \"env:{name}\""))
         .expect("a reference")

@@ -63,8 +63,10 @@ fn snapshot() -> Snapshot {
     Snapshot::compute(&data(), coverage(), "01J8Z", SEPTEMBER)
 }
 
-fn payload_of(snapshot: &Snapshot) -> serde_json::Value {
-    snapshot.index(&publisher()).envelope.payload().clone()
+/// The index as it goes on the wire — the shape §10 reads, with no
+/// `payload` between a client and the fields it is told to take.
+fn json_of(snapshot: &Snapshot) -> serde_json::Value {
+    serde_json::to_value(snapshot.index(&publisher())).expect("plain data")
 }
 
 // ---- what exists (§5.1)
@@ -73,7 +75,7 @@ fn payload_of(snapshot: &Snapshot) -> serde_json::Value {
 fn the_index_lists_every_document_of_the_snapshot_and_never_itself() {
     let snapshot = snapshot();
 
-    let json = payload_of(&snapshot);
+    let json = json_of(&snapshot);
     let listed: Vec<String> = json["documents"]
         .as_array()
         .expect("documents")
@@ -103,9 +105,35 @@ fn the_index_lists_every_document_of_the_snapshot_and_never_itself() {
 fn the_index_is_addressed_as_index_and_carries_the_runs_clock() {
     let index = snapshot().index(&publisher());
 
-    assert_eq!(index.address, Address::Index { year: None });
-    assert_eq!(index.envelope.snapshot_id(), "01J8Z");
-    assert_eq!(index.envelope.revision(), 1);
+    assert_eq!(index.address(), Address::Index { year: None });
+    assert_eq!(index.snapshot_id, "01J8Z");
+    assert_eq!(index.generated_at, "2026-09-01T00:00:00+00:00");
+}
+
+#[test]
+fn the_index_names_its_fields_at_the_top_level_and_has_no_envelope() {
+    // §6: every other document splits the run from a hashed `payload`.
+    // The index is the stated exception — nothing hashes it, and §10 has
+    // a client take `snapshot_id`, `coverage` and `resolutions` straight
+    // off it. A `payload` here would put them where no client looks.
+    let json = json_of(&snapshot());
+
+    assert!(json.get("payload").is_none(), "the index has no payload");
+    assert!(
+        json.get("revision").is_none(),
+        "nothing hashes the index and it is republished every run, so it counts no revisions"
+    );
+    assert_eq!(json["schema_version"], 1);
+    for field in [
+        "snapshot_id",
+        "generated_at",
+        "publisher",
+        "coverage",
+        "resolutions",
+        "documents",
+    ] {
+        assert!(json.get(field).is_some(), "{field} is missing from {json}");
+    }
 }
 
 // ---- what changed (§5.2)
@@ -114,7 +142,7 @@ fn the_index_is_addressed_as_index_and_carries_the_runs_clock() {
 fn an_entry_carries_the_hash_of_the_payload_that_document_published() {
     let snapshot = snapshot();
 
-    let json = payload_of(&snapshot);
+    let json = json_of(&snapshot);
 
     for (entry, document) in json["documents"]
         .as_array()
@@ -142,12 +170,12 @@ fn the_hash_is_over_the_figures_and_not_over_the_run_around_them() {
     let snapshot = snapshot();
     let document = snapshot.documents.first().expect("a document");
 
-    let json = payload_of(&snapshot);
+    let json = json_of(&snapshot);
 
     // The same figures published by a later run: a new `snapshot_id` and
     // a new clock, and the hash a client compares must not move.
     let again = Snapshot::compute(&data(), coverage(), "01J9A", SEPTEMBER);
-    let later = again.index(&publisher()).envelope.payload().clone();
+    let later = json_of(&again);
 
     assert_eq!(json["documents"][0]["hash"], document.hash);
     assert_eq!(
@@ -160,7 +188,7 @@ fn the_hash_is_over_the_figures_and_not_over_the_run_around_them() {
 
 #[test]
 fn the_index_states_where_the_archive_begins_and_ends() {
-    let json = payload_of(&snapshot());
+    let json = json_of(&snapshot());
 
     assert_eq!(
         json["coverage"]["first_event_at"],
@@ -178,7 +206,7 @@ fn the_index_states_where_the_archive_begins_and_ends() {
 fn an_archive_that_holds_nothing_states_that_rather_than_a_date() {
     let empty = Snapshot::compute(&Data::default(), Coverage::default(), "01J8Z", SEPTEMBER);
 
-    let json = empty.index(&publisher()).envelope.payload().clone();
+    let json = json_of(&empty);
 
     assert!(json["coverage"]["first_event_at"].is_null());
     assert!(json["coverage"]["last_event_at"].is_null());
@@ -210,11 +238,14 @@ fn an_archive_that_holds_nothing_states_that_rather_than_a_date() {
 
 #[test]
 fn each_resolution_runs_from_its_first_published_partition_to_its_last() {
-    let json = payload_of(&snapshot());
+    let json = json_of(&snapshot());
     let resolutions = json["resolutions"].as_object().expect("resolutions");
 
     assert_eq!(resolutions["daily"]["from"], "2026-07");
-    assert_eq!(resolutions["daily"]["until"], "2026-09");
+    assert_eq!(
+        resolutions["daily"]["until"], "2026-08",
+        "the archive stops on 3 August, so it offers no September partition to go after (§6.3)"
+    );
     assert_eq!(resolutions["weekly"]["from"], "2026-07");
     assert_eq!(resolutions["monthly"]["from"], "2026");
     assert_eq!(resolutions["monthly"]["until"], "2026");
@@ -225,11 +256,12 @@ fn a_resolution_nothing_was_published_at_is_not_offered() {
     // An archive whose every partition falls outside coverage publishes
     // no series at all, and an index that still advertised `daily` would
     // send every client after a document that does not exist.
-    let json = Snapshot::compute(&Data::default(), Coverage::default(), "01J8Z", SEPTEMBER)
-        .index(&publisher())
-        .envelope
-        .payload()
-        .clone();
+    let json = json_of(&Snapshot::compute(
+        &Data::default(),
+        Coverage::default(),
+        "01J8Z",
+        SEPTEMBER,
+    ));
 
     assert!(json["resolutions"].get("daily").is_none());
 }
@@ -238,8 +270,8 @@ fn a_resolution_nothing_was_published_at_is_not_offered() {
 
 #[test]
 fn the_same_snapshot_indexes_to_the_same_bytes() {
-    let one = serde_json::to_vec(snapshot().index(&publisher()).envelope.payload()).expect("bytes");
-    let two = serde_json::to_vec(snapshot().index(&publisher()).envelope.payload()).expect("bytes");
+    let one = serde_json::to_vec(&snapshot().index(&publisher())).expect("bytes");
+    let two = serde_json::to_vec(&snapshot().index(&publisher())).expect("bytes");
 
     assert_eq!(
         one, two,

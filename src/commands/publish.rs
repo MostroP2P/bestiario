@@ -32,12 +32,13 @@
 //! commands would give a snapshot whose documents disagree about what the
 //! archive held.
 
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use anyhow::{Context as _, Result};
 use sqlx::SqlitePool;
 
-use nostr_sdk::prelude::{Keys, ToBech32 as _};
+use nostr_sdk::prelude::{Keys, RelayUrl, ToBech32 as _};
 
 use crate::commands::Context;
 use crate::config::{AssumptionSettings, PublishSettings};
@@ -46,29 +47,36 @@ use crate::db::repo::events;
 use crate::nostr::client::RelayClient;
 use crate::nostr::{nip11, signer};
 use crate::stats::bucket::Coverage;
-use crate::stats::publish::index::Publisher;
+use crate::stats::publish::index::{Index, Publisher};
 use crate::stats::publish::size::{self, Ceiling, Measured};
-use crate::stats::publish::snapshot::{Document, Snapshot};
+use crate::stats::publish::snapshot::Snapshot;
 use crate::stats::series::{Assumption, Data, Priced};
 
 /// A snapshot, computed and weighed: everything a review needs and
 /// everything the signer of the next row will be handed.
 pub struct Publication {
     pub snapshot: Snapshot,
-    pub index: Document,
+    pub index: Index,
     pub ceiling: Ceiling,
     pub relays_asked: usize,
     pub measured: Vec<Measured>,
 }
 
 impl Publication {
-    /// The index last, as §7 requires of publication and as a listing
-    /// should therefore read: the documents it names come first.
-    pub fn documents(&self) -> impl Iterator<Item = &Document> {
+    /// Every document as a `d` and the `content` published under it, the
+    /// index last — the order §7 requires of publication, and the one a
+    /// listing should therefore read in: the documents the index names
+    /// come first. Pairs rather than one type because the index is not a
+    /// [`Document`]; §6 exempts it from the envelope the rest carry.
+    pub fn documents(&self) -> impl Iterator<Item = (String, String)> + '_ {
         self.snapshot
             .documents
             .iter()
-            .chain(std::iter::once(&self.index))
+            .map(|document| (document.address.to_string(), document.content()))
+            .chain(std::iter::once((
+                self.index.address().to_string(),
+                self.index.content(),
+            )))
     }
 }
 
@@ -145,6 +153,16 @@ pub async fn compute(
     // so stating anything earlier in the index would advertise coverage
     // the documents themselves withhold. The ceiling has no such duty and
     // is the plain extent.
+    //
+    // Read before the figures, and that order is load-bearing. These are
+    // separate reads, so an ingest running alongside can land an event
+    // between them; taking the extent first means the figures can only be
+    // a superset of what the index claims, never a subset. A run that
+    // loaded first could state a floor below data it does not have and
+    // publish the flat line at zero §6.3 exists to prevent. The surplus
+    // is harmless in the other direction: an event newer than the ceiling
+    // either falls in a bucket already covered, or in one no partition
+    // was computed for, and the next run picks it up.
     let coverage = Coverage::from_extent(
         events::earliest_created_at(pool, &crate::nostr::filters::INDEXED_KINDS, &scope).await?,
         events::latest_created_at(pool, &scope).await?,
@@ -163,14 +181,8 @@ pub async fn compute(
         },
     );
 
-    let measured = size::measure(
-        &snapshot
-            .documents
-            .iter()
-            .cloned()
-            .chain(std::iter::once(index.clone()))
-            .collect::<Vec<_>>(),
-    );
+    let mut measured = size::measure(&snapshot.documents);
+    measured.push(size::measure_index(&index));
 
     Ok(Publication {
         snapshot,
@@ -307,7 +319,13 @@ pub fn listing(publication: &Publication) -> String {
             "{:<width$}  {:>7}  {}\n",
             document.address.to_string(),
             document.bytes,
-            abbreviated(&document.hash),
+            document.hash.as_deref().map_or_else(
+                // Nothing hashes the index (§6), so there is no digest to
+                // abbreviate and a dash says so, as it does everywhere
+                // else a figure is absent.
+                || "—".to_string(),
+                abbreviated,
+            ),
             width = width
         ));
     }
@@ -347,6 +365,23 @@ async fn send(publication: &Publication, keys: &Keys, relays: &[String]) -> Resu
     report
 }
 
+/// The relays that have taken every document so far, one delivery at a
+/// time.
+///
+/// `None` is "no document has been sent yet", which is not the same as
+/// "no relay took anything": the first document's acceptances *are* the
+/// set, and every one after it can only narrow it. Kept apart from the
+/// loop because the §7 rule it enforces — an index only where every
+/// document it names already is — is worth a test that does not need two
+/// relays disagreeing.
+fn narrow(holders: Option<BTreeSet<RelayUrl>>, accepted: &[RelayUrl]) -> BTreeSet<RelayUrl> {
+    let accepted: BTreeSet<RelayUrl> = accepted.iter().cloned().collect();
+    match holders {
+        None => accepted,
+        Some(held) => held.intersection(&accepted).cloned().collect(),
+    }
+}
+
 /// The publication itself, over relays somebody else connected.
 ///
 /// Split from [`send`] because a relay that answered at connection time
@@ -363,6 +398,11 @@ async fn send_to(publication: &Publication, keys: &Keys, client: &RelayClient) -
     );
 
     let mut refusals = Vec::new();
+    // The relays that took *every* document so far. §7 makes the index a
+    // promise that the documents it names are already there, and that
+    // promise is per relay: one that refused a single document cannot
+    // host an index naming it, however many other relays took it.
+    let mut holders: Option<BTreeSet<RelayUrl>> = None;
     for document in &publication.snapshot.documents {
         let delivery = client.send(&signer::sign(document, run, keys)).await?;
         for (relay, reason) in &delivery.refused {
@@ -374,14 +414,20 @@ async fn send_to(publication: &Publication, keys: &Keys, client: &RelayClient) -
         if !delivery.is_published() {
             refusals.push(document.address.to_string());
         }
+        holders = Some(narrow(holders, &delivery.accepted));
     }
 
     // Before the index, not after: an index that named a document no
     // relay holds would send readers to fetch something that is not
-    // there, and would go on doing so until the next run.
+    // there, and would go on doing so until the next run. The refusals
+    // gathered above go with it — an operator shrinking a snapshot needs
+    // the relay's own words to tell a policy from a size from an auth
+    // failure, and dropping `out` here would take them away exactly when
+    // they matter.
     anyhow::ensure!(
         refusals.is_empty(),
-        "{} document(s) reached no relay, so the index naming them was not published:\n{}",
+        "{}{} document(s) reached no relay, so the index naming them was not published:\n{}",
+        out,
         refusals.len(),
         refusals
             .iter()
@@ -390,13 +436,38 @@ async fn send_to(publication: &Publication, keys: &Keys, client: &RelayClient) -
             .join("\n")
     );
 
+    // A snapshot of no documents is an index that names nothing, and
+    // every relay can honestly hold that.
+    let holders: Vec<RelayUrl> = holders.map_or_else(
+        || client.relays().to_vec(),
+        |held| held.into_iter().collect(),
+    );
+    let partial: Vec<&RelayUrl> = client
+        .relays()
+        .iter()
+        .filter(|relay| !holders.contains(relay))
+        .collect();
+    for relay in &partial {
+        out.push_str(&format!(
+            "  {relay} is missing at least one document, so it is not sent the index\n"
+        ));
+    }
+    anyhow::ensure!(
+        !holders.is_empty(),
+        "{}every document reached a relay, but no single relay took all of them, \
+         so there is nowhere the index would be true: a client reading any one of \
+         them would be sent after a document that relay does not hold (§7)",
+        out
+    );
+
     let index = client
-        .send(&signer::sign(&publication.index, run, keys))
+        .send_to(&signer::sign_index(&publication.index, run, keys), &holders)
         .await?;
     anyhow::ensure!(
         index.is_published(),
-        "every document was published but the index was refused by every relay: \
-         a client reading the previous index will not see this snapshot"
+        "{}every document was published but the index was refused by every relay: \
+         a client reading the previous index will not see this snapshot",
+        out
     );
 
     out.push_str(&format!(
@@ -413,11 +484,10 @@ fn write(publication: &Publication, directory: &Path) -> Result<()> {
     std::fs::create_dir_all(directory)
         .with_context(|| format!("creating {}", directory.display()))?;
 
-    for document in publication.documents() {
-        let name = format!("{}.json", document.address.to_string().replace(':', "-"));
+    for (address, content) in publication.documents() {
+        let name = format!("{}.json", address.replace(':', "-"));
         let path = directory.join(&name);
-        std::fs::write(&path, document.content())
-            .with_context(|| format!("writing {}", path.display()))?;
+        std::fs::write(&path, content).with_context(|| format!("writing {}", path.display()))?;
     }
 
     Ok(())

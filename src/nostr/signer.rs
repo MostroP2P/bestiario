@@ -24,9 +24,10 @@
 
 use nostr_sdk::prelude::*;
 
-use crate::config::EnvRef;
+use crate::config::SecretRef;
 
 use crate::stats::publish::document::{self, KIND, Run};
+use crate::stats::publish::index::Index;
 use crate::stats::publish::snapshot::Document;
 
 #[cfg(test)]
@@ -35,14 +36,11 @@ mod tests;
 /// Anything that can go wrong between a configured key and [`Keys`].
 #[derive(Debug, thiserror::Error)]
 pub enum KeyError {
-    /// Named rather than described: the operator chose the variable, and
-    /// the name they chose is the only thing that tells them which one to
-    /// export.
-    #[error(
-        "the environment variable `{name}`, named by [publish].nsec, is not set: \
-         export the signing key into it"
-    )]
-    MissingEnv { name: String },
+    /// Quoted rather than described: the operator wrote the reference,
+    /// and what they wrote is the only thing that tells them which
+    /// variable to export or which file to mount.
+    #[error("`{reference}`, named by [publish].nsec, holds no signing key: {reason}")]
+    Unresolved { reference: String, reason: String },
 
     /// The reason is the library's, which names the checksum or the
     /// length; repeating it in our own words would say less.
@@ -78,11 +76,12 @@ pub fn parse(raw: &str, setting: &str) -> Result<Keys, KeyError> {
 /// `publish --dry-run`, whose whole purpose is to review a snapshot
 /// without a key being involved. `publish` resolves before it reads the
 /// archive, so an unexported variable still fails in the first second.
-pub fn resolve(reference: &EnvRef) -> Result<Keys, KeyError> {
-    let secret = reference.read_env().ok_or_else(|| KeyError::MissingEnv {
-        name: reference.name().to_string(),
+pub fn resolve(reference: &SecretRef) -> Result<Keys, KeyError> {
+    let secret = reference.resolve().map_err(|reason| KeyError::Unresolved {
+        reference: reference.describe(),
+        reason: reason.to_string(),
     })?;
-    parse(secret.expose(), &format!("`{}`", reference.name()))
+    parse(secret.expose(), &format!("`{}`", reference.describe()))
 }
 
 /// One document, signed: kind 30666, the tag set of §11, and the
@@ -93,7 +92,7 @@ pub fn resolve(reference: &EnvRef) -> Result<Keys, KeyError> {
 /// does not have — which is the one error in publication that no reader
 /// could detect.
 pub fn sign(document: &Document, run: &Run, keys: &Keys) -> Event {
-    let tags = document::tags(&document.address, run, document.envelope.revision())
+    let tags = document::tags(&document.address, run, Some(document.envelope.revision()))
         .into_iter()
         .map(|tag| Tag::custom(tag.name, tag.values))
         .collect::<Vec<_>>();
@@ -106,4 +105,20 @@ pub fn sign(document: &Document, run: &Run, keys: &Keys) -> Event {
         // no failure mode of its own; treating it as one would put a
         // branch in every caller that nothing can reach.
         .expect("a document signs with a key that parsed")
+}
+
+/// The index, signed. Separate from [`sign`] because the index is not a
+/// [`Document`]: §6 exempts it from the envelope the rest carry, so there
+/// is no revision to tag and its `content` is the whole document.
+pub fn sign_index(index: &Index, run: &Run, keys: &Keys) -> Event {
+    let tags = document::tags(&index.address(), run, None)
+        .into_iter()
+        .map(|tag| Tag::custom(tag.name, tag.values))
+        .collect::<Vec<_>>();
+
+    EventBuilder::new(Kind::Custom(KIND), index.content())
+        .tags(tags)
+        .custom_created_at(Timestamp::from_secs(run.generated_at.max(0) as u64))
+        .finalize(keys)
+        .expect("an index signs with a key that parsed")
 }

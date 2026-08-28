@@ -2,7 +2,9 @@
 //! as a table.
 
 use super::*;
-use crate::publish::address::{Address, Bucket, Partition, Report, Resolution, Scope, Window};
+use crate::publish::address::{
+    Address, Bucket, Month, Partition, Report, Resolution, Scope, Window, Year,
+};
 
 fn window_address() -> Address {
     Address::Window {
@@ -12,17 +14,23 @@ fn window_address() -> Address {
     }
 }
 
+/// A year, and the bucket covering one month: the bounds are the address
+/// module's own test, not this one's.
+fn year_of(year: i32) -> Year {
+    Year::new(year).expect("a four-digit year")
+}
+
+fn month_of(year: i32, month: u32) -> Bucket {
+    Bucket::Month {
+        year: year_of(year),
+        month: Month::new(month).expect("a month of the year"),
+    }
+}
+
 fn series_address() -> Address {
     Address::Series {
         report: Report::Orders,
-        partition: Partition::new(
-            Resolution::Daily,
-            Bucket::Month {
-                year: 2026,
-                month: 1,
-            },
-        )
-        .expect("a month of days"),
+        partition: Partition::new(Resolution::Daily, month_of(2026, 1)).expect("a month of days"),
         scope: Some(Scope::Network("mainnet".into())),
     }
 }
@@ -49,7 +57,7 @@ fn the_kind_is_the_one_the_spec_reserves() {
 #[test]
 fn every_document_carries_the_indexed_tags_and_a_human_readable_alt() {
     // Arrange / Act
-    let tags = tags(&window_address(), &run(), 1);
+    let tags = tags(&window_address(), &run(), Some(1));
 
     // Assert: the three relay-indexed tags, and NIP-31's `alt`.
     assert_eq!(find(&tags, "d"), ["summary:30d"]);
@@ -67,7 +75,7 @@ fn every_document_carries_the_indexed_tags_and_a_human_readable_alt() {
 fn a_series_partition_also_names_its_resolution_and_period() {
     // The period is the address's own: January 2026, read off the bucket
     // rather than handed over beside it, so no series can lack one.
-    let tags = tags(&series_address(), &run(), 3);
+    let tags = tags(&series_address(), &run(), Some(3));
 
     assert_eq!(find(&tags, "resolution"), ["daily"]);
     let period_tag = tags
@@ -83,7 +91,7 @@ fn a_series_partition_also_names_its_resolution_and_period() {
 
 #[test]
 fn a_window_document_names_no_resolution_and_no_period() {
-    let tags = tags(&window_address(), &run(), 1);
+    let tags = tags(&window_address(), &run(), Some(1));
 
     assert!(find(&tags, "resolution").is_empty());
     assert!(find(&tags, "period").is_empty());
@@ -91,7 +99,7 @@ fn a_window_document_names_no_resolution_and_no_period() {
 
 #[test]
 fn the_alt_of_a_series_partition_reads_as_one_sentence() {
-    let tags = tags(&series_address(), &run(), 1);
+    let tags = tags(&series_address(), &run(), Some(1));
     let alt = find(&tags, "alt")[0];
 
     assert!(alt.contains("orders"), "{alt}");
@@ -102,7 +110,7 @@ fn the_alt_of_a_series_partition_reads_as_one_sentence() {
 
 #[test]
 fn the_index_is_described_as_the_index() {
-    let tags = tags(&Address::Index { year: None }, &run(), 1);
+    let tags = tags(&Address::Index { year: None }, &run(), None);
     let alt = find(&tags, "alt")[0];
 
     assert!(alt.to_lowercase().contains("index"), "{alt}");
@@ -114,7 +122,7 @@ fn every_report_and_window_has_words_of_its_own_in_the_alt() {
     // Each variant renders to a phrase that names it; a table rather than
     // a spot check, since a new variant that fell through to a neighbour's
     // wording would describe one document as another.
-    let alt_of = |address: &Address| find(&tags(address, &run(), 1), "alt")[0].to_string();
+    let alt_of = |address: &Address| find(&tags(address, &run(), Some(1)), "alt")[0].to_string();
 
     let mut seen = std::collections::BTreeSet::new();
     for report in Report::ALL {
@@ -153,7 +161,7 @@ fn every_report_and_window_has_words_of_its_own_in_the_alt() {
 
 #[test]
 fn a_scope_and_a_year_are_spelled_out_in_the_alt() {
-    let alt_of = |address: &Address| find(&tags(address, &run(), 1), "alt")[0].to_string();
+    let alt_of = |address: &Address| find(&tags(address, &run(), Some(1)), "alt")[0].to_string();
     let pubkey = "6320ee5e2ce0e1e0ae5d2a3e0b8f1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6fd425";
 
     let instance = alt_of(&Address::Window {
@@ -166,12 +174,15 @@ fn a_scope_and_a_year_are_spelled_out_in_the_alt() {
 
     let yearly = alt_of(&Address::Series {
         report: Report::Volume,
-        partition: Partition::new(Resolution::Monthly, Bucket::Year(2026)).expect("a year"),
+        partition: Partition::new(Resolution::Monthly, Bucket::Year(year_of(2026)))
+            .expect("a year"),
         scope: None,
     });
     assert!(yearly.contains("year 2026"), "{yearly}");
 
-    let sharded = alt_of(&Address::Index { year: Some(2026) });
+    let sharded = alt_of(&Address::Index {
+        year: Some(year_of(2026)),
+    });
     assert!(sharded.contains("2026"), "{sharded}");
     assert!(sharded.to_lowercase().contains("index"), "{sharded}");
 }
@@ -180,7 +191,7 @@ fn a_scope_and_a_year_are_spelled_out_in_the_alt() {
 fn only_single_letter_tags_are_the_relay_indexed_ones() {
     // §11: `d`, `s`, `t` are for the relay; everything else is for a
     // client that already holds the event.
-    let tags = tags(&series_address(), &run(), 1);
+    let tags = tags(&series_address(), &run(), Some(1));
 
     for tag in &tags {
         let indexed = tag.name.len() == 1;
