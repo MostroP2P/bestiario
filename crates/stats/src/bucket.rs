@@ -24,6 +24,16 @@ pub struct Coverage {
     /// `created_at` of the earliest stored event; `None` when the archive
     /// holds none, and then it can speak for nothing.
     earliest: Option<i64>,
+    /// `created_at` of the latest stored event.
+    ///
+    /// Reported, never enforced: `covers` does not consult it, because a
+    /// bucket after the last event is a period the archive *can* speak
+    /// for — nothing happened in it, and zero is the honest answer there.
+    /// Only the floor would lie. It lives here because the index of
+    /// `docs/NOSTR-PUBLICATION.md` §5 states the extent at both ends, and
+    /// that extent is a fact about the same archive this type already
+    /// describes.
+    latest: Option<i64>,
 }
 
 impl Coverage {
@@ -31,12 +41,30 @@ impl Coverage {
     pub const fn since(earliest: i64) -> Self {
         Self {
             earliest: Some(earliest),
+            latest: None,
+        }
+    }
+
+    /// The archive holds events from `earliest` to `latest`.
+    pub const fn between(earliest: i64, latest: i64) -> Self {
+        Self {
+            earliest: Some(earliest),
+            latest: Some(latest),
         }
     }
 
     /// From the earliest stored event, if there is one.
     pub fn from_earliest(earliest: Option<i64>) -> Self {
-        Self { earliest }
+        Self {
+            earliest,
+            latest: None,
+        }
+    }
+
+    /// From the archive's extent, either end absent when it holds
+    /// nothing.
+    pub fn from_extent(earliest: Option<i64>, latest: Option<i64>) -> Self {
+        Self { earliest, latest }
     }
 
     /// Whether `window` reaches into what the archive holds.
@@ -51,6 +79,11 @@ impl Coverage {
     /// `created_at` of the earliest stored event, if there is one.
     pub fn earliest(&self) -> Option<i64> {
         self.earliest
+    }
+
+    /// `created_at` of the latest stored event, if the extent was read.
+    pub fn latest(&self) -> Option<i64> {
+        self.latest
     }
 
     /// The series partitions the archive can speak for at `resolution`,

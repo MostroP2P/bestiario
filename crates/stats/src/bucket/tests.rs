@@ -205,3 +205,17 @@ fn a_monthly_partition_is_a_year_and_it_spans_every_year_covered() {
 
     assert_eq!(years, vec![Bucket::Year(2025), Bucket::Year(2026)]);
 }
+
+#[test]
+fn the_extent_is_reported_at_both_ends_and_only_the_floor_is_enforced() {
+    let extent = Coverage::between(THURSDAY, THURSDAY + DAY);
+
+    assert_eq!(extent.earliest(), Some(THURSDAY));
+    assert_eq!(extent.latest(), Some(THURSDAY + DAY));
+    assert!(
+        extent.covers(Window::new(THURSDAY + 2 * DAY, THURSDAY + 3 * DAY)),
+        "a period after the last event is one the archive can speak for: nothing happened in it"
+    );
+    assert_eq!(Coverage::from_extent(None, None), Coverage::default());
+    assert_eq!(Coverage::from_earliest(Some(THURSDAY)).latest(), None);
+}

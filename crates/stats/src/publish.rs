@@ -14,6 +14,7 @@
 
 pub mod address;
 pub mod document;
+pub mod index;
 pub mod snapshot;
 
 pub use address::Address;
