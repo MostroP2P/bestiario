@@ -120,16 +120,28 @@ first, on every start. That repeats work, but the backfill is idempotent and
 costs a couple of minutes, and it means the index repairs itself if the
 replica is ever lost or truncated.
 
-**No scheduler.** App Platform `jobs` run `PRE_DEPLOY`, `POST_DEPLOY` or
-`FAILED_DEPLOY`, and nowhere else. There is no cron. The commented-out job in
-`.do/app.yaml` publishes once per deploy, which is a deployment trigger and
-not a publication schedule. Publishing on a real cadence needs one of:
+**No scheduler, and no publication job.** App Platform `jobs` run
+`PRE_DEPLOY`, `POST_DEPLOY` or `FAILED_DEPLOY`, and nowhere else. There is no
+cron. `.do/app.yaml` defines no job all the same, because the only shape
+available would publish the wrong thing or corrupt the replica:
+
+- a job is a component of its own, with its own container and its own
+  ephemeral `/data`. Given no litestream configuration it starts from an
+  empty database, and `bestiario publish` then replaces the addressable
+  documents with statistics computed from nothing;
+- given the *same* litestream configuration as the indexer, it becomes the
+  second writer against one bucket prefix — the thing "One writer, and one
+  only" below says must not happen.
+
+Publication has to run where the archive is, and the ways there are:
 
 - a `--every` interval inside the daemon, so one worker both syncs and
-  publishes — the option that keeps the deployment a single component;
-- a DigitalOcean Function on a schedule, or any external cron, invoking the
-  app;
-- a separate always-on worker whose command is a sleep loop around `publish`.
+  publishes against the same file — the option that keeps the deployment a
+  single component, and the one to reach for first;
+- a separate component with a `LITESTREAM_PATH` of its own, which makes it a
+  publisher of its own index rather than of the indexer's;
+- Postgres, per "Postgres, still" below, after which more than one component
+  may touch the same data safely.
 
 ## The ephemeral filesystem, and the bucket that outlives it
 
