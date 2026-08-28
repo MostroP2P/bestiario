@@ -25,3 +25,7 @@ uuid.workspace = true
 # hash of §5 is taken over bytes this crate has to produce itself. On the
 # allowlist of scripts/check-stats-deps.sh; it opens nothing.
 serde_json.workspace = true
+# The hash of docs/NOSTR-PUBLICATION.md §5 is taken over payload bytes this
+# crate produces, so the digest has to be computed here or the answer and
+# its fingerprint would come from two places. A hash function opens nothing.
+sha2.workspace = true

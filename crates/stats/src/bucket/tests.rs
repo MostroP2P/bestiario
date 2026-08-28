@@ -1,5 +1,18 @@
 use super::*;
 use crate::metric::Value;
+use crate::publish::address::{Bucket, Month, Resolution, Year};
+
+/// A month bucket from plain numbers, as every test here writes one.
+fn month_of(year: i32, month: u32) -> Bucket {
+    Bucket::Month {
+        year: Year::new(year).expect("a four-digit year"),
+        month: Month::new(month).expect("a month of the year"),
+    }
+}
+
+fn year_of(year: i32) -> Bucket {
+    Bucket::Year(Year::new(year).expect("a four-digit year"))
+}
 
 /// 2026-08-27T00:00:00Z, a Thursday.
 const THURSDAY: i64 = 1_787_788_800;
@@ -134,4 +147,64 @@ fn a_bucket_whose_predecessor_the_archive_never_saw_is_compared_against_nothing(
     };
     assert_eq!(value("x.2026-08-27.previous"), &Value::Missing);
     assert_eq!(value("x.2026-08-28.previous"), &Value::Count(THURSDAY));
+}
+
+// ---- the partitions a publication run computes
+// (`docs/NOSTR-PUBLICATION.md` §6.3)
+
+/// 2025-12-15T00:00:00Z and 2026-01-10T00:00:00Z.
+const DECEMBER: i64 = 1_765_756_800;
+const JANUARY: i64 = 1_768_003_200;
+
+#[test]
+fn an_archive_holding_nothing_has_no_partition_to_publish() {
+    let empty = Coverage::default();
+
+    for resolution in Resolution::ALL {
+        assert!(
+            empty.partitions(resolution, THURSDAY).is_empty(),
+            "{resolution:?}: nothing to speak for is nothing to publish"
+        );
+    }
+}
+
+#[test]
+fn an_archive_that_begins_after_now_has_no_partition_either() {
+    let ahead = Coverage::since(THURSDAY + DAY);
+
+    assert!(ahead.partitions(Resolution::Monthly, THURSDAY).is_empty());
+}
+
+#[test]
+fn a_timestamp_no_calendar_date_can_hold_yields_no_partitions() {
+    let unrepresentable = Coverage::since(i64::MAX);
+
+    assert!(
+        unrepresentable
+            .partitions(Resolution::Daily, i64::MAX)
+            .is_empty(),
+        "a clock past every representable date names no month"
+    );
+}
+
+#[test]
+fn the_month_partitions_roll_over_into_the_next_year() {
+    let across = Coverage::since(DECEMBER);
+
+    let months = across.partitions(Resolution::Daily, JANUARY);
+
+    assert_eq!(
+        months,
+        vec![month_of(2025, 12), month_of(2026, 1),],
+        "December is followed by the January of the next year, not by a thirteenth month"
+    );
+}
+
+#[test]
+fn a_monthly_partition_is_a_year_and_it_spans_every_year_covered() {
+    let across = Coverage::since(DECEMBER);
+
+    let years = across.partitions(Resolution::Monthly, JANUARY);
+
+    assert_eq!(years, vec![year_of(2025), year_of(2026)]);
 }

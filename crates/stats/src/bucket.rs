@@ -47,6 +47,60 @@ impl Coverage {
         self.earliest
             .is_some_and(|earliest| window.until > earliest)
     }
+
+    /// `created_at` of the earliest stored event, if there is one.
+    pub fn earliest(&self) -> Option<i64> {
+        self.earliest
+    }
+
+    /// The series partitions the archive can speak for at `resolution`,
+    /// from the one holding its earliest event to the one holding `now`,
+    /// oldest first — what a publication run has to compute
+    /// (`docs/NOSTR-PUBLICATION.md` §6.3: a partition entirely outside
+    /// coverage is no document).
+    pub fn partitions(
+        &self,
+        resolution: crate::publish::address::Resolution,
+        now: i64,
+    ) -> Vec<crate::publish::address::Bucket> {
+        use crate::publish::address::{Bucket, Month, Resolution, Year};
+        use chrono::{DateTime, Datelike, Utc};
+
+        let Some(earliest) = self.earliest.filter(|earliest| *earliest <= now) else {
+            return Vec::new();
+        };
+        let (Some(first), Some(last)) = (
+            DateTime::<Utc>::from_timestamp(earliest, 0),
+            DateTime::<Utc>::from_timestamp(now, 0),
+        ) else {
+            return Vec::new();
+        };
+
+        // A year outside the four digits the grammar can spell has no
+        // address, so it has no document either: it is skipped rather
+        // than named, which is the same answer `Partition::new` gives.
+        match resolution {
+            Resolution::Monthly => (first.year()..=last.year())
+                .filter_map(Year::new)
+                .map(Bucket::Year)
+                .collect(),
+            Resolution::Daily | Resolution::Weekly => {
+                let mut buckets = Vec::new();
+                let (mut year, mut month) = (first.year(), first.month());
+                while (year, month) <= (last.year(), last.month()) {
+                    if let (Some(year), Some(month)) = (Year::new(year), Month::new(month)) {
+                        buckets.push(Bucket::Month { year, month });
+                    }
+                    (year, month) = if month == 12 {
+                        (year + 1, 1)
+                    } else {
+                        (year, month + 1)
+                    };
+                }
+                buckets
+            }
+        }
+    }
 }
 
 /// One bucket per period of `window`, oldest first: `block` computes the

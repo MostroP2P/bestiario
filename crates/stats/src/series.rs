@@ -248,10 +248,26 @@ pub fn catalogue(data: &Data, window: Window, now: i64) -> Vec<String> {
         Family::Disputes,
     ]
     .into_iter()
-    .flat_map(|family| family.metrics(data, window, now))
-    .map(|metric| metric.name)
-    .filter(|name| plottable(name).is_ok())
+    .flat_map(|family| catalogue_of(family, data, window, now))
     .collect()
+}
+
+/// The plottable metrics of one family over `window`, in the order the
+/// family reports them — what a published series partition has columns
+/// for.
+pub fn catalogue_of(family: Family, data: &Data, window: Window, now: i64) -> Vec<String> {
+    family
+        .metrics(data, window, now)
+        .into_iter()
+        .map(|metric| metric.name)
+        .filter(|name| plottable(name).is_ok())
+        .collect()
+}
+
+/// The whole block one family reports over `window`, provenance and all —
+/// what a published window document carries verbatim.
+pub fn block_of(family: Family, data: &Data, window: Window, now: i64) -> Vec<Metric> {
+    family.metrics(data, window, now)
 }
 
 /// Whether `name` is a figure of its window, and so has a shape over time.

@@ -14,6 +14,7 @@
 
 pub mod address;
 pub mod document;
+pub mod snapshot;
 
 pub use address::Address;
 pub use document::{Envelope, KIND, Run, SCHEMA_VERSION, Tag};
