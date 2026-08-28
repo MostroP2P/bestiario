@@ -670,7 +670,7 @@ fn a_snapshot_publishes_a_window_document_for_every_report_and_window() {
         for window in Span::ALL {
             let address = format!("{}:{}", report.as_str(), window.as_str());
             assert!(
-                addresses.iter().any(|found| *found == address),
+                addresses.contains(&address),
                 "{address} is missing from {addresses:?}"
             );
         }

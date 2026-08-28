@@ -136,23 +136,22 @@ pub fn hash_of(payload: &impl Serialize) -> String {
 /// same. A client constructing `instances:30d` from the grammar of §3 must
 /// not get a miss because the document happens to have no series.
 fn window_metrics(report: Report, data: &Data, window: Window, now: i64) -> Vec<Metric> {
-    match family_of(report) {
-        Some(family) => series::block_of(family, data, window, now),
-        None => match report {
-            Report::Summary => summary::report(&data.orders, Some(&data.disputes), window, now),
-            Report::Market => market::report(&data.orders, window, None),
-            Report::Instances => instances::list(&data.profiles, &data.orders, window, now),
-            Report::Compare => compare::report(
-                &data.profiles,
-                &data.orders,
-                &data.fees,
-                Some(&data.disputes),
-                window,
-                now,
-            ),
-            // Unreachable: every report either has a family or is named above.
-            Report::Orders | Report::Volume | Report::Disputes | Report::DevFees => Vec::new(),
-        },
+    match report {
+        Report::Orders => series::block_of(series::Family::Activity, data, window, now),
+        Report::Volume => series::block_of(series::Family::Volume, data, window, now),
+        Report::DevFees => series::block_of(series::Family::DevFees, data, window, now),
+        Report::Disputes => series::block_of(series::Family::Disputes, data, window, now),
+        Report::Summary => summary::report(&data.orders, Some(&data.disputes), window, now),
+        Report::Market => market::report(&data.orders, window, None),
+        Report::Instances => instances::list(&data.profiles, &data.orders, window, now),
+        Report::Compare => compare::report(
+            &data.profiles,
+            &data.orders,
+            &data.fees,
+            Some(&data.disputes),
+            window,
+            now,
+        ),
     }
 }
 
