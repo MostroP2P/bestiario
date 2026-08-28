@@ -122,7 +122,7 @@ pub async fn run(
         &context.settings.assumptions,
         &context.settings.publish,
         &context.settings.report.reference_currency,
-        requested(context, republish),
+        requested(context.cli.from, context.cli.until, republish)?,
         now,
     )
     .await?;
@@ -154,31 +154,58 @@ pub async fn run(
 /// span of time. They select partitions rather than filter rows, which is
 /// the only reading of "republish a range" that a partitioned format
 /// allows.
-fn requested(context: &Context<'_>, republish: bool) -> Republish {
+fn requested(from: Option<i64>, until: Option<i64>, republish: bool) -> Result<Republish> {
     if !republish {
-        return Republish::No;
+        return Ok(Republish::No);
     }
-    match (context.cli.from, context.cli.until) {
-        (None, None) => Republish::All,
+    match (from, until) {
+        (None, None) => Ok(Republish::All),
         // One end given is a half-open range, which is what a recovery
         // usually is: everything since the relay was reset.
-        (from, until) => Republish::Range(Window {
-            from: from.unwrap_or(0),
-            until: until.unwrap_or(i64::MAX),
-        }),
+        (from, until) => {
+            let window = Window {
+                from: from.unwrap_or(0),
+                until: until.unwrap_or(i64::MAX),
+            };
+            // Refused rather than obeyed. An empty or reversed range
+            // overlaps no partition, so the run would send exactly what
+            // an ordinary one sends, print nothing unusual and exit
+            // zero — while the operator believes the history they asked
+            // for is back on the relay. A recovery that silently
+            // recovers nothing is worse than one that fails.
+            anyhow::ensure!(
+                window.from < window.until,
+                "--republish over an empty range: --from {} is not before --until {}. \
+                 Nothing overlaps it, so the run would republish nothing while appearing \
+                 to succeed",
+                window.from,
+                window.until
+            );
+            Ok(Republish::Range(window))
+        }
     }
 }
 
 /// Records what this run published, so the next one can say what changed.
 async fn record(pool: &SqlitePool, publication: &Publication) -> Result<()> {
+    // One transaction, because the two halves are one fact. The next run
+    // reads the documents to decide each revision and the run to decide
+    // *why* the figures moved; a crash between them would leave some
+    // documents at this run's revision, the rest at the last one, and the
+    // run row still naming the publication before. The next run would
+    // then skip documents it should send and re-issue others under a
+    // revision already used, with a restatement clock from the wrong run
+    // — and §8's history is not a thing a later run can repair.
+    let mut tx = pool.begin().await.context("recording the publication")?;
+
     for (address, previous) in &publication.state {
-        published::record(pool, address, previous)
+        published::record(&mut *tx, address, previous)
             .await
             .with_context(|| format!("recording the publication of {address}"))?;
     }
 
     published::record_run(
-        pool,
+        &mut *tx,
         &published::Run {
             snapshot_id: publication.snapshot.run.snapshot_id.clone(),
             generated_at: publication.snapshot.run.generated_at,
@@ -190,6 +217,8 @@ async fn record(pool: &SqlitePool, publication: &Publication) -> Result<()> {
     )
     .await
     .context("recording the publication run")?;
+
+    tx.commit().await.context("recording the publication")?;
 
     Ok(())
 }

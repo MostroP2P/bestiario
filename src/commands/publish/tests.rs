@@ -392,3 +392,54 @@ fn a_document_that_moved_is_sent_and_the_index_is_never_withheld() {
         again.not_sent
     );
 }
+
+// ---- what --republish may ask for (§9.3)
+
+#[test]
+fn a_republish_range_that_covers_nothing_is_refused_rather_than_obeyed() {
+    // An empty or reversed range overlaps no partition, so the run would
+    // send exactly what an ordinary one sends, print nothing unusual and
+    // exit zero — while the operator believes the history they asked for
+    // is back on the relay.
+    let empty = requested(Some(NOW), Some(NOW), true).expect_err("from is not before until");
+    let reversed = requested(Some(NOW), Some(NOW - 86_400), true).expect_err("reversed");
+
+    assert!(
+        empty.to_string().contains("republish nothing"),
+        "the refusal has to say what would have happened: {empty}"
+    );
+    assert!(
+        reversed
+            .to_string()
+            .contains("--republish over an empty range")
+    );
+}
+
+#[test]
+fn a_republish_range_with_one_end_open_reaches_to_the_archives_edge() {
+    // The usual recovery: everything since the relay was reset.
+    let since = requested(Some(NOW), None, true).expect("half-open");
+    let until = requested(None, Some(NOW), true).expect("half-open");
+
+    assert_eq!(
+        since,
+        Republish::Range(Window {
+            from: NOW,
+            until: i64::MAX
+        })
+    );
+    assert_eq!(
+        until,
+        Republish::Range(Window {
+            from: 0,
+            until: NOW
+        })
+    );
+}
+
+#[test]
+fn without_the_flag_the_bounds_are_not_a_republication() {
+    let none = requested(Some(NOW), Some(NOW), false).expect("no flag, no range to validate");
+
+    assert_eq!(none, Republish::No);
+}

@@ -232,3 +232,92 @@ async fn recording_a_run_twice_under_one_snapshot_id_is_one_run() {
         .expect("count");
     assert_eq!(count, 1);
 }
+
+// ---- one run recorded as one fact
+
+#[tokio::test]
+async fn a_run_abandoned_halfway_records_none_of_itself() {
+    // The next run reads the documents to decide each revision and the
+    // run row to decide why the figures moved. A crash between the two
+    // would leave some documents at this run's revision and the run row
+    // still naming the one before, and §8's history is not something a
+    // later run can repair — so the whole of it goes in one transaction.
+    let pool = migrated().await;
+
+    let mut tx = pool.begin().await.expect("begin");
+    record(
+        &mut *tx,
+        "orders:24h",
+        &Previous::First {
+            hash: "abc".to_string(),
+            updated_at: NOW,
+        },
+    )
+    .await
+    .expect("the first document of the run");
+    record_run(
+        &mut *tx,
+        &Run {
+            snapshot_id: "20260827T030640Z".to_string(),
+            generated_at: NOW,
+            schema_version: 1,
+            first_event_at: Some(NOW - A_WEEK),
+            last_event_at: Some(NOW),
+            events: 12,
+        },
+    )
+    .await
+    .expect("the run");
+    // The process dies here, before the commit.
+    drop(tx);
+
+    assert!(
+        all(&pool).await.expect("read back").is_empty(),
+        "a half-written run must leave no document behind"
+    );
+    assert_eq!(
+        latest_run(&pool).await.expect("read back"),
+        None,
+        "and no run row claiming those documents were published"
+    );
+}
+
+#[tokio::test]
+async fn a_committed_run_records_both_halves_together() {
+    let pool = migrated().await;
+
+    let mut tx = pool.begin().await.expect("begin");
+    record(
+        &mut *tx,
+        "orders:24h",
+        &Previous::First {
+            hash: "abc".to_string(),
+            updated_at: NOW,
+        },
+    )
+    .await
+    .expect("document");
+    record_run(
+        &mut *tx,
+        &Run {
+            snapshot_id: "20260827T030640Z".to_string(),
+            generated_at: NOW,
+            schema_version: 1,
+            first_event_at: Some(NOW - A_WEEK),
+            last_event_at: Some(NOW),
+            events: 12,
+        },
+    )
+    .await
+    .expect("run");
+    tx.commit().await.expect("commit");
+
+    assert_eq!(all(&pool).await.expect("read back").len(), 1);
+    assert_eq!(
+        latest_run(&pool)
+            .await
+            .expect("read back")
+            .map(|run| run.snapshot_id),
+        Some("20260827T030640Z".to_string())
+    );
+}
