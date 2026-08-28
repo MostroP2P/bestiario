@@ -224,3 +224,37 @@ fn a_weekly_partition_is_filed_under_the_month_its_first_day_falls_in() {
         }
     );
 }
+
+#[test]
+fn a_partition_spans_its_whole_month_or_year_and_december_rolls_the_year() {
+    // 2026-08-01 to 2026-09-01; 2026-12-01 to 2027-01-01; 2026 whole.
+    let august = Partition::new(
+        Resolution::Daily,
+        Bucket::Month {
+            year: 2026,
+            month: 8,
+        },
+    )
+    .expect("a month")
+    .window();
+    assert_eq!((august.from, august.until), (1_785_542_400, 1_788_220_800));
+
+    let december = Bucket::Month {
+        year: 2026,
+        month: 12,
+    }
+    .window();
+    assert_eq!(
+        (december.from, december.until),
+        (1_796_083_200, 1_798_761_600)
+    );
+
+    let year = Partition::new(Resolution::Monthly, Bucket::Year(2026))
+        .expect("a year")
+        .window();
+    assert_eq!((year.from, year.until), (1_767_225_600, 1_798_761_600));
+    assert_eq!(
+        year.until, december.until,
+        "the year ends where December does"
+    );
+}

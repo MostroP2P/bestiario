@@ -263,3 +263,16 @@ fn a_revision_above_the_first_cannot_lack_its_restatement_and_the_first_cannot_h
     assert!(Envelope::restated(&run(), 0, restatement, serde_json::json!({})).is_none());
     assert_eq!(Envelope::first(&run(), serde_json::json!({})).revision(), 1);
 }
+
+#[test]
+fn an_envelope_gives_back_what_it_was_built_from() {
+    // The fields are private so the two states stay coupled; the readers
+    // are what the snapshot and the index build their records from.
+    let payload = serde_json::json!({"range": {}, "metrics": [1, 2, 3]});
+    let envelope = Envelope::first(&run(), payload.clone());
+
+    assert_eq!(envelope.snapshot_id(), "01J8ZTEST");
+    assert_eq!(envelope.generated_at(), "2026-08-27T03:06:40+00:00");
+    assert_eq!(envelope.revision(), 1);
+    assert_eq!(envelope.payload(), &payload);
+}
