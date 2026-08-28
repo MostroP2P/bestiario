@@ -4,9 +4,10 @@
 
 use super::*;
 
-/// The tables of `docs/SPEC.md` §4. Listed explicitly rather than counted, so
+/// The tables of `docs/SPEC.md` §4, plus the two of
+/// `docs/NOSTR-PUBLICATION.md` §8. Listed explicitly rather than counted, so
 /// that a migration which drops one fails with the name of what went missing.
-const EXPECTED_TABLES: [&str; 13] = [
+const EXPECTED_TABLES: [&str; 15] = [
     "dev_fees",
     "dispute_versions",
     "disputes",
@@ -17,6 +18,8 @@ const EXPECTED_TABLES: [&str; 13] = [
     "instances",
     "order_versions",
     "orders",
+    "publication_runs",
+    "published_documents",
     "rates",
     "relays",
     "sync_state",

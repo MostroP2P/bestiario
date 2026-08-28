@@ -127,6 +127,16 @@ pub enum Command {
         /// Also write every document as `<d>.json` into this directory.
         #[arg(long, value_name = "DIR")]
         out: Option<PathBuf>,
+
+        /// Send every document again, including the ones whose figures
+        /// have not moved — the recovery path for a pruned relay, a new
+        /// relay or a schema migration.
+        ///
+        /// With the global `--from` / `--until`, only the series
+        /// partitions that range touches are recovered; whatever an
+        /// ordinary run would have sent is still sent.
+        #[arg(long)]
+        republish: bool,
     },
 
     /// Regenerate the projections from the stored versions.

@@ -102,6 +102,22 @@ where
     Ok(count == 0)
 }
 
+/// How many events the archive holds.
+///
+/// Read by `publish` for the reason of §8: a walk that found events
+/// *inside* a range already covered moves no coverage floor and moves
+/// plenty of figures, and the count is what tells that apart from a
+/// rebuild.
+pub async fn count<'e, E>(executor: E) -> Result<u64, sqlx::Error>
+where
+    E: Executor<'e, Database = Sqlite>,
+{
+    let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM events")
+        .fetch_one(executor)
+        .await?;
+    Ok(count.max(0) as u64)
+}
+
 /// How far back the archive can speak for a report reading `kinds`, within
 /// `scope`.
 ///

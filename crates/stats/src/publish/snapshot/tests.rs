@@ -406,6 +406,103 @@ fn a_snapshot_publishes_every_window_report_and_every_covered_partition() {
 }
 
 #[test]
+fn a_run_over_an_archive_that_has_not_moved_gives_every_window_the_same_hash() {
+    // Arrange: one archive, read by two runs a minute apart. §8: "a run
+    // over an archive that has not moved re-sends no document" — which
+    // holds only if the window a document covers is a function of the
+    // archive rather than of the clock that happened to read it.
+    let archive = Coverage::between(JULY, AUGUST);
+
+    // Act
+    let once = Snapshot::compute(&data(), archive, "a", SEPTEMBER);
+    let again = Snapshot::compute(&data(), archive, "b", SEPTEMBER + 60);
+
+    // Assert: every window document, not just the closed partitions.
+    let windows = |snapshot: &Snapshot| -> Vec<(String, String)> {
+        snapshot
+            .documents
+            .iter()
+            .filter(|document| document.period.is_none())
+            .map(|document| (document.address.to_string(), document.hash.clone()))
+            .collect()
+    };
+    let before = windows(&once);
+    assert!(!before.is_empty(), "the snapshot has window documents");
+    assert_eq!(
+        before,
+        windows(&again),
+        "the clock moved and the archive did not, so no window figure moved"
+    );
+}
+
+#[test]
+fn a_window_ends_at_the_archives_ceiling_and_not_at_the_clock() {
+    // Arrange: an ingest an hour behind the clock. A window running to
+    // `now` would count that hour as a period with no activity, which is
+    // the flat line at zero §6.3 exists to refuse.
+    let archive = Coverage::between(JULY, AUGUST);
+
+    // Act
+    let snapshot = Snapshot::compute(&data(), archive, "a", AUGUST + 3600);
+    let payload = snapshot
+        .documents
+        .iter()
+        .find(|document| document.address.to_string() == "orders:24h")
+        .map(|document| document.envelope.payload().clone())
+        .expect("a 24h window document");
+
+    // Assert: it ends where the archive does.
+    assert_eq!(payload["range"]["until"], rfc3339(AUGUST));
+    assert_eq!(payload["range"]["from"], rfc3339(AUGUST - 86_400));
+}
+
+#[test]
+fn a_ceiling_beyond_the_clock_does_not_reach_past_it() {
+    // A relay can serve an event dated in the future, and a window is
+    // not the place to publish one.
+    let snapshot = Snapshot::compute(
+        &data(),
+        Coverage::between(JULY, SEPTEMBER + 86_400),
+        "a",
+        SEPTEMBER,
+    );
+    let payload = snapshot
+        .documents
+        .iter()
+        .find(|document| document.address.to_string() == "orders:24h")
+        .map(|document| document.envelope.payload().clone())
+        .expect("a 24h window document");
+
+    assert_eq!(payload["range"]["until"], rfc3339(SEPTEMBER));
+}
+
+#[test]
+fn an_archive_dated_entirely_in_the_future_does_not_open_a_window_after_it_closes() {
+    // Arrange: a relay served events dated ahead of the clock, so the
+    // archive's floor and ceiling are both past `now`. The ceiling is
+    // clamped to the clock; the floor `all` reaches back to must be
+    // clamped with it, or the window opens after it closes.
+    let snapshot = Snapshot::compute(
+        &data(),
+        Coverage::between(SEPTEMBER + 86_400, SEPTEMBER + 2 * 86_400),
+        "a",
+        SEPTEMBER,
+    );
+
+    // Act
+    let payload = snapshot
+        .documents
+        .iter()
+        .find(|document| document.address.to_string() == "orders:all")
+        .map(|document| document.envelope.payload().clone())
+        .expect("an `all` window document");
+
+    // Assert: empty, and not inverted.
+    assert_eq!(payload["range"]["from"], rfc3339(SEPTEMBER));
+    assert_eq!(payload["range"]["until"], rfc3339(SEPTEMBER));
+}
+
+#[test]
 fn the_documents_of_a_snapshot_are_in_a_stable_order() {
     let once = Snapshot::compute(&data(), Coverage::since(JULY), "a", SEPTEMBER);
     let again = Snapshot::compute(&data(), Coverage::since(JULY), "b", SEPTEMBER);

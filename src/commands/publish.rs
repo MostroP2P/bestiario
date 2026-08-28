@@ -32,6 +32,7 @@
 //! commands would give a snapshot whose documents disagree about what the
 //! archive held.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use anyhow::{Context as _, Result};
@@ -42,14 +43,17 @@ use nostr_sdk::prelude::{Keys, ToBech32 as _};
 use crate::commands::Context;
 use crate::config::{AssumptionSettings, PublishSettings};
 use crate::db::load::{self, Scope};
-use crate::db::repo::events;
+use crate::db::repo::{events, published};
 use crate::nostr::client::RelayClient;
 use crate::nostr::{nip11, signer};
 use crate::stats::bucket::Coverage;
+use crate::stats::publish::document::SCHEMA_VERSION;
 use crate::stats::publish::index::{Index, Publisher};
+use crate::stats::publish::restatement::{Because, Previous, Read, Republish, Restated};
 use crate::stats::publish::size::{self, Ceiling, Measured};
 use crate::stats::publish::snapshot::Snapshot;
 use crate::stats::series::{Assumption, Data, Priced};
+use crate::stats::window::Window;
 
 /// A snapshot, computed and weighed: everything a review needs and
 /// everything the signer of the next row will be handed.
@@ -59,6 +63,14 @@ pub struct Publication {
     pub ceiling: Ceiling,
     pub relays_asked: usize,
     pub measured: Vec<Measured>,
+    /// The addresses this run does not send, because their payload is
+    /// already published and no republication asked for them (§8). Still
+    /// listed, still in the index, still recorded.
+    pub not_sent: BTreeSet<String>,
+    /// What this run leaves behind for the next one to compare against.
+    pub state: BTreeMap<String, Previous>,
+    /// How many events the archive held when this snapshot was computed.
+    pub events: u64,
 }
 
 impl Publication {
@@ -81,7 +93,13 @@ impl Publication {
 
 /// Computes the snapshot, checks it against the ceiling, prints it and
 /// writes it.
-pub async fn run(context: &Context<'_>, dry_run: bool, out: Option<&Path>, now: i64) -> Result<()> {
+pub async fn run(
+    context: &Context<'_>,
+    dry_run: bool,
+    out: Option<&Path>,
+    republish: bool,
+    now: i64,
+) -> Result<()> {
     refuse_scoped(context)?;
     let settings = &context.settings.publish;
     // Only a run that is going to sign asks for the key, so `--dry-run`
@@ -99,11 +117,19 @@ pub async fn run(context: &Context<'_>, dry_run: bool, out: Option<&Path>, now: 
          --out <dir> to write it as files"
     );
 
+    // Only a run that is going to sign has a clock to answer for: a
+    // review or a write to disk replaces nothing on a relay. Asked before
+    // the archive is read, for the same reason the key is.
+    if keys.is_some() {
+        refuse_stalled_clock(published::latest_run(context.pool).await?.as_ref(), now)?;
+    }
+
     let publication = compute(
         context.pool,
         &context.settings.assumptions,
         &context.settings.publish,
         &context.settings.report.reference_currency,
+        requested(context.cli.from, context.cli.until, republish)?,
         now,
     )
     .await?;
@@ -119,7 +145,118 @@ pub async fn run(context: &Context<'_>, dry_run: bool, out: Option<&Path>, now: 
 
     if let Some(keys) = &keys {
         print!("{}", send(&publication, keys, &settings.relays).await?);
+        // Written only after the relays took it. A run that recorded
+        // first and then failed would tell the next run that documents
+        // are published which are not, and the skip of §8 would leave
+        // them missing until their figures happened to move.
+        record(context.pool, &publication).await?;
     }
+
+    Ok(())
+}
+
+/// What the invocation asked to be republished (§9.3).
+///
+/// The global `--from` / `--until` mean here what they mean everywhere: a
+/// span of time. They select partitions rather than filter rows, which is
+/// the only reading of "republish a range" that a partitioned format
+/// allows.
+fn requested(from: Option<i64>, until: Option<i64>, republish: bool) -> Result<Republish> {
+    if !republish {
+        return Ok(Republish::No);
+    }
+    match (from, until) {
+        (None, None) => Ok(Republish::All),
+        // One end given is a half-open range, which is what a recovery
+        // usually is: everything since the relay was reset.
+        (from, until) => {
+            let window = Window {
+                from: from.unwrap_or(0),
+                until: until.unwrap_or(i64::MAX),
+            };
+            // Refused rather than obeyed. An empty or reversed range
+            // overlaps no partition, so the run would send exactly what
+            // an ordinary one sends, print nothing unusual and exit
+            // zero — while the operator believes the history they asked
+            // for is back on the relay. A recovery that silently
+            // recovers nothing is worse than one that fails.
+            anyhow::ensure!(
+                window.from < window.until,
+                "--republish over an empty range: --from {} is not before --until {}. \
+                 Nothing overlaps it, so the run would republish nothing while appearing \
+                 to succeed",
+                window.from,
+                window.until
+            );
+            Ok(Republish::Range(window))
+        }
+    }
+}
+
+/// Refuses a run whose clock has not passed the last publication's (§7).
+///
+/// A published document is replaceable, and every one of them carries the
+/// run's `generated_at` as its `created_at` (§11). A relay keeps the copy
+/// with the highest `created_at` and breaks a tie on event id, so a second
+/// run inside the same second would sign replacements the relay has no
+/// reason to prefer over what it already holds — and it would say so to
+/// nobody: the send succeeds, the archive records a publication, and the
+/// figures on the relay are the old ones. The same second also repeats
+/// `snapshot_id`, which §7 wants unique per run.
+///
+/// The clock going backwards is the same fault with a longer reach — an
+/// NTP correction can put a run behind the one before it for as long as
+/// the step lasted — so the check is on the ordering, not on equality.
+fn refuse_stalled_clock(last: Option<&published::Run>, now: i64) -> Result<()> {
+    let Some(last) = last else {
+        return Ok(());
+    };
+    anyhow::ensure!(
+        now > last.generated_at,
+        "the clock has not advanced past the last publication: this run is timestamped {} \
+         and snapshot {} was published at {}. Every document carries that timestamp, and a \
+         relay keeps the copy with the later one, so this run would replace nothing while \
+         reporting success. Wait until the clock passes it and run again",
+        crate::stats::publish::document::rfc3339(now),
+        last.snapshot_id,
+        crate::stats::publish::document::rfc3339(last.generated_at)
+    );
+    Ok(())
+}
+
+/// Records what this run published, so the next one can say what changed.
+async fn record(pool: &SqlitePool, publication: &Publication) -> Result<()> {
+    // One transaction, because the two halves are one fact. The next run
+    // reads the documents to decide each revision and the run to decide
+    // *why* the figures moved; a crash between them would leave some
+    // documents at this run's revision, the rest at the last one, and the
+    // run row still naming the publication before. The next run would
+    // then skip documents it should send and re-issue others under a
+    // revision already used, with a restatement clock from the wrong run
+    // — and §8's history is not a thing a later run can repair.
+    let mut tx = pool.begin().await.context("recording the publication")?;
+
+    for (address, previous) in &publication.state {
+        published::record(&mut *tx, address, previous)
+            .await
+            .with_context(|| format!("recording the publication of {address}"))?;
+    }
+
+    published::record_run(
+        &mut *tx,
+        &published::Run {
+            snapshot_id: publication.snapshot.run.snapshot_id.clone(),
+            generated_at: publication.snapshot.run.generated_at,
+            schema_version: SCHEMA_VERSION,
+            first_event_at: publication.snapshot.coverage.earliest(),
+            last_event_at: publication.snapshot.coverage.latest(),
+            events: publication.events,
+        },
+    )
+    .await
+    .context("recording the publication run")?;
+
+    tx.commit().await.context("recording the publication")?;
 
     Ok(())
 }
@@ -143,6 +280,7 @@ pub async fn compute(
     assumptions: &AssumptionSettings,
     settings: &PublishSettings,
     reference_currency: &str,
+    republish: Republish,
     now: i64,
 ) -> Result<Publication> {
     let scope = Scope::default();
@@ -168,7 +306,42 @@ pub async fn compute(
     );
     let data = load(pool, assumptions, reference_currency, &coverage, now).await?;
 
-    let snapshot = Snapshot::compute(&data, coverage, &snapshot_id(now), now);
+    // What was published before, and why the figures moved since (§8).
+    // The reason is read off the archive rather than off a flag: `publish`
+    // is not told whether a backfill or a rebuild ran before it, but the
+    // archive records enough to say.
+    let history = published::all(pool).await?;
+    let last = published::latest_run(pool).await?;
+    let held = events::count(pool).await?;
+    let current = Read {
+        schema_version: SCHEMA_VERSION,
+        covered_from: coverage.earliest(),
+        events: held,
+    };
+    // With no run to compare against, nothing has a revision above the
+    // first and no reason is published; the current reading stands in for
+    // the previous one, so the comparison is trivially "nothing moved"
+    // rather than an arbitrary reason.
+    let because = Because::inferred(
+        last.as_ref().map_or(current, |run| Read {
+            schema_version: run.schema_version,
+            covered_from: run.first_event_at,
+            events: run.events,
+        }),
+        current,
+    );
+
+    let computed = Snapshot::compute(&data, coverage, &snapshot_id(now), now);
+    let Restated {
+        snapshot,
+        not_sent,
+        state,
+    } = computed.restated(&history, because, republish);
+
+    // The index is not under §8's skip: nothing hashes it, and naming the
+    // current snapshot is its whole job, so it is republished on every
+    // run by definition (§5). It is built after the rest because it is
+    // built *from* the rest — including the revisions just decided.
     let index = snapshot.index(&publisher());
 
     let advertised = nip11::limits(&settings.relays).await;
@@ -189,6 +362,9 @@ pub async fn compute(
         ceiling,
         relays_asked: advertised.len(),
         measured,
+        not_sent,
+        state,
+        events: held,
     })
 }
 
@@ -373,14 +549,22 @@ async fn send(publication: &Publication, keys: &Keys, relays: &[String]) -> Resu
 async fn send_to(publication: &Publication, keys: &Keys, client: &RelayClient) -> Result<String> {
     let run = &publication.snapshot.run;
     let mut out = format!(
-        "publishing {} documents to {} relay(s) as {}\n",
-        publication.measured.len(),
+        "publishing to {} relay(s) as {}\n",
         client.relays().len(),
         keys.public_key().to_bech32()?
     );
 
     let mut refusals = Vec::new();
+    let mut sent = 0;
     for document in &publication.snapshot.documents {
+        // §8: a payload already on the relay is not re-signed and not
+        // sent. It stays in the index with the hash, revision and clock
+        // it already had — "unchanged" is one of the things the index
+        // exists to say.
+        if publication.not_sent.contains(&document.address.to_string()) {
+            continue;
+        }
+        sent += 1;
         let delivery = client.send(&signer::sign(document, run, keys)).await?;
         for (relay, reason) in &delivery.refused {
             out.push_str(&format!(
@@ -416,9 +600,12 @@ async fn send_to(publication: &Publication, keys: &Keys, client: &RelayClient) -
          a client reading the previous index will not see this snapshot"
     );
 
+    // The index is always one of them, and is not counted as a document
+    // whose figures did or did not move: it has none of its own.
     out.push_str(&format!(
-        "snapshot {} published, index last\n",
-        run.snapshot_id
+        "snapshot {} published: {sent} document(s) sent, {} unchanged, index last\n",
+        run.snapshot_id,
+        publication.not_sent.len()
     ));
     Ok(out)
 }

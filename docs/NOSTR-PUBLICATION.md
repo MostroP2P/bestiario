@@ -280,6 +280,27 @@ which is a bug in the one that deviates.
 record per figure with `name`, `kind`, `unit`, `value`. Those records are
 carried verbatim — no second format for the same thing.
 
+`range` ends at the archive's ceiling — the `created_at` of its latest stored
+event, clamped to the run's clock — and not at the clock itself. `all`
+likewise begins at the archive's floor. A window running to the publishing
+moment would count the stretch between the last stored event and `now` as a
+period the network was idle, when what the archive knows about that stretch
+is nothing: the flat line at zero §6.3 nulls a bucket to avoid, drawn inside
+a window instead of across one. An ingest an hour behind would publish an
+hour of quiet that did not happen.
+
+It is also what lets §8 hold. `range` is inside `payload` and `payload` is
+what §5 hashes, so a ceiling at `now` would give all twenty window documents
+a new hash on every run: each a restatement of itself, at an ever higher
+`revision`, carrying one of §8's four reasons for a figure that never moved.
+Anchored to the archive, a run that ingested nothing computes the same
+window, the same figures and the same hash.
+
+A figure that is *about* the clock rather than about the window is not
+covered by this and does not pretend to be: an open dispute's age (§6.7) is
+`now - opened_at` and moves between two runs over the same archive, which is
+a figure that really did change.
+
 ### 6.2 Series partitions
 
 The flat form repeats the envelope of every metric on every row, which for
@@ -378,6 +399,22 @@ That is allowed, and it MUST NOT be silent:
   `schema` / `correction`) accompany any revision above 1.
 - The index carries the same fields, so a client detects a restatement
   without fetching the partition.
+- The reason is read off the archive, not off a flag. `publish` is not
+  told whether a `backfill` or a `rebuild` ran before it, but
+  `publication_runs` records the schema each run published under and the
+  extent and size of the archive it read, which tells the three inferable
+  reasons apart: a changed `schema_version` is `schema`; an archive that
+  reaches further back, or holds more events than the last run saw, is
+  `backfill`; the same events underneath moved figures is `rebuild`.
+  `correction` is never inferred — nothing in the archive distinguishes
+  it from a rebuild.
+- Publication history lives in the archive (`published_documents`,
+  `publication_runs`), not on a relay. It is not derivable from the Mostro
+  events, and reading the last index back off a relay would work until the
+  day a relay pruned it — after which every revision would silently reset
+  to 1, which is exactly the claim this section exists to make
+  trustworthy. What §9.3 refuses to keep is a cache of *signed events*;
+  these tables hold none.
 - A client that has cached a partition and sees a higher revision SHOULD
   surface that the figure changed, not just swap it.
 
@@ -386,6 +423,11 @@ is already published is not re-signed and not sent: nothing about the answer
 changed, and a relay does not need a second copy of it. The index still lists
 it, with its existing hash, revision and `updated_at`, because "unchanged" is
 one of the things the index exists to say.
+
+The index is the exception to this rule, and §5 says why: nothing hashes it,
+it has no `payload` to compare and no `revision` to count, and naming the
+current snapshot is its whole job. A run over an archive that has not moved
+therefore re-sends no document — and the index anyway.
 
 The exception is §9.3. `--republish` puts documents on a relay that does not
 have them, so "the relay already has this" is precisely the assumption it
@@ -434,6 +476,13 @@ the documents a pruned relay is missing are overwhelmingly the ones whose
 figures have not changed in months, and a run that skipped them would send
 the recovering relay nothing. Every document in the range is regenerated,
 signed and sent, whatever its hash.
+
+`--from` / `--until` select **partitions**, which is the only reading of "a
+range" a partitioned format allows; a window document is relative to the
+archive's ceiling and covers no fixed span, so no range names one. Whatever
+an ordinary run would have sent is still sent alongside: withholding a
+*changed* document because it fell outside the range would publish an index
+naming a hash no relay holds, which is the one thing §7 forbids.
 
 Signed afresh rather than replayed from a store of past events: §1.1 puts the
 whole truth in the archive and keeps no state beside it, and a cache of

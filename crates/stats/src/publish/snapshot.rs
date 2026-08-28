@@ -316,6 +316,12 @@ pub struct Document {
     pub envelope: Envelope,
     /// The hash of §5, over the payload the envelope carries.
     pub hash: String,
+    /// Unix seconds: when these figures last changed, which is what the
+    /// index reports (§8) and is not the same as when they were last
+    /// published. A snapshot on its own has no history, so
+    /// [`Snapshot::compute`] sets it to the run's clock and
+    /// `restated` gives an unchanged document back the one it had.
+    pub updated_at: i64,
     /// The span a series partition covers; `None` for a window document.
     pub period: Option<Window>,
 }
@@ -368,6 +374,7 @@ impl Snapshot {
                         scope: None,
                     },
                     hash: hash_of(&payload),
+                    updated_at: now,
                     envelope: Envelope::first(
                         &run,
                         serde_json::to_value(&payload).expect("plain data"),
@@ -383,6 +390,7 @@ impl Snapshot {
                         documents.push(Document {
                             address: partition.address,
                             hash: partition.hash,
+                            updated_at: now,
                             envelope: Envelope::first(
                                 &run,
                                 serde_json::to_value(&partition.payload).expect("plain data"),
@@ -402,19 +410,50 @@ impl Snapshot {
     }
 }
 
-/// The window a `<report>:<window>` document is computed over at `now`.
+/// The window a `<report>:<window>` document is computed over: the span
+/// its address names, ending at the archive's ceiling.
+///
 /// `all` reaches back to the archive's floor, which is what "all" can
-/// honestly mean.
+/// honestly mean, and every span ends at its last stored event for the
+/// same kind of reason. A window running to the wall clock counts the
+/// stretch between the last event and `now` as a period with no activity
+/// in it, when what the archive actually knows about that stretch is
+/// nothing — the flat line at zero that §6.3 nulls a bucket to avoid,
+/// drawn inside a window instead of across one. An ingest an hour behind
+/// would publish an hour of quiet the network did not have.
+///
+/// It is also what makes §8 true as written. The payload carries the
+/// range, and the hash of §5 is over the payload, so a ceiling at `now`
+/// moves the hash of all twenty window documents every single run: each
+/// would be a restatement of itself at revision 2, 3, 4, carrying one of
+/// §8's four reasons for a figure that never moved — `rebuild`, since an
+/// unchanged archive infers exactly that — and "a run over an archive
+/// that has not moved re-sends no document" could never hold. Anchored
+/// to the ceiling, an archive that gained nothing gives the same window,
+/// the same figures and the same hash, and a run that ingested something
+/// restates for a reason it really had.
+///
+/// The ceiling is clamped to `now` because a relay can serve an event
+/// dated in the future, and a window is not the place to publish one.
+/// With no ceiling to read — an archive holding nothing at all — there is
+/// no extent to anchor to and the clock is the only anchor left.
 fn window_of(span: Span, coverage: Coverage, now: i64) -> Window {
     const DAY: i64 = 86_400;
+    let until = coverage.latest().map_or(now, |latest| latest.min(now));
     let from = match span {
-        Span::Hours24 => now - DAY,
-        Span::Days7 => now - 7 * DAY,
-        Span::Days30 => now - 30 * DAY,
-        Span::Days90 => now - 90 * DAY,
-        Span::All => coverage.earliest().unwrap_or(now),
+        Span::Hours24 => until - DAY,
+        Span::Days7 => until - 7 * DAY,
+        Span::Days30 => until - 30 * DAY,
+        Span::Days90 => until - 90 * DAY,
+        // Clamped to the ceiling for the same reason the ceiling is
+        // clamped to the clock: an archive holding nothing but
+        // future-dated events has a floor above `now`, and a window
+        // opening after it closes is not a narrower answer but a
+        // nonsensical one — an inverted `range` published, containing
+        // nothing and saying so backwards.
+        Span::All => coverage.earliest().unwrap_or(until).min(until),
     };
-    Window::new(from, now)
+    Window::new(from, until)
 }
 
 #[cfg(test)]

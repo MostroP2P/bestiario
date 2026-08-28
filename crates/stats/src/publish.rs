@@ -15,6 +15,7 @@
 pub mod address;
 pub mod document;
 pub mod index;
+pub mod restatement;
 pub mod size;
 pub mod snapshot;
 

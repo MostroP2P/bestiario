@@ -234,9 +234,41 @@ impl Envelope {
         self.revision
     }
 
+    /// When the figures were restated, and why — absent on a first
+    /// publication, which has nothing to restate.
+    pub fn restated_at(&self) -> Option<&str> {
+        self.restated_at.as_deref()
+    }
+
+    pub fn restated_because(&self) -> Option<&str> {
+        self.restated_because.as_deref()
+    }
+
+    /// The restatement as it was given, in unix seconds — what a caller
+    /// recording this document has to write back, as opposed to the RFC
+    /// 3339 text a reader of the event sees.
+    ///
+    /// Both fields or neither: they are set together and there is no
+    /// state in which one of them is meaningful alone.
+    pub fn restatement(&self) -> Option<Restatement> {
+        let at = self.restated_at.as_deref().and_then(parse_rfc3339)?;
+        Some(Restatement {
+            at,
+            because: self.restated_because.clone()?,
+        })
+    }
+
     pub fn payload(&self) -> &serde_json::Value {
         &self.payload
     }
+}
+
+/// RFC 3339 back to unix seconds — the inverse of [`rfc3339`], for a
+/// caller recording what a document says about itself.
+fn parse_rfc3339(text: &str) -> Option<i64> {
+    DateTime::parse_from_rfc3339(text)
+        .ok()
+        .map(|at| at.timestamp())
 }
 
 /// Unix seconds as RFC 3339 in UTC, the way every timestamp in a

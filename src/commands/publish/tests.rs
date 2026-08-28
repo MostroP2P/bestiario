@@ -5,12 +5,31 @@ use nostr_sdk::prelude::{Filter, Keys, Kind, MockRelay};
 
 use super::*;
 use crate::stats::series::Data;
+use bestiario_stats::publish::restatement::Previous;
 
 /// 2026-08-27T03:06:40Z, the clock the E2E suite freezes.
 const NOW: i64 = 1_787_800_000;
 
 fn publication(coverage: Coverage, ceiling: Ceiling) -> Publication {
-    let snapshot = Snapshot::compute(&Data::default(), coverage, &snapshot_id(NOW), NOW);
+    published_after(coverage, ceiling, &BTreeMap::new())
+}
+
+/// A publication computed against `history`, the way `compute` builds one
+/// — without the database it would otherwise read the history from.
+fn published_after(
+    coverage: Coverage,
+    ceiling: Ceiling,
+    history: &BTreeMap<String, Previous>,
+) -> Publication {
+    let Restated {
+        snapshot,
+        not_sent,
+        state,
+    } = Snapshot::compute(&Data::default(), coverage, &snapshot_id(NOW), NOW).restated(
+        history,
+        Because::Backfill,
+        Republish::No,
+    );
     let index = snapshot.index(&publisher());
     let mut measured = size::measure(&snapshot.documents);
     measured.push(size::measure_index(&index));
@@ -21,6 +40,9 @@ fn publication(coverage: Coverage, ceiling: Ceiling) -> Publication {
         ceiling,
         relays_asked: 1,
         measured,
+        not_sent,
+        state,
+        events: 0,
     }
 }
 
@@ -263,4 +285,204 @@ async fn a_document_no_relay_took_stops_the_index_that_would_name_it() {
         message.contains("the index naming them was not published"),
         "the operator has to be told the index was withheld: {message}"
     );
+}
+
+// ---- what a second run over an unchanged archive sends (§8)
+
+/// The history a run against `publication` would leave behind.
+fn history_of(publication: &Publication) -> BTreeMap<String, Previous> {
+    publication.state.clone()
+}
+
+#[tokio::test]
+async fn a_run_over_an_unchanged_archive_re_sends_no_document() {
+    // Not an optimisation: a relay does not need a second copy of an
+    // answer that did not change, and every re-signature is a new event
+    // every client has to decide it already had. The index is the stated
+    // exception — nothing hashes it and naming the current snapshot is
+    // its whole job, so it goes out every run (§5).
+    let relay = MockRelay::run().await.expect("start the local relay");
+    let url = relay.url().await.to_string();
+    let first = publication(Coverage::since(NOW - 86_400), Ceiling::configured(65_536));
+    send(&first, &keys(), std::slice::from_ref(&url))
+        .await
+        .expect("publish");
+
+    let again = published_after(
+        Coverage::since(NOW - 86_400),
+        Ceiling::configured(65_536),
+        &history_of(&first),
+    );
+    let report = send(&again, &keys(), std::slice::from_ref(&url))
+        .await
+        .expect("publish again");
+
+    assert!(
+        report.contains("0 document(s) sent"),
+        "the run has to say it re-sent no document: {report}"
+    );
+    assert!(
+        report.contains("index last"),
+        "and that the index went out anyway: {report}"
+    );
+    let client = RelayClient::connect(&[url]).await.expect("connect");
+    let stored = client
+        .fetch_window(
+            &client.relays()[0],
+            Filter::new().kind(Kind::Custom(crate::stats::publish::document::KIND)),
+        )
+        .await
+        .expect("read them back");
+    assert_eq!(
+        stored.len(),
+        first.measured.len(),
+        "the second run added events for figures that did not move"
+    );
+}
+
+#[test]
+fn an_unchanged_run_still_lists_every_document_and_records_every_one() {
+    // "Unchanged" is one of the things the index exists to say, and a
+    // document dropped from the record would restart at revision 1.
+    let first = publication(Coverage::since(NOW - 86_400), Ceiling::configured(65_536));
+
+    let again = published_after(
+        Coverage::since(NOW - 86_400),
+        Ceiling::configured(65_536),
+        &history_of(&first),
+    );
+
+    assert_eq!(again.measured.len(), first.measured.len());
+    assert_eq!(again.state, first.state, "and records the same revisions");
+    assert_eq!(
+        again.not_sent.len(),
+        again.snapshot.documents.len(),
+        "every document is already published; the index is not one of them"
+    );
+}
+
+#[test]
+fn a_document_that_moved_is_sent_and_the_index_is_never_withheld() {
+    // §5: nothing hashes the index and it is republished every run, so
+    // it is never in `not_sent` — which is also what §7 needs, since an
+    // index is what makes a snapshot readable at all.
+    let first = publication(Coverage::since(NOW - 86_400), Ceiling::configured(65_536));
+    let mut history = history_of(&first);
+    history.insert(
+        "orders:24h".to_string(),
+        Previous::First {
+            hash: "a hash from another archive".to_string(),
+            updated_at: NOW - 604_800,
+        },
+    );
+
+    let again = published_after(
+        Coverage::since(NOW - 86_400),
+        Ceiling::configured(65_536),
+        &history,
+    );
+
+    assert!(
+        !again.not_sent.contains("orders:24h"),
+        "the document moved and was withheld"
+    );
+    assert!(
+        !again.not_sent.contains("index"),
+        "the index is never withheld: {:?}",
+        again.not_sent
+    );
+}
+
+// ---- what --republish may ask for (§9.3)
+
+#[test]
+fn a_republish_range_that_covers_nothing_is_refused_rather_than_obeyed() {
+    // An empty or reversed range overlaps no partition, so the run would
+    // send exactly what an ordinary one sends, print nothing unusual and
+    // exit zero — while the operator believes the history they asked for
+    // is back on the relay.
+    let empty = requested(Some(NOW), Some(NOW), true).expect_err("from is not before until");
+    let reversed = requested(Some(NOW), Some(NOW - 86_400), true).expect_err("reversed");
+
+    assert!(
+        empty.to_string().contains("republish nothing"),
+        "the refusal has to say what would have happened: {empty}"
+    );
+    assert!(
+        reversed
+            .to_string()
+            .contains("--republish over an empty range")
+    );
+}
+
+#[test]
+fn a_republish_range_with_one_end_open_reaches_to_the_archives_edge() {
+    // The usual recovery: everything since the relay was reset.
+    let since = requested(Some(NOW), None, true).expect("half-open");
+    let until = requested(None, Some(NOW), true).expect("half-open");
+
+    assert_eq!(
+        since,
+        Republish::Range(Window {
+            from: NOW,
+            until: i64::MAX
+        })
+    );
+    assert_eq!(
+        until,
+        Republish::Range(Window {
+            from: 0,
+            until: NOW
+        })
+    );
+}
+
+#[test]
+fn without_the_flag_the_bounds_are_not_a_republication() {
+    let none = requested(Some(NOW), Some(NOW), false).expect("no flag, no range to validate");
+
+    assert_eq!(none, Republish::No);
+}
+
+// ---- the run's clock against the last publication's (§7, §11)
+
+fn last_run(generated_at: i64) -> published::Run {
+    published::Run {
+        snapshot_id: snapshot_id(generated_at),
+        generated_at,
+        schema_version: SCHEMA_VERSION,
+        first_event_at: Some(generated_at - 86_400),
+        last_event_at: Some(generated_at),
+        events: 1,
+    }
+}
+
+#[test]
+fn a_first_run_has_no_clock_to_be_behind() {
+    refuse_stalled_clock(None, NOW).expect("nothing published yet");
+}
+
+#[test]
+fn a_run_whose_clock_has_advanced_is_allowed() {
+    refuse_stalled_clock(Some(&last_run(NOW - 1)), NOW).expect("the clock moved");
+}
+
+#[test]
+fn a_second_run_in_the_same_second_is_refused_rather_than_signed() {
+    // Every document carries the run's timestamp as its `created_at`, and
+    // a relay keeps the copy with the later one — so the replacements
+    // would be dropped by the relay while the run reported success.
+    let stalled = refuse_stalled_clock(Some(&last_run(NOW)), NOW).expect_err("same second");
+
+    assert!(
+        stalled.to_string().contains("replace nothing"),
+        "the refusal has to say what would have happened: {stalled}"
+    );
+}
+
+#[test]
+fn a_clock_that_went_backwards_is_refused_too() {
+    // An NTP correction can put a run behind the one before it for as
+    // long as the step lasted; the fault is the ordering, not equality.
+    refuse_stalled_clock(Some(&last_run(NOW)), NOW - 60).expect_err("the clock went backwards");
 }

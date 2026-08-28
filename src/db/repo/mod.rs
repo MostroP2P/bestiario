@@ -18,6 +18,7 @@ pub mod indexed_kinds;
 pub mod instance_info;
 pub mod instances;
 pub mod orders;
+pub mod published;
 pub mod rates;
 pub mod relays;
 pub mod sync_state;
