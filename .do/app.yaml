@@ -38,7 +38,10 @@ workers:
     # idempotent — events already stored come back as duplicates and are
     # dropped — and it costs a couple of minutes, in exchange for an index
     # that repairs itself if the replica is ever lost or truncated.
-    run_command: bestiario-replicated backfill && bestiario-replicated sync
+    # One command, no shell operators: run_command is not guaranteed to reach a
+    # shell, and one carrying `&&` exits non-zero before the daemon starts.
+    # BESTIARIO_BACKFILL_FIRST below asks for the history walk instead.
+    run_command: bestiario-replicated sync
 
     # Not a knob. litestream's lock lives inside the SQLite file, so it cannot
     # see a second container replicating the same bucket prefix; two instances
@@ -72,6 +75,14 @@ workers:
       - key: BESTIARIO__INDEXER__NETWORKS
         scope: RUN_TIME
         value: "mainnet"
+
+      # `sync` alone subscribes from roughly now and never walks the relays'
+      # history, so the index would hold the last few days and present them as
+      # the network. Assembled inside deploy/replicated.sh, where a shell is
+      # guaranteed. Idempotent, so repeating it on every start is cheap.
+      - key: BESTIARIO_BACKFILL_FIRST
+        scope: RUN_TIME
+        value: "true"
 
       - key: BESTIARIO__INDEXER__BACKFILL_FROM
         scope: RUN_TIME
