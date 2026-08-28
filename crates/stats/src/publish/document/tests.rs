@@ -2,7 +2,9 @@
 //! as a table.
 
 use super::*;
-use crate::publish::address::{Address, Bucket, Partition, Report, Resolution, Scope, Window};
+use crate::publish::address::{
+    Address, Bucket, Month, Partition, Report, Resolution, Scope, Window, Year,
+};
 
 fn window_address() -> Address {
     Address::Window {
@@ -12,17 +14,23 @@ fn window_address() -> Address {
     }
 }
 
+/// A year, and the bucket covering one month: the bounds are the address
+/// module's own test, not this one's.
+fn year_of(year: i32) -> Year {
+    Year::new(year).expect("a four-digit year")
+}
+
+fn month_of(year: i32, month: u32) -> Bucket {
+    Bucket::Month {
+        year: year_of(year),
+        month: Month::new(month).expect("a month of the year"),
+    }
+}
+
 fn series_address() -> Address {
     Address::Series {
         report: Report::Orders,
-        partition: Partition::new(
-            Resolution::Daily,
-            Bucket::Month {
-                year: 2026,
-                month: 1,
-            },
-        )
-        .expect("a month of days"),
+        partition: Partition::new(Resolution::Daily, month_of(2026, 1)).expect("a month of days"),
         scope: Some(Scope::Network("mainnet".into())),
     }
 }
@@ -166,12 +174,15 @@ fn a_scope_and_a_year_are_spelled_out_in_the_alt() {
 
     let yearly = alt_of(&Address::Series {
         report: Report::Volume,
-        partition: Partition::new(Resolution::Monthly, Bucket::Year(2026)).expect("a year"),
+        partition: Partition::new(Resolution::Monthly, Bucket::Year(year_of(2026)))
+            .expect("a year"),
         scope: None,
     });
     assert!(yearly.contains("year 2026"), "{yearly}");
 
-    let sharded = alt_of(&Address::Index { year: Some(2026) });
+    let sharded = alt_of(&Address::Index {
+        year: Some(year_of(2026)),
+    });
     assert!(sharded.contains("2026"), "{sharded}");
     assert!(sharded.to_lowercase().contains("index"), "{sharded}");
 }
