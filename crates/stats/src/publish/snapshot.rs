@@ -26,12 +26,16 @@
 //! the network was trading — the single most misleading thing this system
 //! could publish. A partition entirely outside coverage is no document.
 //!
-//! The same rule applies at the other end. A partition spans a whole
-//! calendar month or year, so the one holding `now` has buckets that have
-//! not happened yet; those are `null` in every column too. Publishing
-//! zeros for tomorrow would draw the same flat line as publishing zeros
-//! for a period nobody indexed, and a chart that dips to zero for the rest
-//! of the month is the more convincing of the two lies.
+//! The same rule applies at the other end, twice over. A partition spans a
+//! whole calendar month or year, so the last one has buckets that have not
+//! happened yet, and — when the archive's extent was read — buckets past
+//! its last stored event; both are `null` in every column, and a partition
+//! wholly past the ceiling is no document at all. Publishing zeros for
+//! tomorrow would draw the same flat line as publishing zeros for a period
+//! nobody indexed, and a chart that dips to zero for the rest of the month
+//! is the more convincing of the two lies. It would also contradict the
+//! `coverage` block of §5, which is the one thing telling a client what
+//! the zeros mean.
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};

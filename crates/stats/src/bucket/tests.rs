@@ -210,15 +210,49 @@ fn a_monthly_partition_is_a_year_and_it_spans_every_year_covered() {
 }
 
 #[test]
-fn the_extent_is_reported_at_both_ends_and_only_the_floor_is_enforced() {
+fn the_extent_is_reported_and_enforced_at_both_ends() {
     let extent = Coverage::between(THURSDAY, THURSDAY + DAY);
 
     assert_eq!(extent.earliest(), Some(THURSDAY));
     assert_eq!(extent.latest(), Some(THURSDAY + DAY));
     assert!(
-        extent.covers(Window::new(THURSDAY + 2 * DAY, THURSDAY + 3 * DAY)),
-        "a period after the last event is one the archive can speak for: nothing happened in it"
+        !extent.covers(Window::new(THURSDAY + 2 * DAY, THURSDAY + 3 * DAY)),
+        "a period wholly past the last event is one nobody indexed: zeros there are the same \
+         flat line as zeros before the first backfill (§6.3)"
+    );
+    assert!(
+        extent.covers(Window::new(THURSDAY + DAY, THURSDAY + 2 * DAY)),
+        "the window is half-open, so one opening on the last event still holds it"
+    );
+    assert!(
+        extent.covers(Window::new(THURSDAY - DAY, THURSDAY + 3 * DAY)),
+        "a window straddling both ends is answerable in the middle"
+    );
+}
+
+#[test]
+fn an_extent_that_was_never_read_has_no_ceiling_to_enforce() {
+    let floor_only = Coverage::from_earliest(Some(THURSDAY));
+
+    assert_eq!(floor_only.latest(), None);
+    assert!(
+        floor_only.covers(Window::new(THURSDAY + 90 * DAY, THURSDAY + 91 * DAY)),
+        "no ceiling was stated, so there is none to fall outside of"
     );
     assert_eq!(Coverage::from_extent(None, None), Coverage::default());
-    assert_eq!(Coverage::from_earliest(Some(THURSDAY)).latest(), None);
+}
+
+#[test]
+fn the_partitions_stop_at_the_last_event_and_not_at_the_clock() {
+    let stopped = Coverage::between(DECEMBER, DECEMBER + DAY);
+
+    assert_eq!(
+        stopped.partitions(Resolution::Daily, JANUARY),
+        vec![month_of(2025, 12)],
+        "a run in January over an archive that stops in December publishes no January"
+    );
+    assert_eq!(
+        stopped.partitions(Resolution::Monthly, JANUARY),
+        vec![year_of(2025)]
+    );
 }
