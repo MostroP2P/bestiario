@@ -3,6 +3,7 @@
 use super::*;
 use crate::bucket::Coverage;
 use crate::publish::address::{Report, Window as Span};
+use crate::publish::index::Publisher;
 use crate::publish::snapshot::Snapshot;
 use crate::series::Data;
 
@@ -66,7 +67,7 @@ fn a_document_weighs_its_content_and_not_its_payload() {
 
     assert_eq!(measured.len(), snapshot.documents.len());
     assert_eq!(measured[0].address, document.address);
-    assert_eq!(measured[0].hash, document.hash);
+    assert_eq!(measured[0].hash.as_deref(), Some(document.hash.as_str()));
     assert_eq!(measured[0].bytes, document.content().len());
     assert!(
         measured[0].bytes > document.envelope.payload().to_string().len(),
@@ -128,4 +129,29 @@ fn a_snapshot_that_fits_names_nothing() {
             ..
         }
     )));
+}
+
+#[test]
+fn the_index_is_weighed_too_and_carries_no_hash() {
+    // §9.1 weighs every document and §5.1 shards the index by year when
+    // it approaches the limit, so an index nobody weighed is a snapshot
+    // that fails at the relay rather than at the gate. Nothing hashes it
+    // (§6), so there is no digest to carry.
+    let snapshot = snapshot();
+    let index = snapshot.index(&Publisher {
+        name: "bestiario".to_string(),
+        version: "0.4.0".to_string(),
+    });
+
+    let measured = measure_index(&index);
+
+    assert_eq!(measured.address.to_string(), "index");
+    assert_eq!(measured.bytes, index.content().len());
+    assert!(measured.bytes > 0);
+    assert_eq!(measured.hash, None);
+    assert!(
+        index.content().starts_with("{\"schema_version\":"),
+        "the content is the whole index, with no envelope around it: {}",
+        index.content()
+    );
 }

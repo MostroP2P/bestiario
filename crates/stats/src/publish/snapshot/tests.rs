@@ -5,7 +5,18 @@ use super::*;
 use crate::activity::{Direction, Order, Origin, Status};
 use crate::bucket::Coverage;
 use crate::metric::{Metric, Value};
-use crate::publish::address::{Bucket, Report, Resolution};
+use crate::publish::address::{Bucket, Month, Report, Resolution, Year};
+
+fn month_of(year: i32, month: u32) -> Bucket {
+    Bucket::Month {
+        year: Year::new(year).expect("a four-digit year"),
+        month: Month::new(month).expect("a month of the year"),
+    }
+}
+
+fn year_of(year: i32) -> Bucket {
+    Bucket::Year(Year::new(year).expect("a four-digit year"))
+}
 use crate::series::Data;
 use crate::window::Window;
 
@@ -56,10 +67,7 @@ fn data() -> Data {
 }
 
 fn august() -> Bucket {
-    Bucket::Month {
-        year: 2026,
-        month: 8,
-    }
+    month_of(2026, 8)
 }
 
 fn payload_of(partition: &Partition) -> serde_json::Value {
@@ -209,7 +217,7 @@ fn an_inferred_column_carries_its_error_once() {
         &priced,
         Report::Volume,
         Resolution::Monthly,
-        Bucket::Year(2026),
+        year_of(2026),
         Coverage::since(JULY),
         SEPTEMBER,
     )
@@ -300,10 +308,7 @@ fn a_partition_entirely_outside_coverage_is_not_a_document() {
         &data(),
         Report::Orders,
         Resolution::Daily,
-        Bucket::Month {
-            year: 2026,
-            month: 6,
-        },
+        month_of(2026, 6),
         Coverage::since(JULY),
         SEPTEMBER,
     );
@@ -422,10 +427,7 @@ fn the_documents_of_a_snapshot_are_in_a_stable_order() {
 // yet is absent (§3, §6.3)
 
 fn july() -> Bucket {
-    Bucket::Month {
-        year: 2026,
-        month: 7,
-    }
+    month_of(2026, 7)
 }
 
 fn weekly(bucket: Bucket) -> Partition {
@@ -468,15 +470,9 @@ fn a_week_straddling_a_month_is_filed_under_one_partition_only() {
     // still producing the right number of rows.
     let mondays = rows_of(
         Resolution::Weekly,
-        super::super::address::Partition::new(
-            Resolution::Weekly,
-            Bucket::Month {
-                year: 2026,
-                month: 8,
-            },
-        )
-        .expect("a weekly month")
-        .window(),
+        super::super::address::Partition::new(Resolution::Weekly, month_of(2026, 8))
+            .expect("a weekly month")
+            .window(),
     );
     assert_eq!(mondays.len(), 5);
     for (index, (key, week)) in mondays.iter().enumerate() {
