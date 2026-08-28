@@ -25,6 +25,13 @@
 //! first backfill would otherwise draw a flat line at zero across a period
 //! the network was trading — the single most misleading thing this system
 //! could publish. A partition entirely outside coverage is no document.
+//!
+//! The same rule applies at the other end. A partition spans a whole
+//! calendar month or year, so the one holding `now` has buckets that have
+//! not happened yet; those are `null` in every column too. Publishing
+//! zeros for tomorrow would draw the same flat line as publishing zeros
+//! for a period nobody indexed, and a chart that dips to zero for the rest
+//! of the month is the more convincing of the two lies.
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -127,15 +134,6 @@ fn family_of(report: Report) -> Option<series::Family> {
     }
 }
 
-/// The bucket size inside a partition of `resolution`.
-fn period_of(resolution: Resolution) -> Period {
-    match resolution {
-        Resolution::Daily => Period::Day,
-        Resolution::Weekly => Period::Week,
-        Resolution::Monthly => Period::Month,
-    }
-}
-
 /// The partition of `report` at `resolution` over `bucket`, or `None` when
 /// the archive can speak for none of it (§6.3).
 pub fn partition(
@@ -184,14 +182,13 @@ pub fn partition(
     .chain(declared)
     .collect();
 
-    let rows = span
-        .buckets(period_of(resolution))
+    let rows = rows_of(resolution, span)
         .into_iter()
         .map(|(key, slot)| {
             let mut row = Vec::with_capacity(columns.len());
             row.push(serde_json::Value::String(key));
             row.extend(catalogue.iter().map(|name| {
-                if !coverage.covers(slot) {
+                if !coverage.covers(slot) || slot.from >= now {
                     return serde_json::Value::Null;
                 }
                 series::measure(data, slot, now, name)
@@ -219,6 +216,64 @@ pub fn partition(
         payload,
         hash,
     })
+}
+
+/// The buckets a partition has a row for.
+///
+/// Days and months are the calendar buckets of the span, clipped to it as
+/// every report clips them. Weeks are not: a week that straddles a month
+/// boundary is filed under the month its first day falls in (§3, and
+/// `Bucket::for_week_starting`), so the rows of a weekly partition are the
+/// *whole* weeks whose Monday falls inside the month — never clipped, and
+/// never repeated in the neighbouring partition.
+///
+/// Clipping them instead would put `2026-W31` in July's partition as
+/// Jul 27–Aug 1 and again in August's as Aug 1–3: one ISO week, one key,
+/// two different sets of figures, and a client stitching the months
+/// together would double-count the days in between or pick whichever it
+/// read last. The cost is that a weekly partition's last row can run a few
+/// days past the month it is addressed by, which is what filing a week
+/// under one month means.
+fn rows_of(resolution: Resolution, span: Window) -> Vec<(String, Window)> {
+    let period = match resolution {
+        Resolution::Daily => Period::Day,
+        Resolution::Monthly => Period::Month,
+        Resolution::Weekly => return weeks_of(span),
+    };
+    span.buckets(period)
+}
+
+/// The whole weeks that open inside `span`.
+fn weeks_of(span: Window) -> Vec<(String, Window)> {
+    // A UTC week is exactly seven days of seconds — there is no daylight
+    // saving here to shorten one — so the weeks are stepped as integers
+    // and every one of them is representable by construction, with no
+    // arithmetic that can fail and no branch for it that no test could
+    // reach. 1970-01-01 was a Thursday, so the Monday of its week is
+    // three days before the epoch — the shift that puts Mondays on
+    // multiples of a week.
+    const WEEK: i64 = 7 * 86_400;
+    const EPOCH_TO_MONDAY: i64 = 3 * 86_400;
+
+    let monday_of = |at: i64| (at + EPOCH_TO_MONDAY).div_euclid(WEEK) * WEEK - EPOCH_TO_MONDAY;
+    let mut monday = monday_of(span.from);
+    if monday < span.from {
+        // The week the month opens in began in the month before, whose
+        // partition already carries it.
+        monday += WEEK;
+    }
+
+    let mut weeks = Vec::new();
+    while monday < span.until {
+        let week = Window::new(monday, monday.saturating_add(WEEK));
+        // The ISO key is the week's own, spelled by the one place that
+        // spells it; a week no calendar can name has no row.
+        if let Some((key, _)) = week.weeks().into_iter().next() {
+            weeks.push((key, week));
+        }
+        monday = monday.saturating_add(WEEK);
+    }
+    weeks
 }
 
 /// The `unit` a column declares, from a sample of its figure — the same
