@@ -13,14 +13,17 @@ use std::path::PathBuf;
 
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 
+use crate::config::DEFAULT_CONFIG_PATH;
 use crate::network::Network;
 
 /// Statistics for the Mostro network, indexed from public Nostr events.
 #[derive(Debug, Parser)]
 #[command(name = "bestiario", version, about, long_about = None)]
 pub struct Cli {
-    /// Path to settings.toml.
-    #[arg(long, short = 'c', global = true, default_value = "settings.toml")]
+    /// Path to settings.toml. Absent at the default path, the configuration
+    /// is taken entirely from BESTIARIO__* ; named explicitly and absent, it
+    /// is an error.
+    #[arg(long, short = 'c', global = true, default_value = DEFAULT_CONFIG_PATH)]
     pub config: PathBuf,
 
     /// Emit JSON instead of a table.

@@ -4,6 +4,8 @@
 //! single user-facing operation. Commands hold no domain logic of their own;
 //! they assemble the layers below. See `docs/SPEC.md` §10.
 
+use std::path::Path;
+
 use anyhow::{Context as _, Result};
 use chrono::Utc;
 use sqlx::SqlitePool;
@@ -24,7 +26,7 @@ pub mod summary;
 pub mod sync;
 
 use crate::cli::{Cli, Command, StatsCommand};
-use crate::config::Settings;
+use crate::config::{DEFAULT_CONFIG_PATH, Settings};
 use crate::db::load::Scope;
 use crate::stats::bucket::Coverage;
 
@@ -38,8 +40,17 @@ pub struct Context<'a> {
 
 /// Loads configuration, opens the database and runs the requested command.
 pub async fn run(cli: &Cli) -> Result<()> {
-    let settings =
-        Settings::load(&cli.config).with_context(|| format!("loading {}", cli.config.display()))?;
+    // A missing file is tolerated only at the default path, where it means
+    // "configured through the environment" — the shape of the container
+    // deployment, which ships no settings.toml. Anywhere else the path was
+    // typed on purpose, and a typo has to fail rather than index with
+    // defaults.
+    let settings = if cli.config == Path::new(DEFAULT_CONFIG_PATH) {
+        Settings::load_optional(&cli.config)
+    } else {
+        Settings::load(&cli.config)
+    }
+    .with_context(|| format!("loading {}", cli.config.display()))?;
 
     let pool = crate::db::connect_and_migrate(&settings.database.url)
         .await

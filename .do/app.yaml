@@ -1,0 +1,133 @@
+# DigitalOcean App Platform spec for bestiario. See docs/DEPLOY.md.
+#
+#   doctl apps create --spec .do/app.yaml
+#   doctl apps update <APP_ID> --spec .do/app.yaml
+#
+# The spec is versioned so that the deployment is reviewed like everything
+# else: a change to the relays being indexed is a pull request, not a click in
+# a dashboard.
+#
+# bestiario serves no HTTP, so it is a `worker` and not a `service`: no port,
+# no health check, no public URL. Workers require a paid plan.
+
+name: bestiario
+region: nyc
+
+workers:
+  - name: indexer
+    # Built from this repository's Dockerfile. App Platform has no Rust
+    # buildpack, so a Dockerfile is not an optimisation here, it is the only
+    # way in.
+    dockerfile_path: Dockerfile
+    source_dir: /
+
+    github:
+      repo: MostroP2P/bestiario
+      branch: main
+      deploy_on_push: true
+
+    instance_size_slug: apps-s-1vcpu-1gb
+    instance_count: 1
+
+    # `sync` follows the relays live. The image's CMD says the same thing;
+    # stating it here keeps the spec readable on its own and leaves room for
+    # `backfill` on a first run.
+    run_command: bestiario sync
+
+    envs:
+      # ---------------------------------------------------------------------
+      # What to read
+      #
+      # No settings.toml is shipped in the image: every value below is the
+      # BESTIARIO__* override of the matching key in settings.toml.example.
+      # Lists are one variable, comma separated.
+      # ---------------------------------------------------------------------
+      - key: BESTIARIO__NOSTR__RELAYS
+        scope: RUN_TIME
+        value: "wss://relay.mostro.network,wss://nos.lol"
+
+      - key: BESTIARIO__NOSTR__DISCOVER_RELAYS
+        scope: RUN_TIME
+        value: "false"
+
+      - key: BESTIARIO__INDEXER__INSTANCES
+        scope: RUN_TIME
+        value: "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390"
+
+      - key: BESTIARIO__INDEXER__ACCEPT_UNKNOWN_INSTANCES
+        scope: RUN_TIME
+        value: "false"
+
+      - key: BESTIARIO__INDEXER__NETWORKS
+        scope: RUN_TIME
+        value: "mainnet"
+
+      - key: BESTIARIO__INDEXER__BACKFILL_FROM
+        scope: RUN_TIME
+        value: "1735689600"
+
+      # ---------------------------------------------------------------------
+      # Where to write
+      #
+      # The App Platform filesystem is ephemeral: this database is lost on
+      # every deploy, restart and rescale, and the index is rebuilt from the
+      # relays. Read docs/DEPLOY.md before treating it as durable storage.
+      # ---------------------------------------------------------------------
+      - key: BESTIARIO__DATABASE__URL
+        scope: RUN_TIME
+        value: "sqlite:///data/bestiario.db"
+
+      - key: RUST_LOG
+        scope: RUN_TIME
+        value: "bestiario=info,bestiario_stats=info,warn"
+
+      # ---------------------------------------------------------------------
+      # Publishing
+      #
+      # Two variables, and the distinction between them is the point.
+      # BESTIARIO__PUBLISH__NSEC is configuration: it holds the *name* of the
+      # variable the key lives in, and pasting a key into it is refused at
+      # startup. BESTIARIO_PUBLISH_NSEC — one underscore, so outside the
+      # BESTIARIO__ prefix and never read as a setting — is the key itself,
+      # and is the only value here that is encrypted.
+      #
+      # Replace the placeholder before deploying. `doctl apps update` encrypts
+      # it in place; the ciphertext is what belongs in this file if the spec
+      # is ever round-tripped back out.
+      # ---------------------------------------------------------------------
+      - key: BESTIARIO__PUBLISH__NSEC
+        scope: RUN_TIME
+        value: "env:BESTIARIO_PUBLISH_NSEC"
+
+      - key: BESTIARIO_PUBLISH_NSEC
+        scope: RUN_TIME
+        type: SECRET
+        value: "nsec1...REPLACE_ME"
+
+# App Platform has no scheduler: `jobs` run around a deploy and nowhere else,
+# so a POST_DEPLOY job publishes once per deploy rather than on a cadence.
+# That is a deployment trigger, not a publication schedule; docs/DEPLOY.md
+# covers what publishing on a real interval would take. Uncomment to publish
+# whatever the indexer has collected by the end of a deploy.
+#
+# jobs:
+#   - name: publish
+#     kind: POST_DEPLOY
+#     dockerfile_path: Dockerfile
+#     source_dir: /
+#     github:
+#       repo: MostroP2P/bestiario
+#       branch: main
+#     instance_size_slug: apps-s-1vcpu-1gb
+#     run_command: bestiario publish
+#     envs:
+#       - key: BESTIARIO__PUBLISH__NSEC
+#         scope: RUN_TIME
+#         value: "env:BESTIARIO_PUBLISH_NSEC"
+#       - key: BESTIARIO_PUBLISH_NSEC
+#         scope: RUN_TIME
+#         type: SECRET
+#         value: "nsec1...REPLACE_ME"
+
+alerts:
+  - rule: DEPLOYMENT_FAILED

@@ -108,6 +108,10 @@ stores one rebuilds its subscription over the wider set there and then, so a
 process meant to run for months does not go on dialling only the relays it
 happened to know about on the day it started.
 
+Every key can also be set from the environment, which is how the container
+image is configured: `BESTIARIO__DATABASE__URL` overrides `[database].url`,
+and a list is one comma-separated variable. See `docs/DEPLOY.md`.
+
 ## First backfill
 
 ```console
