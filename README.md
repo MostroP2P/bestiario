@@ -1126,11 +1126,12 @@ machines, committed, and pasted into issues. So `settings.toml` holds the
 error rather than a setup that works and quietly leaks — the type the field
 parses into cannot hold a secret at all.
 
-The variable is read when a run actually signs, not when the configuration
-loads. `bestiario stats orders` on a machine that publishes nothing neither
-needs the key nor fails without it, and `publish` resolves it before it
-reads a single row, so an unexported variable fails in the first second and
-says which variable to export.
+The variable is read only by a run that is going to sign. `bestiario stats
+orders` on a machine that publishes nothing neither needs the key nor fails
+without it, and neither does `publish --dry-run`, whose whole purpose is to
+review a snapshot without a key being involved. A run that *will* publish
+resolves it before reading a single row, so an unexported variable fails in
+the first second and says which variable to export.
 
 The pubkey that key belongs to is the whole of what a reader trusts. A
 client verifies a signature, not a hostname, so moving the daemon to

@@ -89,16 +89,10 @@ fn reference(name: &str) -> EnvRef {
 }
 
 #[test]
-fn no_key_configured_is_not_an_error() {
-    assert!(resolve(None).expect("nothing to resolve").is_none());
-}
-
-#[test]
 fn a_variable_nobody_exported_is_named_in_the_refusal() {
     // The operator picked the name; it is the only thing that tells them
     // which variable to export.
-    let error =
-        resolve(Some(&reference("BESTIARIO_NOTHING_EXPORTED_THIS"))).expect_err("not exported");
+    let error = resolve(&reference("BESTIARIO_NOTHING_EXPORTED_THIS")).expect_err("not exported");
 
     assert!(
         error

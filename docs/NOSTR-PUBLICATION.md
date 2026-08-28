@@ -503,9 +503,9 @@ bestiario publish [--dry-run] [--out <dir>] [--republish] [--from …] [--until 
   shell history; a configuration file is copied, committed and pasted into
   issues. `[publish].nsec` therefore parses into a type that holds a
   variable's *name*, so a literal key there is a load error rather than a
-  working setup that leaks. The variable is read when a run signs, not
-  when the configuration loads, so a command that publishes nothing does
-  not require it.
+  working setup that leaks. The variable is read only by a run that is
+  going to sign, not when the configuration loads, so a command that
+  publishes nothing — `--dry-run` included — does not require it.
 - Publishes to `[publish].relays`, which defaults to `[nostr].relays` but is
   configured separately: reading and writing are different trust decisions.
 

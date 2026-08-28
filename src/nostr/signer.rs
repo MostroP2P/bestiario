@@ -70,20 +70,19 @@ pub fn parse(raw: &str, setting: &str) -> Result<Keys, KeyError> {
     Ok(Keys::new(secret))
 }
 
-/// The key an operator configured, if they configured one.
+/// The key the reference names.
 ///
-/// Read here rather than when the configuration loads, so that a `stats`
-/// invocation on a machine that publishes nothing neither needs the
-/// variable nor fails without it. `publish` resolves before it reads the
-/// archive, so an unexported variable still fails loudly and early.
-pub fn resolve(reference: Option<&EnvRef>) -> Result<Option<Keys>, KeyError> {
-    let Some(reference) = reference else {
-        return Ok(None);
-    };
+/// Read here rather than when the configuration loads, and only by a run
+/// that is going to sign: `stats` on a machine that publishes nothing
+/// neither needs the variable nor fails without it, and neither does
+/// `publish --dry-run`, whose whole purpose is to review a snapshot
+/// without a key being involved. `publish` resolves before it reads the
+/// archive, so an unexported variable still fails in the first second.
+pub fn resolve(reference: &EnvRef) -> Result<Keys, KeyError> {
     let secret = reference.read_env().ok_or_else(|| KeyError::MissingEnv {
         name: reference.name().to_string(),
     })?;
-    parse(secret.expose(), &format!("`{}`", reference.name())).map(Some)
+    parse(secret.expose(), &format!("`{}`", reference.name()))
 }
 
 /// One document, signed: kind 30666, the tag set of §11, and the

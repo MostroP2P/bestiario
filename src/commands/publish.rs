@@ -77,9 +77,14 @@ impl Publication {
 pub async fn run(context: &Context<'_>, dry_run: bool, out: Option<&Path>, now: i64) -> Result<()> {
     refuse_scoped(context)?;
     let settings = &context.settings.publish;
-    // Before the archive is read: a run that discovers it cannot sign
-    // should discover it in the first second, not after thirty documents.
-    let keys = signer::resolve(settings.nsec.as_ref())?;
+    // Only a run that is going to sign asks for the key, so `--dry-run`
+    // reviews a snapshot on a machine that holds none. And it asks before
+    // the archive is read: a run that cannot sign should discover it in
+    // the first second, not after thirty documents.
+    let keys = match (dry_run, settings.nsec.as_ref()) {
+        (false, Some(reference)) => Some(signer::resolve(reference)?),
+        _ => None,
+    };
     anyhow::ensure!(
         dry_run || out.is_some() || keys.is_some(),
         "`publish` has no signing key: point [publish].nsec at an environment \
@@ -105,11 +110,8 @@ pub async fn run(context: &Context<'_>, dry_run: bool, out: Option<&Path>, now: 
         write(&publication, directory)?;
     }
 
-    // `--dry-run` signs nothing, whatever is configured (§12): it is the
-    // invocation an operator reaches for precisely when they do not yet
-    // trust what the next one would send.
-    if let (false, Some(keys)) = (dry_run, keys) {
-        print!("{}", send(&publication, &keys, &settings.relays).await?);
+    if let Some(keys) = &keys {
+        print!("{}", send(&publication, keys, &settings.relays).await?);
     }
 
     Ok(())

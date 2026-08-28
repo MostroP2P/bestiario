@@ -446,6 +446,20 @@ async fn backfill_then_every_report_against_the_local_relay() {
         "an unexported key has to name the variable: {refusal}"
     );
 
+    // But only a run that is going to sign asks for the key at all: a
+    // review is the invocation of somebody who does not hold one, on a
+    // machine that is not the publisher.
+    let reviewed = invoke(&settings, &["publish", "--dry-run"], false);
+    assert!(
+        reviewed.status.success(),
+        "--dry-run asked for a key it never uses:\n{}",
+        String::from_utf8_lossy(&reviewed.stderr)
+    );
+    assert!(
+        !String::from_utf8_lossy(&reviewed.stdout).contains("index last"),
+        "--dry-run signs nothing and publishes nothing"
+    );
+
     let runs: BTreeSet<&str> = published
         .iter()
         .filter_map(|event| {
