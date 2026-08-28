@@ -248,14 +248,11 @@ fn the_partitions_stop_at_the_last_event_and_not_at_the_clock() {
 
     assert_eq!(
         stopped.partitions(Resolution::Daily, JANUARY),
-        vec![Bucket::Month {
-            year: 2025,
-            month: 12
-        }],
+        vec![month_of(2025, 12)],
         "a run in January over an archive that stops in December publishes no January"
     );
     assert_eq!(
         stopped.partitions(Resolution::Monthly, JANUARY),
-        vec![Bucket::Year(2025)]
+        vec![year_of(2025)]
     );
 }
