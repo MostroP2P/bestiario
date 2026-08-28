@@ -8,3 +8,4 @@
 pub mod client;
 pub mod filters;
 pub mod nip11;
+pub mod signer;

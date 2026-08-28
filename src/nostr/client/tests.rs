@@ -408,3 +408,50 @@ async fn a_relay_configured_twice_is_one_relay() {
 
     assert_eq!(client.relays(), std::slice::from_ref(&url));
 }
+
+// ---- publication (docs/NOSTR-PUBLICATION.md §7)
+
+#[tokio::test]
+async fn an_event_sent_to_a_relay_is_readable_from_it() {
+    let relay = relay().await;
+    let client = RelayClient::connect(&[relay.url().await.to_string()])
+        .await
+        .expect("connect");
+    let keys = Keys::generate();
+    let event = order_at(&keys, 1_787_800_000);
+
+    let delivery = client.send(&event).await.expect("send");
+
+    assert!(delivery.is_published(), "no relay took it: {delivery:?}");
+    assert_eq!(delivery.accepted, client.relays().to_vec());
+    assert!(delivery.refused.is_empty());
+
+    let stored = client
+        .fetch_window(&client.relays()[0], Filter::new().id(event.id))
+        .await
+        .expect("fetch it back");
+    assert_eq!(stored, vec![event]);
+}
+
+#[tokio::test]
+async fn a_relay_that_is_gone_is_a_refusal_and_not_a_publication() {
+    // The distinction the index of §7 rests on: an event nobody took must
+    // not be reported as published, or the index names a document that is
+    // not there.
+    let relay = relay().await;
+    let client = RelayClient::connect(&[relay.url().await.to_string()])
+        .await
+        .expect("connect");
+    relay.shutdown();
+    let event = order_at(&Keys::generate(), 1_787_800_000);
+
+    let delivery = client
+        .send(&event)
+        .await
+        .expect("a refusal is not an error");
+
+    assert!(
+        !delivery.is_published(),
+        "the relay was down and the event was reported as published: {delivery:?}"
+    );
+}

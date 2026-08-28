@@ -1108,7 +1108,22 @@ relays = ["wss://relay.mostro.network"]
 # smaller limitation.max_content_length in its NIP-11 document lowers it;
 # none raises it.
 max_content_bytes = 65536
+# The signing key, as `nsec1…` or as 64 hexadecimal characters. Never a
+# command-line flag: a flag is readable in `ps` by every user on the
+# machine, and lands in the shell history of the one who typed it.
+nsec = "nsec1…"
+# Or, better, the path of a file holding nothing but that key — where it
+# can have its own permissions and stay out of the configuration file an
+# operator pastes into an issue. Setting both is an error rather than a
+# precedence: neither is the other's default.
+# nsec_file = "/etc/bestiario/publish.nsec"
 ```
+
+The pubkey that key belongs to is the whole of what a reader trusts. A
+client verifies a signature, not a hostname, so moving the daemon to
+another machine changes nothing anybody has to be told — and losing the key
+is the one thing that cannot be undone, because a new one publishes a
+different bestiario.
 
 `publish --dry-run` computes the whole snapshot from one reading of the
 archive and prints it — every document, the bytes it would carry and the
@@ -1180,9 +1195,33 @@ snapshot a site can serve before its relay connection is live:
 bestiario publish --out ./snapshot
 ```
 
-Signing and publication to the relays arrive with the signing key
-(`[publish].nsec`); until then an invocation that asks for neither
-`--dry-run` nor `--out` is refused rather than quietly doing nothing.
+With a key configured, `publish` on its own signs every document and sends
+it to `[publish].relays`:
+
+```sh
+bestiario publish
+```
+
+The index goes **last**, and that ordering is the whole of §7. An index
+names every document with the hash of the payload that belongs to it, so an
+index on a relay is a promise that the documents it names are already
+there. A document no relay accepted breaks that promise, so the run stops
+before the index and says which document was missing — a snapshot that is
+half on the relay is recoverable by running again, while an index that
+points at documents nobody holds sends every reader to fetch nothing until
+the next run.
+
+A relay that refuses a document is reported and not fatal. Publication goes
+to several relays for the same reason indexing reads from several: a
+snapshot that reached four of five relays is a snapshot people can read,
+and aborting on the fifth would throw away the four. Only a document that
+reached *none* of them stops the run.
+
+`--dry-run` signs nothing even when a key is configured — it is the
+invocation an operator reaches for precisely when they do not yet trust
+what the next one would send. A run with no key, no `--dry-run` and no
+`--out` is refused rather than quietly doing nothing: it is the invocation
+of somebody who believes they have configured a publisher and has not.
 
 ## Development
 

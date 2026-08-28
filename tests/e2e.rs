@@ -24,12 +24,14 @@
 //! every output, the README commands' as `readme-<n>.txt`, so the examples
 //! can be pasted back from the same run.
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use nostr_sdk::prelude::{
-    Event, EventBuilder, FinalizeEvent as _, Keys, MockRelay, PublicKey, SecretKey, Tag,
+    Client, Event, EventBuilder, Filter, FinalizeEvent as _, Keys, Kind, MockRelay, PublicKey,
+    SecretKey, Tag,
 };
 use tempfile::TempDir;
 
@@ -123,6 +125,11 @@ fn fixtures() -> Vec<Event> {
     events
 }
 
+/// The key the E2E publisher signs with: a throwaway, generated once, and
+/// the only key in this repository. It signs nothing but the documents a
+/// local relay holds for the length of one test.
+const PUBLISHER_NSEC: &str = "nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5";
+
 /// A settings file pointing at the local relay and a fresh database.
 ///
 /// Every network the fixtures use is indexed, so the one `success` order
@@ -146,6 +153,9 @@ backfill_from = {FROM}
 
 [database]
 url = "sqlite://{}"
+
+[publish]
+nsec = "{PUBLISHER_NSEC}"
 "#,
             database.display()
         ),
@@ -173,6 +183,27 @@ fn bestiario(settings: &Path, args: &[&str]) -> String {
     );
 
     String::from_utf8(output.stdout).expect("utf-8 stdout")
+}
+
+/// Runs the binary with `args`, asserting it exited non-zero, and returns
+/// its stderr — for the refusals that are the point of the invocation.
+fn bestiario_refuses(settings: &Path, args: &[&str]) -> String {
+    let output = Command::new(env!("CARGO_BIN_EXE_bestiario"))
+        .env("BESTIARIO_NOW", NOW)
+        .arg("--config")
+        .arg(settings)
+        .args(args)
+        .output()
+        .expect("run bestiario");
+
+    assert!(
+        !output.status.success(),
+        "`bestiario {}` was expected to fail and did not:\n{}",
+        args.join(" "),
+        String::from_utf8_lossy(&output.stdout)
+    );
+
+    String::from_utf8(output.stderr).expect("utf-8 stderr")
 }
 
 /// The JSON envelope of SPEC §10, checked for shape.
@@ -333,6 +364,87 @@ async fn backfill_then_every_report_against_the_local_relay() {
     let mut again: serde_json::Value = serde_json::from_str(&again).expect("json");
     again["generated_at"] = serde_json::Value::Null;
     assert_eq!(again, summary, "rebuild changed the summary");
+
+    // Act: publish the snapshot for real — signed, to the relay the
+    // fixtures came from. `--dry-run` has already run above, as one of the
+    // README's examples; this is the half of §12 that a key turns on.
+    let report = bestiario(&settings, &["publish"]);
+
+    // Assert: every document the run listed is on the relay, under the
+    // publisher's key and the addressable kind of §2.
+    let published = relay_documents(&relay).await;
+    let publisher = Keys::parse(PUBLISHER_NSEC)
+        .expect("the E2E key")
+        .public_key();
+    assert!(
+        published.iter().all(|event| event.pubkey == publisher),
+        "something on the relay was not signed by the configured key"
+    );
+    let addresses: BTreeSet<String> = published
+        .iter()
+        .filter_map(|event| event.tags.identifier())
+        .collect();
+    assert!(
+        addresses.contains("index"),
+        "the index of §5 was never published: {addresses:?}"
+    );
+    assert!(
+        addresses.contains("orders:30d") && addresses.contains("series:volume:monthly:2026"),
+        "a window document and a series partition should both be there: {addresses:?}"
+    );
+    assert_eq!(
+        addresses.len(),
+        published.len(),
+        "a `d` address was published twice in one run"
+    );
+    assert!(
+        report.contains("index last"),
+        "the run has to say it published the index last: {report}"
+    );
+
+    // And the snapshot the run computed is the snapshot the relay holds:
+    // every `s` tag names this run, which is what lets a client ask for a
+    // whole publication in one filter (§7).
+    // And an operator who has configured no key at all is told so, rather
+    // than getting a run that reads the whole archive and sends nothing.
+    let keyless = dir.path().join("keyless.toml");
+    fs::write(
+        &keyless,
+        fs::read_to_string(&settings)
+            .expect("settings")
+            .replace(&format!("nsec = \"{PUBLISHER_NSEC}\""), ""),
+    )
+    .expect("write keyless settings");
+    let refusal = bestiario_refuses(&keyless, &["publish"]);
+    assert!(
+        refusal.contains("no signing key"),
+        "a keyless run has to say why it did nothing: {refusal}"
+    );
+
+    let runs: BTreeSet<&str> = published
+        .iter()
+        .filter_map(|event| {
+            event
+                .tags
+                .iter()
+                .find(|tag| tag.kind() == "s")
+                .and_then(Tag::content)
+        })
+        .collect();
+    assert_eq!(runs.len(), 1, "one publication, one snapshot_id: {runs:?}");
+}
+
+/// Every kind 30666 document the relay is holding.
+async fn relay_documents(relay: &MockRelay) -> Vec<Event> {
+    let client = Client::default();
+    client.add_relay(relay.url().await).await.expect("add");
+    client.connect().await;
+    let events = client
+        .fetch_events(Filter::new().kind(Kind::from_u16(30666)))
+        .await
+        .expect("read the documents back");
+    client.shutdown().await;
+    events.into_iter().collect()
 }
 
 /// `line` split the way a shell would, as far as double quotes: an

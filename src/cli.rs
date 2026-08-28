@@ -112,14 +112,15 @@ pub enum Command {
         order_id: String,
     },
 
-    /// Compute the publishable snapshot of docs/NOSTR-PUBLICATION.md.
+    /// Publish the snapshot of docs/NOSTR-PUBLICATION.md over Nostr.
     ///
-    /// Signs nothing and publishes nothing: `--dry-run` prints what would
-    /// be published, with sizes and hashes, and `--out` writes the same
-    /// documents as files.
+    /// Signs every document with the key of `[publish]` and sends it to
+    /// `[publish].relays`, the index last. `--dry-run` prints what would
+    /// be published instead, and `--out` writes the same documents as
+    /// files; neither needs a key.
     Publish {
         /// Print the snapshot — every document, its size and its payload
-        /// hash — without writing or signing anything.
+        /// hash — without writing, signing or publishing anything.
         #[arg(long)]
         dry_run: bool,
 
