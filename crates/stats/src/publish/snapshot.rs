@@ -44,6 +44,7 @@ use crate::bucket::Coverage;
 use crate::metric::{Metric, MetricKind, Value};
 use crate::series::{self, Data};
 use crate::window::{Period, Window};
+use crate::{compare, instances, market, summary};
 
 use super::address::{Address, Bucket, Partition as Slot, Report, Resolution, Window as Span};
 use super::document::{Envelope, Run, rfc3339};
@@ -124,6 +125,34 @@ pub fn hash_of(payload: &impl Serialize) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
+}
+
+/// A report's figures over `window`, whatever it is computed from.
+///
+/// The four families go through [`series::block_of`], so a window figure
+/// and the same figure in a series come from one aggregation. The other
+/// four are views over the same archive and have their own entry points —
+/// no shape over time (§6.2 plots none of them), but a window all the
+/// same. A client constructing `instances:30d` from the grammar of §3 must
+/// not get a miss because the document happens to have no series.
+fn window_metrics(report: Report, data: &Data, window: Window, now: i64) -> Vec<Metric> {
+    match report {
+        Report::Orders => series::block_of(series::Family::Activity, data, window, now),
+        Report::Volume => series::block_of(series::Family::Volume, data, window, now),
+        Report::DevFees => series::block_of(series::Family::DevFees, data, window, now),
+        Report::Disputes => series::block_of(series::Family::Disputes, data, window, now),
+        Report::Summary => summary::report(&data.orders, Some(&data.disputes), window, now),
+        Report::Market => market::report(&data.orders, window, None),
+        Report::Instances => instances::list(&data.profiles, &data.orders, window, now),
+        Report::Compare => compare::report(
+            &data.profiles,
+            &data.orders,
+            &data.fees,
+            Some(&data.disputes),
+            window,
+            now,
+        ),
+    }
 }
 
 /// The series family behind a report, for the reports that have one.
@@ -360,12 +389,9 @@ impl Snapshot {
         let mut documents = Vec::new();
 
         for report in Report::ALL {
-            let Some(family) = family_of(report) else {
-                continue;
-            };
             for span in Span::ALL {
                 let window = window_of(span, coverage, now);
-                let metrics = series::block_of(family, data, window, now);
+                let metrics = window_metrics(report, data, window, now);
                 let payload = window_payload(window, &metrics);
                 documents.push(Document {
                     address: Address::Window {
@@ -381,6 +407,12 @@ impl Snapshot {
                     ),
                     period: None,
                 });
+            }
+            // Only the series depend on a family. A report without one has
+            // no shape over time and is plotted nowhere; its windows were
+            // published above regardless.
+            if family_of(report).is_none() {
+                continue;
             }
             for resolution in Resolution::ALL {
                 for bucket in coverage.partitions(resolution, now) {

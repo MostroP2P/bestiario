@@ -4,8 +4,9 @@
 use super::*;
 use crate::activity::{Direction, Order, Origin, Status};
 use crate::bucket::Coverage;
+use crate::instances::Profile;
 use crate::metric::{Metric, Value};
-use crate::publish::address::{Bucket, Month, Report, Resolution, Year};
+use crate::publish::address::{Bucket, Month, Report, Resolution, Window as Span, Year};
 
 fn month_of(year: i32, month: u32) -> Bucket {
     Bucket::Month {
@@ -51,6 +52,24 @@ fn order(id: &str, created_at: i64, sats: i64) -> Order {
         success_at: Some(created_at + DAY),
         canceled_at: None,
         expires_at: Some(created_at + 2 * DAY),
+    }
+}
+
+fn profile(pubkey: &str, name: &str) -> Profile {
+    Profile {
+        pubkey: pubkey.to_string(),
+        name: Some(name.to_string()),
+        label: format!("{name} ({pubkey})"),
+        mostro_version: Some("0.14.2".into()),
+        protocol_version: Some("1".into()),
+        fee: Some(0.006),
+        min_order_sats: Some(1_000),
+        max_order_sats: Some(1_000_000),
+        fiat_currencies: vec!["ARS".into()],
+        ln_networks: vec!["mainnet".into()],
+        bond_enabled: Some(true),
+        first_seen_at: JULY,
+        last_seen_at: AUGUST + DAY,
     }
 }
 
@@ -631,4 +650,133 @@ fn a_bucket_that_has_not_happened_yet_is_absent_rather_than_zero() {
             json["rows"][day]
         );
     }
+}
+
+// ---- every report gets its window documents (§3, §6.1)
+
+#[test]
+fn a_snapshot_publishes_a_window_document_for_every_report_and_window() {
+    // Arrange
+    let snapshot = Snapshot::compute(&data(), Coverage::since(JULY), "01J8ZRUN", SEPTEMBER);
+    let addresses: Vec<String> = snapshot
+        .documents
+        .iter()
+        .map(|document| document.address.to_string())
+        .collect();
+
+    // Act / Assert — the grammar of §3 names eight reports, and a client
+    // that constructs one of those addresses must not get a miss.
+    for report in Report::ALL {
+        for window in Span::ALL {
+            let address = format!("{}:{}", report.as_str(), window.as_str());
+            assert!(
+                addresses.contains(&address),
+                "{address} is missing from {addresses:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_report_with_no_series_family_still_gets_its_windows() {
+    let snapshot = Snapshot::compute(&data(), Coverage::since(JULY), "01J8ZRUN", SEPTEMBER);
+    let has = |address: &str| {
+        snapshot
+            .documents
+            .iter()
+            .any(|document| document.address.to_string() == address)
+    };
+
+    // These four have no shape over time, which is a fact about their
+    // series and not about their windows.
+    assert!(has("summary:30d"));
+    assert!(has("market:30d"));
+    assert!(has("instances:30d"));
+    assert!(has("compare:30d"));
+}
+
+#[test]
+fn a_report_with_no_series_family_gets_no_partitions() {
+    let snapshot = Snapshot::compute(&data(), Coverage::since(JULY), "01J8ZRUN", SEPTEMBER);
+
+    for document in &snapshot.documents {
+        let address = document.address.to_string();
+        for report in ["summary", "market", "instances", "compare"] {
+            assert!(
+                !address.starts_with(&format!("series:{report}:")),
+                "{address} plots a report that has no shape over time"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_instances_document_names_the_instances_that_traded() {
+    // Arrange — the archive knows one instance, and it created orders.
+    let data = Data {
+        profiles: vec![profile("pk", "Alpha")],
+        ..data()
+    };
+
+    // Act
+    let snapshot = Snapshot::compute(&data, Coverage::since(JULY), "01J8ZRUN", SEPTEMBER);
+    let document = snapshot
+        .documents
+        .iter()
+        .find(|document| document.address.to_string() == "instances:all")
+        .expect("an instances window document");
+    let payload = serde_json::to_value(document.envelope.payload()).expect("serialises");
+    let names: Vec<String> = payload["metrics"]
+        .as_array()
+        .expect("metrics")
+        .iter()
+        .map(|metric| metric["name"].as_str().expect("name").to_string())
+        .collect();
+
+    // Assert — this is what the map on the site needs and cannot get
+    // anywhere else: which instance, under which name, trading how much.
+    assert!(
+        names
+            .iter()
+            .any(|name| name.contains("Alpha") && name.ends_with(".created")),
+        "{names:?}"
+    );
+}
+
+#[test]
+fn an_archive_with_no_instances_publishes_an_empty_instances_document() {
+    // An archive that knows no profiles has nothing to say about them, and
+    // says nothing — rather than not publishing the document, which a
+    // client cannot tell from a relay withholding it.
+    let snapshot = Snapshot::compute(&data(), Coverage::since(JULY), "01J8ZRUN", SEPTEMBER);
+    let document = snapshot
+        .documents
+        .iter()
+        .find(|document| document.address.to_string() == "instances:all")
+        .expect("an instances window document");
+    let payload = serde_json::to_value(document.envelope.payload()).expect("serialises");
+
+    assert_eq!(payload["metrics"].as_array().expect("metrics").len(), 0);
+}
+
+#[test]
+fn the_market_document_reports_what_the_network_trades() {
+    let snapshot = Snapshot::compute(&data(), Coverage::since(JULY), "01J8ZRUN", SEPTEMBER);
+    let document = snapshot
+        .documents
+        .iter()
+        .find(|document| document.address.to_string() == "market:all")
+        .expect("a market window document");
+    let payload = serde_json::to_value(document.envelope.payload()).expect("serialises");
+    let names: Vec<String> = payload["metrics"]
+        .as_array()
+        .expect("metrics")
+        .iter()
+        .map(|metric| metric["name"].as_str().expect("name").to_string())
+        .collect();
+
+    assert!(
+        names.iter().any(|name| name.starts_with("market.")),
+        "{names:?}"
+    );
 }

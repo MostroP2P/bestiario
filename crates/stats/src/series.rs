@@ -23,6 +23,7 @@ use std::collections::BTreeMap;
 use crate::activity::{self, Order};
 use crate::dev_fees::{self, DevFeeData};
 use crate::disputes::{self, DisputeData};
+use crate::instances::Profile;
 use crate::metric::{Metric, Value};
 use crate::rates::RateBook;
 use crate::volume;
@@ -34,6 +35,13 @@ pub struct Data {
     pub orders: Vec<Order>,
     pub fees: DevFeeData,
     pub disputes: DisputeData,
+    /// The instances the archive knows, for the reports that are about
+    /// them rather than about the network as a whole. Empty for the four
+    /// families, which read orders and never profiles; an archive that has
+    /// seen no instance publishes an empty `instances` document rather
+    /// than none, because a client cannot tell a missing document from a
+    /// relay withholding one.
+    pub profiles: Vec<Profile>,
     /// The dev fee share to assume per instance (§5). `None` leaves the
     /// inferred §6.6 rows out: they rest on an assumption, and a series
     /// asked for without one would plot a number nothing supports.

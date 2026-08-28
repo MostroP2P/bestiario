@@ -98,6 +98,9 @@ async fn load_for(
 
     Ok(Data {
         priced,
+        // A series is never about an instance: §6.2 plots the four
+        // families and none of them reads a profile.
+        profiles: Vec::new(),
         orders: if orders {
             load::activity::orders(pool, &query.scope).await?
         } else {

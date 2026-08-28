@@ -275,6 +275,18 @@ which is a bug in the one that deviates.
 
 ### 6.1 Window documents
 
+Every report named in the grammar of §3 has window documents, at every
+window, whether or not it has a series family. Having no shape over time is a
+fact about a report's *series* and says nothing about its windows: `summary`,
+`market`, `instances` and `compare` are views over the same archive and are
+answers to a question a client asks by window like any other. A client that
+constructs `instances:30d` from §3 and gets a miss cannot tell that from a
+relay withholding the document, which is the confusion §5 exists to end.
+
+`instances` in particular is the only place a client learns that an instance
+exists at all — its pubkey, its name, the currencies it lists — and no other
+document names one. A map of the network cannot be drawn without it.
+
 `payload` is the report envelope already specified in SPEC §10 minus its
 `generated_at`, which belongs to the run: `range`, and `metrics` as one flat
 record per figure with `name`, `kind`, `unit`, `value`. Those records are
@@ -299,7 +311,11 @@ window, the same figures and the same hash.
 A figure that is *about* the clock rather than about the window is not
 covered by this and does not pretend to be: an open dispute's age (§6.7) is
 `now - opened_at` and moves between two runs over the same archive, which is
-a figure that really did change.
+a figure that really did change. An instance's `silent_for` is `now -
+last_seen_at` and is the same shape, which is why the five `instances`
+documents restate on every run alongside the five `disputes` ones — and why
+those ten are re-signed whole even though most of what they carry is a
+profile that has not moved in weeks.
 
 ### 6.2 Series partitions
 
