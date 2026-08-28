@@ -1,0 +1,22 @@
+# Litestream replication of the index to S3-compatible object storage.
+# Copied to /etc/litestream.yml, which is where litestream looks by default.
+#
+# Every value is an environment variable, expanded by litestream at startup:
+# the image is built once and the bucket it replicates to is a property of the
+# deployment, not of the image. The credentials are not named here at all —
+# litestream reads LITESTREAM_ACCESS_KEY_ID and LITESTREAM_SECRET_ACCESS_KEY
+# from the environment itself, so no file in this repository has a place to
+# put a secret even by accident.
+#
+# `path` is a prefix inside the bucket, not a filename. One bucket can hold
+# several deployments as long as each has its own prefix; two deployments
+# sharing a prefix would replicate over each other. See docs/DEPLOY.md.
+
+dbs:
+  - path: ${BESTIARIO_DB_PATH}
+    replicas:
+      - type: s3
+        bucket: ${LITESTREAM_BUCKET}
+        path: ${LITESTREAM_PATH}
+        endpoint: ${LITESTREAM_ENDPOINT}
+        region: ${LITESTREAM_REGION}

@@ -11,6 +11,8 @@ Three files carry the deployment, and all three are versioned:
 | `Dockerfile`    | The image: a builder stage and a small runtime one  |
 | `.dockerignore` | What never enters the build context                 |
 | `.do/app.yaml`  | The App Platform spec, applied with `doctl`         |
+| `deploy/replicated.sh` | The entrypoint: restore, then run, then stream |
+| `deploy/litestream.yml` | Which database goes to which bucket          |
 
 ## Configuration without a file
 
@@ -51,9 +53,10 @@ Two variables, and telling them apart matters:
 - `BESTIARIO_PUBLISH_NSEC` is the **key**. One underscore, so it falls
   outside the `BESTIARIO__` prefix and is never read as a setting.
 
-Only the second is a secret, and it is the only value in `.do/app.yaml`
-marked `type: SECRET`. The indirection is what lets the spec be committed:
-it names where the key lives without ever containing it.
+Only the second is a secret, and it is marked `type: SECRET` in
+`.do/app.yaml` — as are the two Spaces credentials below. The indirection is
+what lets the spec be committed: it names where the key lives without ever
+containing it.
 
 The key is read when a run actually signs. A worker that only runs `sync`
 neither needs the variable nor fails without it.
@@ -70,15 +73,29 @@ docker run --rm \
   bestiario sync
 ```
 
-The entrypoint is the binary, so any subcommand works as the argument:
-`backfill`, `summary --json`, `publish --dry-run`.
+Any subcommand works as the argument: `backfill`, `summary --json`,
+`publish --dry-run`. Without `LITESTREAM_BUCKET` in the environment nothing
+is replicated and the container keeps its database in the volume, which is
+what a local run wants.
 
 ## App Platform
 
 ```sh
-doctl apps create --spec .do/app.yaml
+doctl apps create --spec .do/app.yaml --project-id <MOSTRO_PROJECT_ID>
 doctl apps update <APP_ID> --spec .do/app.yaml
 ```
+
+`--project-id` puts the app in the Mostro project alongside the rest of the
+network's infrastructure; without it DigitalOcean files it under the
+account's default project. The spec has no field for this — it is a
+create-time flag, so it is easy to forget and awkward to correct later. The
+Spaces bucket belongs in the same project:
+`doctl projects resources assign <ID> --resource do:space:<bucket>`.
+
+Before the first `create`, DigitalOcean's GitHub app has to be authorised
+for the organisation, or the API answers `GitHub user does not have access
+to MostroP2P/bestiario`. That is an interactive grant in the dashboard —
+**Apps → Create → GitHub → Manage Access** — with no `doctl` equivalent.
 
 Edit the spec, not the dashboard. A change to which instances are indexed is
 a change to what the published statistics mean, and it should go through
@@ -105,30 +122,83 @@ not a publication schedule. Publishing on a real cadence needs one of:
   app;
 - a separate always-on worker whose command is a sleep loop around `publish`.
 
-## The ephemeral filesystem
-
-This is the part to read before treating the deployment as durable.
+## The ephemeral filesystem, and the bucket that outlives it
 
 App Platform components have no persistent volumes. Every deploy, restart
 and rescale starts from a clean filesystem, so `/data/bestiario.db` is gone
-and `create_if_missing` makes a fresh, empty one. The index is then rebuilt
-from whatever the relays still hold — which is not the same as what was
-indexed, since relays expire events and `backfill_from` only reaches as far
-back as they kept.
+and `create_if_missing` makes a fresh, empty one. Left alone, the index is
+rebuilt from whatever the relays still hold — which is not what was indexed,
+since relays expire events and `backfill_from` only reaches as far back as
+they kept.
 
-That is survivable for a deployment that redeploys rarely and only wants
-recent statistics. It is not a durable index. The ways out, in order of how
-much work they are:
+The deployment therefore replicates the database to a DigitalOcean Spaces
+bucket with [litestream](https://litestream.io), which turns the container's
+filesystem into a cache of that bucket: the database is restored before the
+daemon starts and every subsequent write is streamed out as it happens.
 
-1. **Postgres.** The honest fix. It needs a `postgres` feature on `sqlx`
-   (`Cargo.toml` compiles only `sqlite` today), a second `Migrator`, and
-   relaxing the `sqlite:` check in `src/db/mod.rs`. Tracked separately from
-   this deployment work.
-2. **Replicate the SQLite file** to Spaces, Litestream-style. Fewer code
-   changes, more moving parts, and WAL replication has to be reasoned about
-   rather than assumed.
-3. **Accept the rebuild.** Viable while the relays hold enough history and
-   the backfill is quick. Measure the backfill before choosing this.
+`deploy/replicated.sh` is the whole of it, and it is the image's
+`ENTRYPOINT`, so one image has one contract. With no `LITESTREAM_BUCKET` in
+the environment it execs bestiario unchanged — `docker run … summary`
+behaves exactly as it did before replication existed. With a bucket, the
+same invocation replicates.
 
-Until one of those lands, treat the App Platform database as a cache of the
-relays rather than as the record.
+### Configuration
+
+| Variable | What it is |
+| --- | --- |
+| `LITESTREAM_BUCKET` | The Spaces bucket. Unset means "do not replicate". |
+| `LITESTREAM_PATH` | A prefix *inside* the bucket, not a filename. |
+| `LITESTREAM_REGION` | `nyc3`, and the default for the endpoint. |
+| `LITESTREAM_ENDPOINT` | `nyc3.digitaloceanspaces.com`. |
+| `LITESTREAM_ACCESS_KEY_ID` | Spaces key, scoped `readwrite` to the one bucket. Stored as a `SECRET`. |
+| `LITESTREAM_SECRET_ACCESS_KEY` | Its secret, likewise a `SECRET`. |
+| `BESTIARIO_DB_PATH` | The file litestream replicates. |
+
+`BESTIARIO_DB_PATH` and `BESTIARIO__DATABASE__URL` must name the same file.
+They are set together in the Dockerfile for that reason: bestiario is told a
+SQLite URL and litestream a filesystem path, and replicating a different file
+than the daemon writes would back up an empty database without ever failing.
+
+Create the key scoped to the single bucket rather than account-wide:
+
+```sh
+doctl spaces keys create bestiario-litestream \
+  --grants 'bucket=mostro-bestiario-index;permission=readwrite'
+```
+
+### One writer, and one only
+
+litestream's lock lives inside the SQLite file, so it cannot see a second
+container replicating the same bucket prefix. Two of them would interleave
+writes into one replica and corrupt it. Three consequences, none of them
+optional:
+
+- `instance_count` stays at **1**. It is not a scaling knob.
+- A second deployment gets its own `LITESTREAM_PATH`.
+- A `publish` job sharing the prefix would be that second writer. Publish
+  from the same process as `sync`, or from a prefix of its own.
+
+The honest caveat: App Platform may briefly overlap the old and new
+containers during a deploy, and nothing here prevents that window.
+
+If a replica is damaged, **copy the prefix aside before touching it** and try
+to restore from it — `litestream restore -o /tmp/check.db` names a different
+output file and leaves the replica alone, so a partial recovery is still on
+the table. Only once that is exhausted, empty the prefix and re-run
+`backfill`.
+
+That last step is a real loss, not a free reset. bestiario never overwrites
+history (`docs/SPEC.md` §5), so nothing is corrupted silently — but a
+backfill reaches only as far back as the relays still hold, and they expire
+events. Whatever the index had recorded from before that horizon does not
+come back. The replica *is* the durable copy; the relays are not a backup of
+it. A deployment that cannot accept that risk wants Postgres, not a second
+replica.
+
+### Postgres, still
+
+Replication makes the index durable; it does not make SQLite a networked
+database. A deployment that wants concurrent readers, or more than one
+component touching the data, wants Postgres: a `postgres` feature on `sqlx`
+(`Cargo.toml` compiles only `sqlite` today), a second `Migrator`, and
+relaxing the `sqlite:` check in `src/db/mod.rs`.
