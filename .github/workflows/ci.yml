@@ -41,6 +41,30 @@ jobs:
         # crate: the rest of the workspace is allowed to do I/O, that is its job.
         run: CLIPPY_CONF_DIR=crates/stats cargo clippy -p bestiario-stats --all-targets -- -D warnings
 
+  container:
+    name: Container image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: install the spec parser's dependency
+        # Explicit rather than relying on the runner image happening to ship
+        # PyYAML: the check is worthless the day it silently stops running.
+        run: pip install --quiet pyyaml
+      - name: app spec carries no shell operators
+        # `run_command: a && b` passes `doctl apps spec validate` and then
+        # fails at run time; the script says why.
+        run: ./scripts/check-app-spec.py
+      - name: build the image
+        # Plain `docker build`, matching what App Platform does with the same
+        # Dockerfile. No registry push: this job proves the image works, and
+        # deploying it is the app spec's job.
+        run: docker build -t bestiario:ci .
+      - name: smoke the image
+        # Building an image proves almost nothing — a stale-mtime fingerprint
+        # once produced a green build whose binary printed nothing and exited
+        # 0. These checks run the thing.
+        run: ./scripts/smoke-image.sh bestiario:ci
+
   test:
     name: Test
     runs-on: ubuntu-latest
