@@ -27,6 +27,7 @@ use nostr_sdk::prelude::*;
 use crate::config::EnvRef;
 
 use crate::stats::publish::document::{self, KIND, Run};
+use crate::stats::publish::index::Index;
 use crate::stats::publish::snapshot::Document;
 
 #[cfg(test)]
@@ -93,12 +94,39 @@ pub fn resolve(reference: &EnvRef) -> Result<Keys, KeyError> {
 /// does not have — which is the one error in publication that no reader
 /// could detect.
 pub fn sign(document: &Document, run: &Run, keys: &Keys) -> Event {
-    let tags = document::tags(&document.address, run, document.envelope.revision())
-        .into_iter()
-        .map(|tag| Tag::custom(tag.name, tag.values))
+    signed(
+        &document::tags(&document.address, run, document.envelope.revision()),
+        document.content(),
+        run,
+        keys,
+    )
+}
+
+/// The index, signed (§5).
+///
+/// It carries the same tag set as every other document, at revision 1:
+/// nothing hashes the index and nothing counts revisions of it — it is
+/// republished on every run by definition, since naming the current
+/// snapshot is its whole job.
+pub fn sign_index(index: &Index, run: &Run, keys: &Keys) -> Event {
+    signed(
+        &document::tags(&index.address(), run, FIRST_REVISION),
+        index.content(),
+        run,
+        keys,
+    )
+}
+
+/// The revision an index is published under: there is no other.
+const FIRST_REVISION: u32 = 1;
+
+fn signed(tags: &[document::Tag], content: String, run: &Run, keys: &Keys) -> Event {
+    let tags = tags
+        .iter()
+        .map(|tag| Tag::custom(tag.name.clone(), tag.values.clone()))
         .collect::<Vec<_>>();
 
-    EventBuilder::new(Kind::Custom(KIND), document.content())
+    EventBuilder::new(Kind::Custom(KIND), content)
         .tags(tags)
         .custom_created_at(Timestamp::from_secs(run.generated_at.max(0) as u64))
         .finalize(keys)

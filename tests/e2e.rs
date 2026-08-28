@@ -441,13 +441,15 @@ async fn backfill_then_every_report_against_the_local_relay() {
     // And the snapshot the run computed is the snapshot the relay holds:
     // every `s` tag names this run, which is what lets a client ask for a
     // whole publication in one filter (§7).
-    // Act / Assert: a second run over an unchanged archive sends nothing
-    // (§8). Every figure is the one already published, and a relay does
-    // not need a second copy of an answer that did not change.
+    // Act / Assert: a second run over an unchanged archive re-sends no
+    // document (§8). Every figure is the one already published, and a
+    // relay does not need a second copy of an answer that did not
+    // change. The index goes out anyway — nothing hashes it and naming
+    // the current snapshot is its whole job (§5).
     let again = bestiario(&settings, &["publish"]);
     assert!(
-        again.contains("nothing changed"),
-        "a second run over an unchanged archive re-signed everything: {again}"
+        again.contains("0 document(s) sent"),
+        "a second run over an unchanged archive re-signed figures: {again}"
     );
     assert_eq!(
         relay_documents(&relay).await.len(),

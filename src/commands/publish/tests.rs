@@ -23,30 +23,16 @@ fn published_after(
 ) -> Publication {
     let Restated {
         snapshot,
-        mut not_sent,
-        mut state,
+        not_sent,
+        state,
     } = Snapshot::compute(&Data::default(), coverage, &snapshot_id(NOW), NOW).restated(
         history,
         Because::Backfill,
         Republish::No,
     );
     let index = snapshot.index(&publisher());
-    let address = index.address.to_string();
-    if history
-        .get(&address)
-        .is_some_and(|previous| previous.hash() == index.hash)
-    {
-        not_sent.insert(address.clone());
-    }
-    state.insert(address, restatement::recorded(&index));
-    let measured = size::measure(
-        &snapshot
-            .documents
-            .iter()
-            .cloned()
-            .chain(std::iter::once(index.clone()))
-            .collect::<Vec<_>>(),
-    );
+    let mut measured = size::measure(&snapshot.documents);
+    measured.push(size::measure_index(&index));
 
     Publication {
         snapshot,
@@ -166,15 +152,16 @@ fn an_empty_archive_says_so_rather_than_printing_two_blanks() {
 fn every_document_is_listed_with_its_size_and_an_abbreviated_hash() {
     let publication = publication(Coverage::since(NOW - 86_400), Ceiling::configured(65_536));
     let first = publication.measured.first().expect("documents");
+    let hash = first.hash.as_deref().expect("a document is hashed");
 
     let listing = listing(&publication);
 
     assert!(
-        listing.contains(&format!("{}…", &first.hash[..16])),
+        listing.contains(&format!("{}…", &hash[..16])),
         "a review is not a 64-character comparison: {listing}"
     );
     assert!(
-        !listing.contains(&first.hash[..]),
+        !listing.contains(hash),
         "the whole digest belongs in the index and in --out, not in a table"
     );
     assert!(
@@ -193,7 +180,7 @@ fn the_index_is_listed_last_because_it_is_published_last() {
 
     let addresses: Vec<String> = publication
         .documents()
-        .map(|document| document.address.to_string())
+        .map(|(address, _)| address)
         .collect();
 
     assert_eq!(
@@ -202,6 +189,30 @@ fn the_index_is_listed_last_because_it_is_published_last() {
         "an index naming a set of hashes implies those documents are already there (§7)"
     );
     assert_eq!(addresses.len(), publication.snapshot.documents.len() + 1);
+}
+
+#[test]
+fn the_index_is_weighed_with_the_rest_and_listed_without_a_hash() {
+    // §9.1 weighs every document, the index included — §5.1 shards it by
+    // year for that very reason. But nothing hashes the index (§6), so
+    // the column that names a digest has none to name.
+    let publication = publication(Coverage::since(NOW - 86_400), Ceiling::configured(65_536));
+    let index = publication
+        .measured
+        .last()
+        .expect("the index, weighed last");
+
+    let listing = listing(&publication);
+
+    assert_eq!(index.address.to_string(), "index");
+    assert!(index.bytes > 0, "the index counts against the ceiling too");
+    assert_eq!(index.hash, None);
+    assert!(
+        listing
+            .lines()
+            .any(|line| line.starts_with("index ") && line.ends_with('—')),
+        "a dash where a digest would go, as everywhere else a figure is absent: {listing}"
+    );
 }
 
 // ---- signing and relay publication (§7, §12)
@@ -241,11 +252,10 @@ async fn every_document_and_the_index_reach_the_relay() {
         .iter()
         .filter_map(|event| event.tags.identifier())
         .collect();
-    for document in publication.documents() {
+    for (address, _) in publication.documents() {
         assert!(
-            addresses.contains(&document.address.to_string()),
-            "{} never reached the relay",
-            document.address
+            addresses.contains(&address),
+            "{address} never reached the relay"
         );
     }
     assert!(
@@ -285,10 +295,12 @@ fn history_of(publication: &Publication) -> BTreeMap<String, Previous> {
 }
 
 #[tokio::test]
-async fn a_run_over_an_unchanged_archive_sends_nothing_at_all() {
+async fn a_run_over_an_unchanged_archive_re_sends_no_document() {
     // Not an optimisation: a relay does not need a second copy of an
     // answer that did not change, and every re-signature is a new event
-    // every client has to decide it already had.
+    // every client has to decide it already had. The index is the stated
+    // exception — nothing hashes it and naming the current snapshot is
+    // its whole job, so it goes out every run (§5).
     let relay = MockRelay::run().await.expect("start the local relay");
     let url = relay.url().await.to_string();
     let first = publication(Coverage::since(NOW - 86_400), Ceiling::configured(65_536));
@@ -306,8 +318,12 @@ async fn a_run_over_an_unchanged_archive_sends_nothing_at_all() {
         .expect("publish again");
 
     assert!(
-        report.contains("nothing changed"),
-        "the run has to say it sent nothing: {report}"
+        report.contains("0 document(s) sent"),
+        "the run has to say it re-sent no document: {report}"
+    );
+    assert!(
+        report.contains("index last"),
+        "and that the index went out anyway: {report}"
     );
     let client = RelayClient::connect(&[url]).await.expect("connect");
     let stored = client
@@ -340,17 +356,16 @@ fn an_unchanged_run_still_lists_every_document_and_records_every_one() {
     assert_eq!(again.state, first.state, "and records the same revisions");
     assert_eq!(
         again.not_sent.len(),
-        again.measured.len(),
-        "every document, the index included, is already published"
+        again.snapshot.documents.len(),
+        "every document is already published; the index is not one of them"
     );
 }
 
 #[test]
-fn the_index_is_withheld_only_when_nothing_it_names_moved() {
-    // The index's payload carries every document's hash, so an index that
-    // did not move implies nothing it names did. The converse is what
-    // §7 rests on: an index is never withheld while something it names
-    // is being sent.
+fn a_document_that_moved_is_sent_and_the_index_is_never_withheld() {
+    // §5: nothing hashes the index and it is republished every run, so
+    // it is never in `not_sent` — which is also what §7 needs, since an
+    // index is what makes a snapshot readable at all.
     let first = publication(Coverage::since(NOW - 86_400), Ceiling::configured(65_536));
     let mut history = history_of(&first);
     history.insert(
@@ -373,6 +388,7 @@ fn the_index_is_withheld_only_when_nothing_it_names_moved() {
     );
     assert!(
         !again.not_sent.contains("index"),
-        "the index names a hash nobody published yet and was withheld anyway"
+        "the index is never withheld: {:?}",
+        again.not_sent
     );
 }

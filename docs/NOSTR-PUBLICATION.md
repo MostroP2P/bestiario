@@ -403,9 +403,10 @@ changed, and a relay does not need a second copy of it. The index still lists
 it, with its existing hash, revision and `updated_at`, because "unchanged" is
 one of the things the index exists to say.
 
-The index is a document under this rule like any other. Its payload carries
-every document's hash, so it moves exactly when one of them does — and a run
-over an archive that has not moved therefore publishes nothing at all.
+The index is the exception to this rule, and §5 says why: nothing hashes it,
+it has no `payload` to compare and no `revision` to count, and naming the
+current snapshot is its whole job. A run over an archive that has not moved
+therefore re-sends no document — and the index anyway.
 
 The exception is §9.3. `--republish` puts documents on a relay that does not
 have them, so "the relay already has this" is precisely the assumption it

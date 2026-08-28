@@ -48,10 +48,10 @@ use crate::nostr::client::RelayClient;
 use crate::nostr::{nip11, signer};
 use crate::stats::bucket::Coverage;
 use crate::stats::publish::document::SCHEMA_VERSION;
-use crate::stats::publish::index::Publisher;
-use crate::stats::publish::restatement::{self, Because, Previous, Read, Republish, Restated};
+use crate::stats::publish::index::{Index, Publisher};
+use crate::stats::publish::restatement::{Because, Previous, Read, Republish, Restated};
 use crate::stats::publish::size::{self, Ceiling, Measured};
-use crate::stats::publish::snapshot::{Document, Snapshot};
+use crate::stats::publish::snapshot::Snapshot;
 use crate::stats::series::{Assumption, Data, Priced};
 use crate::stats::window::Window;
 
@@ -59,7 +59,7 @@ use crate::stats::window::Window;
 /// everything the signer of the next row will be handed.
 pub struct Publication {
     pub snapshot: Snapshot,
-    pub index: Document,
+    pub index: Index,
     pub ceiling: Ceiling,
     pub relays_asked: usize,
     pub measured: Vec<Measured>,
@@ -74,13 +74,20 @@ pub struct Publication {
 }
 
 impl Publication {
-    /// The index last, as §7 requires of publication and as a listing
-    /// should therefore read: the documents it names come first.
-    pub fn documents(&self) -> impl Iterator<Item = &Document> {
+    /// Every document as a `d` and the `content` published under it, the
+    /// index last — the order §7 requires of publication, and the one a
+    /// listing should therefore read in: the documents the index names
+    /// come first. Pairs rather than one type because the index is not a
+    /// [`Document`]; §6 exempts it from the envelope the rest carry.
+    pub fn documents(&self) -> impl Iterator<Item = (String, String)> + '_ {
         self.snapshot
             .documents
             .iter()
-            .chain(std::iter::once(&self.index))
+            .map(|document| (document.address.to_string(), document.content()))
+            .chain(std::iter::once((
+                self.index.address().to_string(),
+                self.index.content(),
+            )))
     }
 }
 
@@ -216,6 +223,16 @@ pub async fn compute(
     // so stating anything earlier in the index would advertise coverage
     // the documents themselves withhold. The ceiling has no such duty and
     // is the plain extent.
+    //
+    // Read before the figures, and that order is load-bearing. These are
+    // separate reads, so an ingest running alongside can land an event
+    // between them; taking the extent first means the figures can only be
+    // a superset of what the index claims, never a subset. A run that
+    // loaded first could state a floor below data it does not have and
+    // publish the flat line at zero §6.3 exists to prevent. The surplus
+    // is harmless in the other direction: an event newer than the ceiling
+    // either falls in a bucket already covered, or in one no partition
+    // was computed for, and the next run picks it up.
     let coverage = Coverage::from_extent(
         events::earliest_created_at(pool, &crate::nostr::filters::INDEXED_KINDS, &scope).await?,
         events::latest_created_at(pool, &scope).await?,
@@ -250,24 +267,15 @@ pub async fn compute(
     let computed = Snapshot::compute(&data, coverage, &snapshot_id(now), now);
     let Restated {
         snapshot,
-        mut not_sent,
-        mut state,
+        not_sent,
+        state,
     } = computed.restated(&history, because, republish);
 
-    // The index is a document like any other under §8: its payload moves
-    // only when something it names moves, so a run over an unchanged
-    // archive re-sends nothing at all. It is built after the rest because
-    // it is built *from* the rest.
+    // The index is not under §8's skip: nothing hashes it, and naming the
+    // current snapshot is its whole job, so it is republished on every
+    // run by definition (§5). It is built after the rest because it is
+    // built *from* the rest — including the revisions just decided.
     let index = snapshot.index(&publisher());
-    let address = index.address.to_string();
-    if republish == Republish::No
-        && history
-            .get(&address)
-            .is_some_and(|previous| previous.hash() == index.hash)
-    {
-        not_sent.insert(address.clone());
-    }
-    state.insert(address, restatement::recorded(&index));
 
     let advertised = nip11::limits(&settings.relays).await;
     let ceiling = advertised.iter().fold(
@@ -278,14 +286,8 @@ pub async fn compute(
         },
     );
 
-    let measured = size::measure(
-        &snapshot
-            .documents
-            .iter()
-            .cloned()
-            .chain(std::iter::once(index.clone()))
-            .collect::<Vec<_>>(),
-    );
+    let mut measured = size::measure(&snapshot.documents);
+    measured.push(size::measure_index(&index));
 
     Ok(Publication {
         snapshot,
@@ -425,7 +427,13 @@ pub fn listing(publication: &Publication) -> String {
             "{:<width$}  {:>7}  {}\n",
             document.address.to_string(),
             document.bytes,
-            abbreviated(&document.hash),
+            document.hash.as_deref().map_or_else(
+                // Nothing hashes the index (§6), so there is no digest to
+                // abbreviate and a dash says so, as it does everywhere
+                // else a figure is absent.
+                || "—".to_string(),
+                abbreviated,
+            ),
             width = width
         ));
     }
@@ -516,23 +524,8 @@ async fn send_to(publication: &Publication, keys: &Keys, client: &RelayClient) -
             .join("\n")
     );
 
-    // An index whose payload did not move names the same hashes as the
-    // one already on the relay, and by construction nothing it names
-    // moved either — the index's payload carries every document's hash.
-    // So a run over an unchanged archive sends nothing at all.
-    if publication
-        .not_sent
-        .contains(&publication.index.address.to_string())
-    {
-        out.push_str(&format!(
-            "nothing changed since the last snapshot; {} documents left as published\n",
-            publication.measured.len()
-        ));
-        return Ok(out);
-    }
-
     let index = client
-        .send(&signer::sign(&publication.index, run, keys))
+        .send(&signer::sign_index(&publication.index, run, keys))
         .await?;
     anyhow::ensure!(
         index.is_published(),
@@ -540,10 +533,12 @@ async fn send_to(publication: &Publication, keys: &Keys, client: &RelayClient) -
          a client reading the previous index will not see this snapshot"
     );
 
+    // The index is always one of them, and is not counted as a document
+    // whose figures did or did not move: it has none of its own.
     out.push_str(&format!(
         "snapshot {} published: {sent} document(s) sent, {} unchanged, index last\n",
         run.snapshot_id,
-        publication.measured.len() - sent - 1
+        publication.not_sent.len()
     ));
     Ok(out)
 }
@@ -555,11 +550,10 @@ fn write(publication: &Publication, directory: &Path) -> Result<()> {
     std::fs::create_dir_all(directory)
         .with_context(|| format!("creating {}", directory.display()))?;
 
-    for document in publication.documents() {
-        let name = format!("{}.json", document.address.to_string().replace(':', "-"));
+    for (address, content) in publication.documents() {
+        let name = format!("{}.json", address.replace(':', "-"));
         let path = directory.join(&name);
-        std::fs::write(&path, document.content())
-            .with_context(|| format!("writing {}", path.display()))?;
+        std::fs::write(&path, content).with_context(|| format!("writing {}", path.display()))?;
     }
 
     Ok(())

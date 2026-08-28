@@ -136,10 +136,13 @@ fn an_unchanged_document_is_still_in_the_index() {
         name: "bestiario".to_string(),
         version: "0".to_string(),
     });
-    let payload = index.envelope.payload().to_string();
     assert!(
-        payload.contains(&first(&snapshot).address.to_string()),
-        "an unchanged document fell out of the index: {payload}"
+        index
+            .documents
+            .iter()
+            .any(|entry| entry.d == first(&snapshot).address.to_string()),
+        "an unchanged document fell out of the index: {:?}",
+        index.documents
     );
     assert_eq!(
         restated.snapshot.documents.len(),
