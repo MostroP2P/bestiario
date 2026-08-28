@@ -84,13 +84,23 @@ workers:
         scope: RUN_TIME
         value: "wss://relay.mostro.network,wss://nos.lol"
 
+      # On, so that an instance's kind 10002 is followed to the relays it
+      # actually publishes to. The two relays above are where the network is
+      # expected to be; discovery is what finds where it also is, and the
+      # walk already dials what a relay list names mid-run rather than
+      # leaving it until somebody re-runs `backfill`.
       - key: BESTIARIO__NOSTR__DISCOVER_RELAYS
         scope: RUN_TIME
-        value: "false"
+        value: "true"
 
+      # Every instance the network is known to run, hex or npub — the config
+      # layer parses both. `accept_unknown_instances` is off below, so this
+      # list is exactly what gets indexed, and adding to it is a change to
+      # what the published statistics mean. Which is why it lives here and
+      # not in the dashboard.
       - key: BESTIARIO__INDEXER__INSTANCES
         scope: RUN_TIME
-        value: "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390"
+        value: "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390,00000235a3e904cfe1213a8a54d6f1ec1bef7cc6bfaabd6193e82931ccf1366a,npub1qqqvcqssrmpfa65uuc3jtp6jh8ta5ekz0pz76f5ydhgtplrnddqqrqe7xr,npub1qqqqj79vck2v2p5hd3j4km0vhuk54ujllk4xdq8j49tgkz5ggsdsvgn7vr,npub1qqq8evest7uh9awvs0ur4rau58nyay7f6ymf3q9fl43wl9wj87gsrk6xv3,npub1qqqqnms7fvwu0tw3n2esunhc2ntm2chzpzmzdphajqpt2zeym2asr7ata2,00037abd44e7a846689e230d5446abcd0d56a344fa81fff85c09d1929feda486,b3626fe91b602bdbca3673bec0855221f41dc8f6d0e4027e51eaa525d68d87f2"
 
       - key: BESTIARIO__INDEXER__ACCEPT_UNKNOWN_INSTANCES
         scope: RUN_TIME
@@ -108,9 +118,18 @@ workers:
         scope: RUN_TIME
         value: "true"
 
+      # 2026-02-01T00:00:00-03:00. How far back a walk asks, not how far back
+      # the archive reaches: events already stored are kept, and
+      # `indexed_kinds` records the deepest floor ever requested, so lowering
+      # this later does not throw anything away and raising it does not
+      # narrow what is already published.
+      #
+      # What it does bound is a rebuild. If the Spaces replica is ever lost,
+      # the archive comes back only as far as this reaches — and the relays
+      # currently hold orders from about 2026-01-16, which is earlier.
       - key: BESTIARIO__INDEXER__BACKFILL_FROM
         scope: RUN_TIME
-        value: "1735689600"
+        value: "1769914800"
 
       # ---------------------------------------------------------------------
       # Where to write
