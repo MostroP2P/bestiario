@@ -408,7 +408,7 @@ async fn send_to(publication: &Publication, keys: &Keys, client: &RelayClient) -
     );
 
     let index = client
-        .send(&signer::sign(&publication.index, run, keys))
+        .send(&signer::sign_index(&publication.index, run, keys))
         .await?;
     anyhow::ensure!(
         index.is_published(),
