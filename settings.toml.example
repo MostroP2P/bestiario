@@ -44,3 +44,20 @@ url = "sqlite://bestiario.db"
 [report]
 # Currency that inferred volume is converted into.
 reference_currency = "USD"
+
+[publish]
+# Relays to publish the snapshot of docs/NOSTR-PUBLICATION.md to. Defaults to
+# [nostr].relays, and is configured separately on purpose: reading a relay and
+# writing to it are different trust decisions.
+# relays = ["wss://relay.mostro.network"]
+
+# The publisher's own ceiling on a document. A relay that advertises a smaller
+# limitation.max_content_length in its NIP-11 document lowers it; none raises it.
+# max_content_bytes = 65536
+
+# Where the signing key lives: the NAME of an environment variable, never the
+# key. This file is copied between machines, committed and pasted into issues,
+# and a key written here is a key in all three; `nsec = "nsec1…"` is refused.
+# Read only when a run actually signs, so `stats` on a machine that publishes
+# nothing neither needs the variable nor fails without it.
+# nsec = "env:BESTIARIO_PUBLISH_NSEC"

@@ -497,7 +497,15 @@ bestiario publish [--dry-run] [--out <dir>] [--republish] [--from …] [--until 
   signs nothing.
 - `--out` also writes the documents as files, for the static fallback
   snapshot the site serves before the relay connection is live.
-- Signing key from `[publish].nsec` or a file path; never from a flag.
+- Signing key from the environment, named by `[publish].nsec` as
+  `"env:BESTIARIO_PUBLISH_NSEC"`; never from a flag, and never written
+  into the configuration file. A flag is readable in `ps` and lands in a
+  shell history; a configuration file is copied, committed and pasted into
+  issues. `[publish].nsec` therefore parses into a type that holds a
+  variable's *name*, so a literal key there is a load error rather than a
+  working setup that leaks. The variable is read only by a run that is
+  going to sign, not when the configuration loads, so a command that
+  publishes nothing — `--dry-run` included — does not require it.
 - Publishes to `[publish].relays`, which defaults to `[nostr].relays` but is
   configured separately: reading and writing are different trust decisions.
 

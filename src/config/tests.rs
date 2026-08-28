@@ -684,3 +684,54 @@ fn a_ceiling_the_operator_sets_is_the_one_that_applies() {
 
     assert_eq!(settings.publish.max_content_bytes, 16_384);
 }
+
+// ---- [publish] the signing key (docs/NOSTR-PUBLICATION.md §12)
+
+#[test]
+fn a_publication_without_a_key_signs_nothing_and_is_not_an_error() {
+    // Reviewing a snapshot is the whole of rows 46-49, and neither
+    // `--dry-run` nor `--out` needs a key. Demanding one here would make
+    // every unconfigured run fail at startup for a section it never uses.
+    let settings = Settings::from_toml_str(VALID).expect("valid");
+
+    assert_eq!(settings.publish.nsec, None);
+}
+
+#[test]
+fn a_signing_key_is_configured_as_the_name_of_an_environment_variable() {
+    let toml = format!("{VALID}\n[publish]\nnsec = \"env:BESTIARIO_PUBLISH_NSEC\"\n");
+
+    let settings = Settings::from_toml_str(&toml).expect("valid");
+
+    assert_eq!(
+        settings.publish.nsec.as_ref().map(EnvRef::name),
+        Some("BESTIARIO_PUBLISH_NSEC")
+    );
+}
+
+#[test]
+fn a_key_written_into_the_settings_file_is_refused() {
+    // A configuration file is copied between machines, committed and
+    // pasted into issues; a key in it is a key in all three.
+    let toml = format!(
+        "{VALID}\n[publish]\nnsec = \
+         \"nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5\"\n"
+    );
+
+    let error = Settings::from_toml_str(&toml).expect_err("a literal key");
+
+    assert!(
+        error.to_string().contains("could not load configuration"),
+        "the key never reaches a validated Settings: {error}"
+    );
+}
+
+#[test]
+fn the_variable_is_not_read_when_the_configuration_loads() {
+    // Naming a variable nothing exported is not an error until something
+    // needs to sign: `stats` on a machine that publishes nothing should
+    // neither need the key nor fail without it.
+    let toml = format!("{VALID}\n[publish]\nnsec = \"env:NOTHING_EXPORTED_THIS\"\n");
+
+    Settings::from_toml_str(&toml).expect("an unexported variable is not a load error");
+}

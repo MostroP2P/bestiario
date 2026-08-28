@@ -5,14 +5,24 @@
 //! archive's extent is, what ceiling every document is weighed against
 //! (§9.1), and what a run that signs nothing is allowed to do.
 //!
-//! # Nothing is signed and nothing is published
+//! # What a run does, and what it refuses to do
 //!
-//! This is the reviewable half of publication. `--dry-run` prints what
-//! would be published, with sizes and hashes; `--out` writes the same
+//! `--dry-run` is the reviewable half: it prints what would be published,
+//! with sizes and hashes, and signs nothing. `--out` writes the same
 //! documents as files, which is the static snapshot a site can serve
-//! before its relay connection is live. Signing and relay publication
-//! arrive with the key, and until then an invocation that asks for
-//! neither is refused rather than quietly doing nothing.
+//! before its relay connection is live. Anything else signs the snapshot
+//! with the key of `[publish]` and sends it to `[publish].relays`.
+//!
+//! A run with no key and no `--dry-run` and no `--out` is refused rather
+//! than quietly doing nothing: it is the invocation of an operator who
+//! believes they have configured a publisher and has not.
+//!
+//! The index goes last (§7). An index names every document with the hash
+//! of the payload that belongs to it, so an index on a relay is a promise
+//! that the documents it names are already there — which is only true if
+//! nothing is left to send when it goes out. A document no relay accepted
+//! breaks that promise, so the index is not sent at all and the run
+//! fails naming what was missing.
 //!
 //! # One pass over the archive
 //!
@@ -27,11 +37,14 @@ use std::path::Path;
 use anyhow::{Context as _, Result};
 use sqlx::SqlitePool;
 
+use nostr_sdk::prelude::{Keys, ToBech32 as _};
+
 use crate::commands::Context;
 use crate::config::{AssumptionSettings, PublishSettings};
 use crate::db::load::{self, Scope};
 use crate::db::repo::events;
-use crate::nostr::nip11;
+use crate::nostr::client::RelayClient;
+use crate::nostr::{nip11, signer};
 use crate::stats::bucket::Coverage;
 use crate::stats::publish::index::{Index, Publisher};
 use crate::stats::publish::size::{self, Ceiling, Measured};
@@ -70,10 +83,20 @@ impl Publication {
 /// writes it.
 pub async fn run(context: &Context<'_>, dry_run: bool, out: Option<&Path>, now: i64) -> Result<()> {
     refuse_scoped(context)?;
+    let settings = &context.settings.publish;
+    // Only a run that is going to sign asks for the key, so `--dry-run`
+    // reviews a snapshot on a machine that holds none. And it asks before
+    // the archive is read: a run that cannot sign should discover it in
+    // the first second, not after thirty documents.
+    let keys = match (dry_run, settings.nsec.as_ref()) {
+        (false, Some(reference)) => Some(signer::resolve(reference)?),
+        _ => None,
+    };
     anyhow::ensure!(
-        dry_run || out.is_some(),
-        "`publish` signs nothing yet: pass --dry-run to review the snapshot, \
-         or --out <dir> to write it as files"
+        dry_run || out.is_some() || keys.is_some(),
+        "`publish` has no signing key: point [publish].nsec at an environment \
+         variable holding one, or pass --dry-run to review the snapshot, or \
+         --out <dir> to write it as files"
     );
 
     let publication = compute(
@@ -92,6 +115,10 @@ pub async fn run(context: &Context<'_>, dry_run: bool, out: Option<&Path>, now: 
     }
     if let Some(directory) = out {
         write(&publication, directory)?;
+    }
+
+    if let Some(keys) = &keys {
+        print!("{}", send(&publication, keys, &settings.relays).await?);
     }
 
     Ok(())
@@ -320,6 +347,81 @@ fn abbreviated(hash: &str) -> String {
 
 /// Characters of a hash a listing shows.
 const HASH_PREFIX: usize = 16;
+
+/// Signs every document and sends it, the index last (§7).
+///
+/// Returns what happened rather than printing as it goes: the run either
+/// completes and is reported in one piece, or fails on a document nobody
+/// took and reports that instead. A half-printed listing followed by an
+/// error reads like the error belongs to the last line printed.
+async fn send(publication: &Publication, keys: &Keys, relays: &[String]) -> Result<String> {
+    let client = RelayClient::connect(relays).await?;
+    let report = send_to(publication, keys, &client).await;
+    // Closed whether the run succeeded or failed on a document nobody
+    // took: an aborted publication should not leave a websocket open
+    // behind it either.
+    client.shutdown().await;
+    report
+}
+
+/// The publication itself, over relays somebody else connected.
+///
+/// Split from [`send`] because a relay that answered at connection time
+/// and is gone by the time a document is sent is exactly the case §7 is
+/// about, and it cannot be reached through a function that dials its own
+/// relays.
+async fn send_to(publication: &Publication, keys: &Keys, client: &RelayClient) -> Result<String> {
+    let run = &publication.snapshot.run;
+    let mut out = format!(
+        "publishing {} documents to {} relay(s) as {}\n",
+        publication.measured.len(),
+        client.relays().len(),
+        keys.public_key().to_bech32()?
+    );
+
+    let mut refusals = Vec::new();
+    for document in &publication.snapshot.documents {
+        let delivery = client.send(&signer::sign(document, run, keys)).await?;
+        for (relay, reason) in &delivery.refused {
+            out.push_str(&format!(
+                "  {} refused by {relay}: {reason}\n",
+                document.address
+            ));
+        }
+        if !delivery.is_published() {
+            refusals.push(document.address.to_string());
+        }
+    }
+
+    // Before the index, not after: an index that named a document no
+    // relay holds would send readers to fetch something that is not
+    // there, and would go on doing so until the next run.
+    anyhow::ensure!(
+        refusals.is_empty(),
+        "{} document(s) reached no relay, so the index naming them was not published:\n{}",
+        refusals.len(),
+        refusals
+            .iter()
+            .map(|address| format!("  {address}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+
+    let index = client
+        .send(&signer::sign_index(&publication.index, run, keys))
+        .await?;
+    anyhow::ensure!(
+        index.is_published(),
+        "every document was published but the index was refused by every relay: \
+         a client reading the previous index will not see this snapshot"
+    );
+
+    out.push_str(&format!(
+        "snapshot {} published, index last\n",
+        run.snapshot_id
+    ));
+    Ok(out)
+}
 
 /// Writes every document as `<d>.json`, with `:` folded to `-` so the
 /// name is a filename on every filesystem. The static snapshot a site

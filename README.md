@@ -1108,7 +1108,36 @@ relays = ["wss://relay.mostro.network"]
 # smaller limitation.max_content_length in its NIP-11 document lowers it;
 # none raises it.
 max_content_bytes = 65536
+# Where the signing key lives: the NAME of an environment variable, never
+# the key itself. `nsec = "nsec1…"` is refused.
+nsec = "env:BESTIARIO_PUBLISH_NSEC"
 ```
+
+```sh
+export BESTIARIO_PUBLISH_NSEC=nsec1…
+bestiario publish
+```
+
+The key is never written into this file and never passed as a flag. A flag
+is readable in `ps` by every user on the machine and lands in the shell
+history of whoever typed it; a configuration file is copied between
+machines, committed, and pasted into issues. So `settings.toml` holds the
+*name* of the variable, and a literal key in that field is a configuration
+error rather than a setup that works and quietly leaks — the type the field
+parses into cannot hold a secret at all.
+
+The variable is read only by a run that is going to sign. `bestiario stats
+orders` on a machine that publishes nothing neither needs the key nor fails
+without it, and neither does `publish --dry-run`, whose whole purpose is to
+review a snapshot without a key being involved. A run that *will* publish
+resolves it before reading a single row, so an unexported variable fails in
+the first second and says which variable to export.
+
+The pubkey that key belongs to is the whole of what a reader trusts. A
+client verifies a signature, not a hostname, so moving the daemon to
+another machine changes nothing anybody has to be told — and losing the key
+is the one thing that cannot be undone, because a new one publishes a
+different bestiario.
 
 `publish --dry-run` computes the whole snapshot from one reading of the
 archive and prints it — every document, the bytes it would carry and the
@@ -1186,12 +1215,33 @@ snapshot a site can serve before its relay connection is live:
 bestiario publish --out ./snapshot
 ```
 
-Signing and publication to the relays arrive with the signing key, which
-§12 of the spec places at `[publish].nsec`. The section takes no such key
-yet: `relays` and `max_content_bytes` are the two it accepts, and a key it
-does not know is a configuration error rather than a setting that waits for
-the feature. Until then an invocation that asks for neither `--dry-run` nor
-`--out` is refused rather than quietly doing nothing.
+With a key configured, `publish` on its own signs every document and sends
+it to `[publish].relays`:
+
+```sh
+bestiario publish
+```
+
+The index goes **last**, and that ordering is the whole of §7. An index
+names every document with the hash of the payload that belongs to it, so an
+index on a relay is a promise that the documents it names are already
+there. A document no relay accepted breaks that promise, so the run stops
+before the index and says which document was missing — a snapshot that is
+half on the relay is recoverable by running again, while an index that
+points at documents nobody holds sends every reader to fetch nothing until
+the next run.
+
+A relay that refuses a document is reported and not fatal. Publication goes
+to several relays for the same reason indexing reads from several: a
+snapshot that reached four of five relays is a snapshot people can read,
+and aborting on the fifth would throw away the four. Only a document that
+reached *none* of them stops the run.
+
+`--dry-run` signs nothing even when a key is configured — it is the
+invocation an operator reaches for precisely when they do not yet trust
+what the next one would send. A run with no key, no `--dry-run` and no
+`--out` is refused rather than quietly doing nothing: it is the invocation
+of somebody who believes they have configured a publisher and has not.
 
 ## Development
 

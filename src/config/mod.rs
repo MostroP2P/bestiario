@@ -22,8 +22,11 @@ use serde::Deserialize;
 
 use crate::network::Network;
 
+mod secret;
 #[cfg(test)]
 mod tests;
+
+pub use secret::{EnvRef, Secret};
 
 /// Environment prefix and separator: `BESTIARIO__DATABASE__URL` overrides
 /// `[database].url`.
@@ -224,6 +227,14 @@ pub struct PublishSettings {
     /// lowers it; none raises it.
     #[serde(default = "default_max_content_bytes")]
     pub max_content_bytes: usize,
+    /// Where the signing key of §12 lives: the *name* of an environment
+    /// variable, written as `nsec = "env:BESTIARIO_PUBLISH_NSEC"`.
+    ///
+    /// Never the key itself — see [`EnvRef`]. The variable is read when a
+    /// run actually signs, so a `stats` invocation on a machine that
+    /// publishes nothing neither needs it nor fails without it.
+    #[serde(default)]
+    pub nsec: Option<EnvRef>,
 }
 
 fn default_max_content_bytes() -> usize {
@@ -235,6 +246,7 @@ impl Default for PublishSettings {
         Self {
             relays: Vec::new(),
             max_content_bytes: default_max_content_bytes(),
+            nsec: None,
         }
     }
 }

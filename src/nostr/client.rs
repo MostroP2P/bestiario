@@ -67,6 +67,37 @@ pub enum ClientError {
         #[source]
         source: Box<nostr_sdk::error::Error>,
     },
+
+    /// Not "a relay refused the event", which is an outcome
+    /// [`Delivery`] carries, but "the event could not be sent at all".
+    #[error("event `{event}` could not be sent to any relay")]
+    Send {
+        event: EventId,
+        #[source]
+        source: Box<nostr_sdk::error::Error>,
+    },
+}
+
+/// What became of one event, relay by relay.
+///
+/// Both halves are kept because both are worth printing: an operator who
+/// publishes to five relays wants to know that the fifth has been refusing
+/// everything for a week, and that is invisible if only the failures of a
+/// document nobody took are reported.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Delivery {
+    pub accepted: Vec<RelayUrl>,
+    /// Each with the relay's own `OK` message, which is the only
+    /// explanation there is.
+    pub refused: Vec<(RelayUrl, String)>,
+}
+
+impl Delivery {
+    /// Whether any relay took it. A document no relay took is not
+    /// published, whatever the reasons the others gave.
+    pub fn is_published(&self) -> bool {
+        !self.accepted.is_empty()
+    }
 }
 
 /// A pool of connected relays, each addressable on its own.
@@ -300,6 +331,39 @@ impl RelayClient {
         if let Err(error) = self.client.unsubscribe(&subscription.id).await {
             tracing::debug!(%error, "could not close the subscription");
         }
+    }
+
+    /// Sends one signed event to every connected relay, and says which of
+    /// them took it.
+    ///
+    /// A relay that refuses is reported rather than raised: publication is
+    /// to several relays on purpose, and a snapshot that reached four of
+    /// five is a snapshot that is readable. The caller decides what a
+    /// document nobody took means — for `publish`, it means the index that
+    /// would name it is not sent (§7).
+    ///
+    /// The `Err` is reserved for not being able to send at all, which is
+    /// not a per-relay outcome and would otherwise be reported as every
+    /// relay having refused for the same reason.
+    pub async fn send(&self, event: &Event) -> Result<Delivery, ClientError> {
+        let output = self
+            .client
+            .send_event(event)
+            .to(self.relays.clone())
+            .await
+            .map_err(|source| ClientError::Send {
+                event: event.id,
+                source: Box::new(source),
+            })?;
+
+        // Sorted, so a listing of what happened reads in a stable order
+        // rather than in the order a HashMap chose.
+        let mut accepted: Vec<RelayUrl> = output.success.into_keys().collect();
+        accepted.sort();
+        let mut refused: Vec<(RelayUrl, String)> = output.failed.into_iter().collect();
+        refused.sort();
+
+        Ok(Delivery { accepted, refused })
     }
 
     /// Closes every connection, so a `sync` interrupted with SIGINT leaves no

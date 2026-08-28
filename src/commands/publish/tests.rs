@@ -1,6 +1,8 @@
 //! The decisions `publish` makes on its own: the run's identity, the
 //! ceiling it refuses against, and what a review prints.
 
+use nostr_sdk::prelude::{Filter, Keys, Kind, MockRelay};
+
 use super::*;
 use crate::stats::series::Data;
 
@@ -188,5 +190,77 @@ fn the_index_is_weighed_with_the_rest_and_listed_without_a_hash() {
             .lines()
             .any(|line| line.starts_with("index ") && line.ends_with('—')),
         "a dash where a digest would go, as everywhere else a figure is absent: {listing}"
+    );
+}
+
+// ---- signing and relay publication (§7, §12)
+
+/// A throwaway key, used nowhere but here.
+const NSEC: &str = "nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5";
+
+fn keys() -> Keys {
+    crate::nostr::signer::parse(NSEC, "the test key").expect("a key")
+}
+
+#[tokio::test]
+async fn every_document_and_the_index_reach_the_relay() {
+    let relay = MockRelay::run().await.expect("start the local relay");
+    let publication = publication(Coverage::since(NOW - 86_400), Ceiling::configured(65_536));
+    let url = relay.url().await.to_string();
+
+    let report = send(&publication, &keys(), std::slice::from_ref(&url))
+        .await
+        .expect("publish");
+
+    let client = RelayClient::connect(&[url]).await.expect("connect");
+    let stored = client
+        .fetch_window(
+            &client.relays()[0],
+            Filter::new().kind(Kind::Custom(crate::stats::publish::document::KIND)),
+        )
+        .await
+        .expect("read them back");
+
+    assert_eq!(
+        stored.len(),
+        publication.measured.len(),
+        "the relay holds a different number of documents than were sent"
+    );
+    let addresses: std::collections::BTreeSet<_> = stored
+        .iter()
+        .filter_map(|event| event.tags.identifier())
+        .collect();
+    for (address, _) in publication.documents() {
+        assert!(
+            addresses.contains(&address),
+            "{address} never reached the relay"
+        );
+    }
+    assert!(
+        report.contains(&publication.snapshot.run.snapshot_id),
+        "the report has to name the run it published: {report}"
+    );
+}
+
+#[tokio::test]
+async fn a_document_no_relay_took_stops_the_index_that_would_name_it() {
+    // §7: an index on a relay is a promise that the documents it names are
+    // already there. Sending it anyway would leave readers fetching
+    // something that is not there until the next run.
+    let relay = MockRelay::run().await.expect("start the local relay");
+    let url = relay.url().await.to_string();
+    let publication = publication(Coverage::since(NOW - 86_400), Ceiling::configured(65_536));
+
+    let client = RelayClient::connect(&[url]).await.expect("connect");
+    relay.shutdown();
+
+    let refusal = send_to(&publication, &keys(), &client)
+        .await
+        .expect_err("no relay is left to take anything");
+
+    let message = refusal.to_string();
+    assert!(
+        message.contains("the index naming them was not published"),
+        "the operator has to be told the index was withheld: {message}"
     );
 }
