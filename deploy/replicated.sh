@@ -25,8 +25,23 @@ export BESTIARIO_DB_PATH
 # would make the image unusable for every local `docker run`. Run the daemon
 # plainly and say so once, rather than failing or — worse — pretending to
 # replicate.
+# `sync` subscribes to the relays from roughly now and does not walk their
+# history, so a deployment that only syncs holds the last few days and presents
+# them as the network.
+#
+# The sequence cannot be written as `backfill && sync`. Neither App Platform's
+# run_command nor litestream's -exec is guaranteed to reach a shell — the first
+# exits non-zero before the daemon starts, and the second runs the backfill and
+# then shuts down without ever reaching the sync. So the two are sequenced here,
+# as separate processes, and nothing downstream is ever handed a shell operator.
+backfill_first=""
+if [ "${BESTIARIO_BACKFILL_FIRST:-}" = "true" ]; then
+    backfill_first="yes"
+fi
+
 if [ -z "${LITESTREAM_BUCKET:-}" ]; then
     echo "bestiario-replicated: LITESTREAM_BUCKET is unset, running without replication" >&2
+    [ -z "$backfill_first" ] || bestiario backfill
     exec bestiario "$@"
 fi
 
@@ -57,4 +72,17 @@ for arg in "$@"; do
     command="$command '$(printf '%s' "$arg" | sed "s/'/'\\\\''/g")'"
 done
 
-exec litestream replicate -restore-if-db-not-exists -exec "$command"
+# Restore explicitly, rather than leaving it to `replicate
+# -restore-if-db-not-exists`, so the backfill below sees the index that is
+# already in the bucket and walks the relays for what is missing from it
+# rather than for all of it.
+litestream restore -if-db-not-exists -if-replica-exists "$BESTIARIO_DB_PATH"
+
+# The backfill runs before replication starts, so its writes are not streamed
+# as they happen; the snapshot litestream takes when it starts carries them
+# instead. A container that dies mid-backfill therefore loses that pass and
+# redoes it on the next start, which is exactly what an idempotent backfill is
+# for.
+[ -z "$backfill_first" ] || bestiario backfill
+
+exec litestream replicate -exec "$command"
