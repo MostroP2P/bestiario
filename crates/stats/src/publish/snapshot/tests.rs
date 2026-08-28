@@ -780,3 +780,219 @@ fn the_market_document_reports_what_the_network_trades() {
         "{names:?}"
     );
 }
+
+// ---- per-instance documents (§3 `scope`, §6.1.1)
+
+/// Two pubkeys the grammar of §3 can name: 64 lowercase hex.
+const ALPHA: &str = "6320ee5e2ce0e1e0ae5d2a3e0b8f1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6fd425";
+const BETA: &str = "0f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8";
+
+/// An order of `pubkey`, in `fiat`.
+fn order_by(id: &str, pubkey: &str, fiat: &str, created_at: i64) -> Order {
+    let base = order(id, created_at, 10_000);
+    Order {
+        pubkey: pubkey.to_string(),
+        instance: format!("Instance ({})", &pubkey[..8]),
+        fiat_code: fiat.to_string(),
+        origin: Origin {
+            fiat_code: fiat.to_string(),
+            ..base.origin.clone()
+        },
+        ..base
+    }
+}
+
+/// Two instances: Alpha trades ARS twice and USD once, Beta trades COP once.
+fn two_instances() -> Data {
+    Data {
+        orders: vec![
+            order_by("a1", ALPHA, "ARS", AUGUST + DAY),
+            order_by("a2", ALPHA, "ARS", AUGUST + 2 * DAY),
+            order_by("a3", ALPHA, "USD", AUGUST + 3 * DAY),
+            order_by("b1", BETA, "COP", AUGUST + DAY),
+        ],
+        profiles: vec![profile(ALPHA, "Alpha"), profile(BETA, "Beta")],
+        ..Data::default()
+    }
+}
+
+fn addresses(snapshot: &Snapshot) -> Vec<String> {
+    snapshot
+        .documents
+        .iter()
+        .map(|document| document.address.to_string())
+        .collect()
+}
+
+/// The metrics of one document, by address, as `(name, value)`.
+fn metrics_of(snapshot: &Snapshot, address: &str) -> Vec<(String, serde_json::Value)> {
+    let document = snapshot
+        .documents
+        .iter()
+        .find(|document| document.address.to_string() == address)
+        .unwrap_or_else(|| panic!("{address} is missing from {:?}", addresses(snapshot)));
+    let payload = serde_json::to_value(document.envelope.payload()).expect("serialises");
+    payload["metrics"]
+        .as_array()
+        .expect("metrics")
+        .iter()
+        .map(|metric| {
+            (
+                metric["name"].as_str().expect("name").to_string(),
+                metric["value"].clone(),
+            )
+        })
+        .collect()
+}
+
+/// One figure of one document, as a count.
+fn count_of(snapshot: &Snapshot, address: &str, name: &str) -> i64 {
+    metrics_of(snapshot, address)
+        .into_iter()
+        .find(|(found, _)| found == name)
+        .unwrap_or_else(|| panic!("{address} has no {name}"))
+        .1
+        .as_i64()
+        .unwrap_or_else(|| panic!("{name} of {address} is not a count"))
+}
+
+#[test]
+fn every_instance_gets_an_orders_document_at_every_window() {
+    // Arrange / Act
+    let snapshot = Snapshot::compute(&two_instances(), Coverage::since(JULY), "run", SEPTEMBER);
+    let addresses = addresses(&snapshot);
+
+    // Assert — a client that constructs one of these from §3 must not get
+    // a miss, exactly as for the network-wide documents.
+    for pubkey in [ALPHA, BETA] {
+        for window in Span::ALL {
+            let address = format!("orders:{}:i:{pubkey}", window.as_str());
+            assert!(
+                addresses.contains(&address),
+                "{address} is missing from {addresses:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn an_instance_document_counts_that_instances_orders_and_no_others() {
+    // Arrange / Act
+    let snapshot = Snapshot::compute(&two_instances(), Coverage::since(JULY), "run", SEPTEMBER);
+
+    // Assert — three of the four orders are Alpha's, one is Beta's.
+    assert_eq!(count_of(&snapshot, "orders:all", "orders.created"), 4);
+    assert_eq!(
+        count_of(
+            &snapshot,
+            &format!("orders:all:i:{ALPHA}"),
+            "orders.created"
+        ),
+        3
+    );
+    assert_eq!(
+        count_of(&snapshot, &format!("orders:all:i:{BETA}"), "orders.created"),
+        1
+    );
+}
+
+#[test]
+fn an_instance_document_breaks_its_orders_down_by_currency() {
+    // Arrange / Act
+    let snapshot = Snapshot::compute(&two_instances(), Coverage::since(JULY), "run", SEPTEMBER);
+    let alpha = format!("orders:all:i:{ALPHA}");
+
+    // Assert — the per-currency counts a frontend renders as
+    // "Alpha: ARS 2, USD 1".
+    assert_eq!(count_of(&snapshot, &alpha, "orders.ARS.created"), 2);
+    assert_eq!(count_of(&snapshot, &alpha, "orders.USD.created"), 1);
+
+    // A currency this instance never traded has no block: absence is not
+    // a zero row nobody published.
+    let names: Vec<String> = metrics_of(&snapshot, &alpha)
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect();
+    assert!(
+        !names.iter().any(|name| name.starts_with("orders.COP.")),
+        "{names:?}"
+    );
+}
+
+#[test]
+fn the_per_currency_counts_of_an_instance_add_up_to_its_total() {
+    // An order names exactly one currency and belongs to exactly one
+    // instance, so the currency blocks partition the instance's orders —
+    // which is what lets a client sum them, and sum instances into the
+    // network. Payment methods would not: an order names several.
+    let snapshot = Snapshot::compute(&two_instances(), Coverage::since(JULY), "run", SEPTEMBER);
+    let alpha = format!("orders:all:i:{ALPHA}");
+
+    let per_currency: i64 = metrics_of(&snapshot, &alpha)
+        .into_iter()
+        .filter(|(name, _)| name.ends_with(".created") && name != "orders.created")
+        .map(|(_, value)| value.as_i64().expect("a count"))
+        .sum();
+
+    assert_eq!(per_currency, count_of(&snapshot, &alpha, "orders.created"));
+}
+
+#[test]
+fn an_instance_the_grammar_cannot_name_gets_no_document() {
+    // Arrange — a profile whose pubkey is not 64 lowercase hex. It cannot
+    // be rendered into a `d` that §3 parses, so publishing one would put a
+    // document on a relay under a name no conforming client constructs.
+    let data = Data {
+        profiles: vec![profile("pk", "Alpha")],
+        ..data()
+    };
+
+    // Act
+    let snapshot = Snapshot::compute(&data, Coverage::since(JULY), "run", SEPTEMBER);
+
+    // Assert
+    for address in addresses(&snapshot) {
+        assert!(
+            !address.contains(":i:"),
+            "{address} names an unnameable pubkey"
+        );
+    }
+}
+
+#[test]
+fn only_the_orders_report_is_scoped_to_an_instance() {
+    // The other seven reports stay network-wide: the cross product of
+    // report x window x instance is what §13.4 warns about, and the
+    // per-instance figures the other reports would carry are already in
+    // `compare` and `instances`, one row per instance.
+    let snapshot = Snapshot::compute(&two_instances(), Coverage::since(JULY), "run", SEPTEMBER);
+
+    for address in addresses(&snapshot) {
+        if let Some((report, _)) = address.split_once(':') {
+            assert!(
+                !address.contains(":i:") || report == "orders",
+                "{address} scopes a report that is not published per instance"
+            );
+        }
+        assert!(
+            !(address.starts_with("series:") && address.contains(":i:")),
+            "{address} is a per-instance series, which §13.4 leaves unpublished"
+        );
+    }
+}
+
+#[test]
+fn every_address_a_snapshot_publishes_parses_back() {
+    // The round trip of §3 over what is actually published: a document
+    // whose `d` a client cannot construct is a document nobody can fetch.
+    let snapshot = Snapshot::compute(&two_instances(), Coverage::since(JULY), "run", SEPTEMBER);
+
+    for document in &snapshot.documents {
+        let rendered = document.address.to_string();
+        assert_eq!(
+            crate::publish::address::Address::parse(&rendered).as_ref(),
+            Ok(&document.address),
+            "{rendered} does not parse back"
+        );
+    }
+}

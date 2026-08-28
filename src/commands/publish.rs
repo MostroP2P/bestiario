@@ -261,15 +261,18 @@ async fn record(pool: &SqlitePool, publication: &Publication) -> Result<()> {
     Ok(())
 }
 
-/// A published document is the whole network's, and its address carries no
-/// scope (§3), so a scoped run would sign network-wide addresses over one
-/// instance's figures — a document that lies about what it is.
+/// A snapshot decides its own scopes (§3): the network-wide documents and
+/// one `orders` document per instance, every one of them computed from the
+/// same reading of the whole archive. Narrowing the *run* would not narrow
+/// the addresses it signs — it would sign `orders:30d` over one instance's
+/// orders, and `orders:30d:i:<other>` over an archive that no longer holds
+/// that instance's. A document that lies about what it is, either way.
 fn refuse_scoped(context: &Context<'_>) -> Result<()> {
     anyhow::ensure!(
         context.cli.instance.is_none() && context.cli.network.is_none(),
-        "`publish` cannot be scoped with --instance or --network: a published document \
-         addresses the whole network, and scoping one would sign a network-wide address \
-         over an instance's figures"
+        "`publish` cannot be scoped with --instance or --network: a snapshot decides its \
+         own scopes — the network-wide documents and one per instance — and narrowing the \
+         run would sign those addresses over a subset of the archive"
     );
     Ok(())
 }

@@ -292,19 +292,41 @@ pub enum Scope {
 const NETWORKS: [&str; 4] = ["mainnet", "testnet", "signet", "regtest"];
 
 impl Scope {
+    /// The scope naming `pubkey`, or `None` when the grammar cannot name
+    /// it: 64 lowercase hex characters and nothing else.
+    ///
+    /// The constructor exists so that the *building* of an address is
+    /// under the same rule as the parsing of one. A snapshot narrows a
+    /// document to an instance by taking the pubkey the archive stored,
+    /// and a pubkey that is not 64 lowercase hex would render into a `d`
+    /// that [`Address::parse`] refuses — a document published under a
+    /// name no conforming client can construct, which is worse than a
+    /// document that was never published.
+    pub fn instance(pubkey: &str) -> Option<Self> {
+        let hex = pubkey.len() == 64
+            && pubkey
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
+        hex.then(|| Self::Instance(pubkey.to_string()))
+    }
+
+    /// The scope naming `network`, or `None` when it is not one the
+    /// indexer admits.
+    pub fn network(network: &str) -> Option<Self> {
+        NETWORKS
+            .contains(&network)
+            .then(|| Self::Network(network.to_string()))
+    }
+
     /// Parses the two trailing segments of an address: `i`/`n` and a value.
+    ///
+    /// The two arms are the constructors above, so a value that parses is
+    /// exactly a value that can be built and vice versa; one rule, in one
+    /// place.
     fn parse(kind: &str, value: &str) -> Option<Self> {
         match kind {
-            "i" => {
-                let hex = value.len() == 64
-                    && value
-                        .bytes()
-                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
-                hex.then(|| Self::Instance(value.to_string()))
-            }
-            "n" => NETWORKS
-                .contains(&value)
-                .then(|| Self::Network(value.to_string())),
+            "i" => Self::instance(value),
+            "n" => Self::network(value),
             _ => None,
         }
     }
