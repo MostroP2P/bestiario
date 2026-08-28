@@ -10,6 +10,7 @@ use nostr_sdk::prelude::Event;
 use sqlx::{Executor, QueryBuilder, Sqlite, SqlitePool};
 
 use crate::db::load::Scope;
+use crate::nostr::filters::SINGLE_COPY_KINDS;
 
 /// One row of `events`.
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
@@ -140,12 +141,38 @@ where
 /// requested is unknown history, and the report can speak for none of the
 /// window rather than print observed zeros for it.
 ///
+/// # The kinds a relay keeps one of
+///
+/// [`SINGLE_COPY_KINDS`] invert the second floor, so they are read from
+/// `indexed_kinds` whether or not the archive holds one. A profile, a rate
+/// sheet and a relay list each replace the last, so a relay has exactly one
+/// however far back a filter reaches: a backfill asking for January's rates
+/// is handed today's. Their earliest stored event therefore dates this
+/// archive, not the history behind it, and taking the latest of six floors
+/// would let three of them pull every report's floor forward to the day the
+/// indexer was deployed — an archive holding the year, published as one
+/// holding today.
+///
+/// What is left is what was asked for, which is the honest claim for a kind
+/// with no history to expire: the relay was asked from that floor and
+/// handed over everything it had. It is the same answer the third floor
+/// already gives a kind that came back empty, and the fallback when nothing
+/// recorded the request is the earliest stored event — the conservative
+/// reading, and the one this returned before.
+///
 /// `scope` narrows both `events` floors to the instance the report covers,
 /// so an instance added and backfilled after an older one's events expired
 /// does not inherit the older one's reach. Only the instance half of the
 /// scope applies: `events` stores each event verbatim and has no `network`
 /// column, and a floor pretending otherwise would be the same lie in a
 /// smaller place.
+///
+/// The `indexed_kinds` floor is the one exception, and cannot be otherwise:
+/// the table is keyed by kind alone, because a relay is asked about every
+/// instance at once. It cannot widen a scoped report's reach — the first
+/// floor is the earliest event *of that instance*, and the latest of the
+/// three wins — so the most it costs is not narrowing the window further
+/// for one instance among several.
 ///
 /// `None` when nothing can be spoken for: an empty archive, or a kind that
 /// was never asked for.
@@ -160,19 +187,42 @@ pub async fn earliest_created_at(
 
     let mut floor = archive;
     for &kind in kinds {
-        let known = match scoped_min(pool, Some(kind), scope).await? {
-            Some(first) => first,
-            // Never stored. Only an explicit record of the request makes
-            // that a zero rather than a blank.
-            None => match super::indexed_kinds::indexed_from(pool, kind).await? {
-                Some(from) => from,
-                None => return Ok(None),
-            },
+        let Some(known) = kind_floor(pool, kind, scope).await? else {
+            return Ok(None);
         };
         floor = floor.max(known);
     }
 
     Ok(Some(floor))
+}
+
+/// How far back one kind can be spoken for; `None` when nothing says.
+///
+/// The two readings of the archive that [`earliest_created_at`] weighs,
+/// which of them leads depending on whether the relays keep this kind's
+/// history at all.
+async fn kind_floor(
+    pool: &SqlitePool,
+    kind: u16,
+    scope: &Scope,
+) -> Result<Option<i64>, sqlx::Error> {
+    if SINGLE_COPY_KINDS.contains(&kind) {
+        // Asked-for first, because the one copy stored dates the archive
+        // and not the history. Falling back rather than returning `None`
+        // when nothing recorded the request: the stored event is then the
+        // only evidence there is, and it is the conservative one.
+        return match super::indexed_kinds::indexed_from(pool, kind).await? {
+            Some(from) => Ok(Some(from)),
+            None => scoped_min(pool, Some(kind), scope).await,
+        };
+    }
+
+    match scoped_min(pool, Some(kind), scope).await? {
+        Some(first) => Ok(Some(first)),
+        // Never stored. Only an explicit record of the request makes that
+        // a zero rather than a blank.
+        None => super::indexed_kinds::indexed_from(pool, kind).await,
+    }
 }
 
 /// The latest `created_at` in `scope`, over every kind.
