@@ -401,9 +401,13 @@ currency it traded:
 ```
 
 Every metric matching `orders.<CODE>.created` is one bar of the chart. The
-currency codes are the three-letter codes instances publish; a currency this
-instance did not trade in the window has **no block at all**, rather than a
-block of zeros.
+currency codes are the three-letter codes instances publish.
+
+A currency has **no block at all** — rather than a block of zeros — when
+every figure the block would carry is zero. So the currencies you see are
+the ones that did something in this window, or have an order live right
+now; enumerate them from the payload rather than assuming a fixed set, and
+treat a missing code as zero on every count.
 
 Each currency block carries the same nine figures as the instance total:
 
@@ -429,10 +433,20 @@ once and which are attributed to each rather than divided between them —
 which is why `market.method_top3_by_volume` adds up to more than the volume
 traded, and why there are no per-method blocks.
 
-**Volume by currency, network-wide,** is a different document and already
-exists: `volume:<window>` carries `volume.fiat.<CODE>.total` and friends
-(§8.3). Per-instance volume by currency is not published; the per-instance
-`orders` documents give counts, not sats.
+**For the network's mix by currency you do not need these at all.**
+`orders:<window>` carries `orders.<CODE>.created`, `.completed`, `.canceled`
+and `.open_now` for every currency the network traded — one document, one
+`REQ`. The per-instance documents are for the *cross*: which instance is
+behind which currency. The two agree by construction; §7's summing rule is
+what makes that true, and the publisher asserts it in its own tests.
+
+**Volume by currency, network-wide,** is a different document again:
+`volume:<window>` carries `volume.fiat.<CODE>.total` and friends (§8.3).
+Careful — that block counts only completed orders with a **fixed** fiat
+amount, so range orders are missing from it, and its totals are in fiat, not
+sats. For "how many successful orders in ARS", use
+`orders.ARS.completed`, which counts them all. Volume in **sats** per
+currency is not published at any scope.
 
 ---
 
@@ -456,14 +470,26 @@ Every figure, by document. `<CODE>` is a three-letter currency code,
 
 ### 8.2 `orders:<window>` and `orders:<window>:i:<pubkey>`
 
-The nine figures of §7's table, under `orders.*`. The scoped documents
-repeat all nine per currency as `orders.<CODE>.*`; the network-wide document
-does not (PUB §6.1.1 says why).
+The nine figures of §7's table, under `orders.*`, in both scopes.
+
+Both scopes also break those orders down by currency, to different depths:
+
+| | Per currency |
+| --- | --- |
+| `orders:<window>` (network) | **Four counts**: `orders.<CODE>.created`, `.completed`, `.canceled`, `.open_now` |
+| `orders:<window>:i:<pubkey>` | **All nine figures**: the whole block again as `orders.<CODE>.*` |
+
+The network document is the shallower one because the network's currency
+list has no ceiling while the document size does (PUB §6.1.1). The four it
+carries are the ones that *sum*, which is what a client actually does with
+them; `completion_rate` per currency is `completed / (completed + canceled)`
+and derives from two of them, and the rest is a per-instance question.
 
 Series columns (`series:orders:*`): `created`, `completed`, `canceled`,
-`completion_rate`, `abandonment_rate`. The two `_now` figures and the two
-`_delta` ones are absent by design — one kind is about the clock rather than
-the window, and the other is already a change.
+`completion_rate`, `abandonment_rate` — and **no column per currency**, at
+any resolution. The two `_now` figures and the two `_delta` ones are absent
+by design too: one kind is about the clock rather than the window, and the
+other is already a change.
 
 ### 8.3 `volume:<window>`
 
@@ -687,7 +713,8 @@ same window by label.
 | Instance directory or map | `instances:all` |
 | League table | `compare:30d`, joined to `instances:30d` by label for pubkeys |
 | **Currencies per instance** | `instances:30d` for the pubkeys, then one `orders:30d:i:<pubkey>` per instance |
-| Network currency mix by orders | The same per-instance documents, summed |
+| Network currency mix by orders | `orders:30d`, the `orders.<CODE>.*` rows — one document |
+| Successful orders by currency | `orders.<CODE>.completed`, network-wide or per instance |
 | Network currency mix by fiat volume | `volume:30d`, the `volume.fiat.<CODE>.*` rows |
 | Market structure | `market:30d` |
 | Live book | `orders:24h`, rows `orders.open_now` and `orders.in_progress_now` |
@@ -708,6 +735,9 @@ So you do not go looking:
 - **Individual orders, disputes or events.** bestiario publishes statistics,
   not a mirror of the Mostro events — those are on the relays already, under
   kinds 38383, 38386, 8383 and 38385.
+- **Volume in sats per currency**, at any scope. `volume.fiat.<CODE>.total`
+  is in fiat and covers fixed-amount orders only; the per-currency blocks of
+  `orders` are counts.
 - **Anything about counterparties.** No pubkeys of takers or makers, no
   identities. Only instances are named.
 

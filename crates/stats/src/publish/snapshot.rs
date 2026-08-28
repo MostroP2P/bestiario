@@ -142,7 +142,17 @@ pub fn hash_of(payload: &impl Serialize) -> String {
 /// not get a miss because the document happens to have no series.
 fn window_metrics(report: Report, data: &Data, window: Window, now: i64) -> Vec<Metric> {
     match report {
-        Report::Orders => series::block_of(series::Family::Activity, data, window, now),
+        // The only report whose window document carries more than its
+        // family's block: the network's mix by currency (§6.1.1), which is
+        // added here and not in `series::Family::Activity` so that it
+        // reaches this document and not the series. A column per currency
+        // per bucket would put the size problem of §9.1 in the one shape
+        // that already repeats a row per day.
+        Report::Orders => {
+            let mut metrics = series::block_of(series::Family::Activity, data, window, now);
+            metrics.extend(fiat_counts(&data.orders, window, now));
+            metrics
+        }
         Report::Volume => series::block_of(series::Family::Volume, data, window, now),
         Report::DevFees => series::block_of(series::Family::DevFees, data, window, now),
         Report::Disputes => series::block_of(series::Family::Disputes, data, window, now),
@@ -158,6 +168,75 @@ fn window_metrics(report: Report, data: &Data, window: Window, now: i64) -> Vec<
             now,
         ),
     }
+}
+
+/// The network's orders by currency: four counts per currency traded in
+/// the window, under `orders.<CODE>.created`, `.completed`, `.canceled`
+/// and `.open_now`.
+///
+/// # Four figures and not nine
+///
+/// The instance-scoped documents carry the whole §6.1 block per currency
+/// ([`instance_metrics`]) because an instance's currencies are the handful
+/// it lists in its 38385. The network's are every code any instance ever
+/// published, and that list has no ceiling while §9.1 does — at roughly
+/// eighty-five bytes a metric, nine figures over a hundred codes is some
+/// seventy-six kilobytes and past the default limit, where the failure
+/// mode is a run that publishes nothing at all. Four is a quarter of that
+/// and leaves the largest document in the snapshot with room.
+///
+/// Which four is not arbitrary. They are the figures that *sum*: an order
+/// names one currency, so the blocks partition the window's orders and a
+/// client may add them up or compare them against the whole-network row
+/// above. The rates and the deltas do not sum — a completion rate is not
+/// the sum of completion rates — and `completion_rate` is anyway
+/// `completed / (completed + canceled)`, which a client derives from two
+/// of these. What is left, `abandonment_rate` and the deltas, is in the
+/// scoped documents for whoever wants it per instance.
+pub fn fiat_counts(orders: &[Order], window: Window, now: i64) -> Vec<Metric> {
+    activity::slice(orders, activity::Dimension::Fiat)
+        .into_iter()
+        .flat_map(|(code, group)| {
+            let group: Vec<Order> = group.into_iter().cloned().collect();
+            let activity = activity::summarise(&group, window, now);
+            let counts = [
+                ("created", activity.created),
+                ("completed", activity.completed),
+                ("canceled", activity.canceled),
+                ("open_now", activity.open_now),
+            ];
+            if !traded(counts.iter().map(|(_, count)| *count)) {
+                return Vec::new();
+            }
+            counts
+                .into_iter()
+                .map(|(name, count)| {
+                    Metric::observed(format!("orders.{code}.{name}"), Value::Count(count as i64))
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// Whether a currency's block is published at all: whether any figure in
+/// it is above zero.
+///
+/// [`activity::slice`] groups the whole archive in scope and not the
+/// window's orders — the deltas need the period before it and the `_now`
+/// counts need every live order — so a currency whose every order is older
+/// than the window still reaches the grouping. Publishing that group would
+/// put a block of zeros in the document, which is the §6.3 absence rule
+/// broken in the one place it costs the most: `orders:24h` would carry a
+/// block for every code the network has ever traded, growing forever,
+/// which is precisely the size argument these blocks are published under.
+///
+/// The counts handed in are the ones *that document* publishes, so the
+/// question is always "did this currency contribute anything to what is
+/// about to be written" and never a figure the reader cannot see. A
+/// currency the network is trading right now is not zero in `open_now`,
+/// so nothing live is dropped.
+fn traded(counts: impl IntoIterator<Item = u64>) -> bool {
+    counts.into_iter().any(|count| count > 0)
 }
 
 /// The reports published narrowed to one instance (§3 `scope`).
@@ -209,20 +288,32 @@ pub const SCOPED_REPORTS: [Report; 1] = [Report::Orders];
 /// over the same orders, and re-selecting them per window would walk the
 /// network's whole order list five times per instance for an answer that
 /// does not depend on the window at all.
-pub fn instance_metrics(
-    own: &[Order],
-    window: Window,
-    coverage: Coverage,
-    now: i64,
-) -> Vec<Metric> {
+pub fn instance_metrics(own: &[Order], window: Window, now: i64) -> Vec<Metric> {
     let mut metrics = activity::metrics("orders", &activity::summarise(own, window, now));
-    metrics.extend(activity::report(
-        own,
-        window,
-        now,
-        Some(activity::Dimension::Fiat),
-        coverage,
-    ));
+
+    // Sliced here rather than through `activity::report`, which is the
+    // command's entry point and lists every currency in scope — a table an
+    // operator asked for says "ARS: nothing this week" rather than leaving
+    // the row out. A document is under the opposite rule; see [`traded`].
+    metrics.extend(
+        activity::slice(own, activity::Dimension::Fiat)
+            .into_iter()
+            .flat_map(|(code, group)| {
+                let group: Vec<Order> = group.into_iter().cloned().collect();
+                let activity = activity::summarise(&group, window, now);
+                if !traded([
+                    activity.created,
+                    activity.completed,
+                    activity.canceled,
+                    activity.open_now,
+                    activity.in_progress_now,
+                ]) {
+                    return Vec::new();
+                }
+                activity::metrics(&format!("orders.{code}"), &activity)
+            }),
+    );
+
     metrics
 }
 
@@ -528,7 +619,7 @@ impl Snapshot {
             for report in SCOPED_REPORTS {
                 for span in Span::ALL {
                     let window = window_of(span, coverage, now);
-                    let metrics = instance_metrics(&own, window, coverage, now);
+                    let metrics = instance_metrics(&own, window, now);
                     let payload = window_payload(window, &metrics);
                     documents.push(Document {
                         address: Address::Window {
