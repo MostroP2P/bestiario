@@ -11,8 +11,9 @@
 //! by every user on the machine and lands in the shell history of the one
 //! who typed it. It is kept out of `settings.toml` for the same kind of
 //! reason — that file is copied between machines, committed, and pasted
-//! into issues. What the file holds is the *name* of an environment
-//! variable, and this module is where that name becomes a key.
+//! into issues. What the file holds is a *reference*: the name of an
+//! environment variable or the path of a file, and this module is where
+//! either becomes a key.
 //!
 //! # Why the event's clock is the run's
 //!
@@ -92,12 +93,39 @@ pub fn resolve(reference: &SecretRef) -> Result<Keys, KeyError> {
 /// does not have — which is the one error in publication that no reader
 /// could detect.
 pub fn sign(document: &Document, run: &Run, keys: &Keys) -> Event {
-    let tags = document::tags(&document.address, run, Some(document.envelope.revision()))
-        .into_iter()
-        .map(|tag| Tag::custom(tag.name, tag.values))
+    signed(
+        &document::tags(&document.address, run, document.envelope.revision()),
+        document.content(),
+        run,
+        keys,
+    )
+}
+
+/// The index, signed (§5).
+///
+/// It carries the same tag set as every other document, at revision 1:
+/// nothing hashes the index and nothing counts revisions of it — it is
+/// republished on every run by definition, since naming the current
+/// snapshot is its whole job.
+pub fn sign_index(index: &Index, run: &Run, keys: &Keys) -> Event {
+    signed(
+        &document::tags(&index.address(), run, FIRST_REVISION),
+        index.content(),
+        run,
+        keys,
+    )
+}
+
+/// The revision an index is published under: there is no other.
+const FIRST_REVISION: u32 = 1;
+
+fn signed(tags: &[document::Tag], content: String, run: &Run, keys: &Keys) -> Event {
+    let tags = tags
+        .iter()
+        .map(|tag| Tag::custom(tag.name.clone(), tag.values.clone()))
         .collect::<Vec<_>>();
 
-    EventBuilder::new(Kind::Custom(KIND), document.content())
+    EventBuilder::new(Kind::Custom(KIND), content)
         .tags(tags)
         .custom_created_at(Timestamp::from_secs(run.generated_at.max(0) as u64))
         .finalize(keys)
@@ -105,20 +133,4 @@ pub fn sign(document: &Document, run: &Run, keys: &Keys) -> Event {
         // no failure mode of its own; treating it as one would put a
         // branch in every caller that nothing can reach.
         .expect("a document signs with a key that parsed")
-}
-
-/// The index, signed. Separate from [`sign`] because the index is not a
-/// [`Document`]: §6 exempts it from the envelope the rest carry, so there
-/// is no revision to tag and its `content` is the whole document.
-pub fn sign_index(index: &Index, run: &Run, keys: &Keys) -> Event {
-    let tags = document::tags(&index.address(), run, None)
-        .into_iter()
-        .map(|tag| Tag::custom(tag.name, tag.values))
-        .collect::<Vec<_>>();
-
-    EventBuilder::new(Kind::Custom(KIND), index.content())
-        .tags(tags)
-        .custom_created_at(Timestamp::from_secs(run.generated_at.max(0) as u64))
-        .finalize(keys)
-        .expect("an index signs with a key that parsed")
 }
