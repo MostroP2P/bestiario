@@ -258,3 +258,28 @@ fn a_partition_spans_its_whole_month_or_year_and_december_rolls_the_year() {
         "the year ends where December does"
     );
 }
+
+#[test]
+fn a_partition_refuses_a_bucket_no_year_or_month_could_be() {
+    // `fits` is about shape; these have the right shape and a number the
+    // grammar has no spelling for. A month is `01`..`12` and a year is
+    // four digits, so `2026-00` and `-0001` are strings `parse` refuses,
+    // and a built partition must refuse them too.
+    for month in [0, 13, 99] {
+        assert!(
+            Partition::new(Resolution::Daily, Bucket::Month { year: 2026, month }).is_none(),
+            "month {month} is not a month"
+        );
+    }
+
+    for year in [-1, 10_000] {
+        assert!(
+            Partition::new(Resolution::Monthly, Bucket::Year(year)).is_none(),
+            "year {year} is not four digits"
+        );
+        assert!(
+            Partition::new(Resolution::Weekly, Bucket::Month { year, month: 1 }).is_none(),
+            "year {year} is not four digits"
+        );
+    }
+}

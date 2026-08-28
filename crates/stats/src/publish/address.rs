@@ -166,6 +166,18 @@ impl Bucket {
         )
     }
 
+    /// Whether the numbers are ones the grammar can spell: a four-digit
+    /// year, and a month of `01`..`12` (§3). Shape is not enough — a
+    /// `Bucket` is built from its fields, and `2026-00` has the shape of a
+    /// month and is not one.
+    fn is_canonical(self) -> bool {
+        let four_digits = |year| (0..=9999).contains(&year);
+        match self {
+            Self::Month { year, month } => four_digits(year) && (1..=12).contains(&month),
+            Self::Year(year) => four_digits(year),
+        }
+    }
+
     fn parse(text: &str) -> Option<Self> {
         match text.split_once('-') {
             None => Some(Self::Year(year(text)?)),
@@ -199,13 +211,12 @@ pub struct Partition {
 }
 
 impl Partition {
-    /// `bucket` at `resolution`, or `None` when the shapes disagree: a
+    /// `bucket` at `resolution`, or `None` when the shapes disagree — a
     /// month of monthly buckets is one bucket, and a year of daily ones is
-    /// too large for one document (§3, §9.2).
+    /// too large for one document (§3, §9.2) — or when the bucket names a
+    /// month or a year the grammar cannot spell.
     pub fn new(resolution: Resolution, bucket: Bucket) -> Option<Self> {
-        bucket
-            .fits(resolution)
-            .then_some(Self { resolution, bucket })
+        (bucket.fits(resolution) && bucket.is_canonical()).then_some(Self { resolution, bucket })
     }
 
     pub fn resolution(self) -> Resolution {
