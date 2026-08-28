@@ -1314,9 +1314,10 @@ worth. `--open` shows the annotated report, `--clean` discards profiles from
 an earlier build.
 
 `docs/RELEASE.md` is the release procedure: `cargo release <level> --execute`
-bumps the version, writes the `CHANGELOG.md` section from the commit log and
-pushes a `vX.Y.Z` tag, and the tag makes GitHub Actions build the Linux x86_64
-binary and publish the release with those notes.
+bumps the version — or `cargo release --execute`, which ships the version the
+manifest already carries — writes the `CHANGELOG.md` section from the commit
+log and pushes a `vX.Y.Z` tag, and the tag makes GitHub Actions build the Linux
+x86_64 binary and publish the release with those notes.
 
 `docs/SPEC.md` is the source of truth for event formats, the data model,
 the metrics and the CLI; `docs/ROADMAP.md` is the plan, one row per pull

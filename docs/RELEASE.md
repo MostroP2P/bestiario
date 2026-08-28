@@ -4,20 +4,32 @@ A release is one command. `cargo release` cuts the version locally and pushes
 a tag; the tag is what GitHub Actions turns into a published release.
 
 ```sh
-cargo install cargo-release   # once
-cargo release patch           # a rehearsal: prints, changes nothing
-cargo release patch --execute # the real thing
+cargo install cargo-release    # once
+cargo release minor            # a rehearsal: prints, changes nothing
+cargo release minor --execute  # the real thing
 ```
 
 `patch`, `minor` and `major` are the levels; an explicit version
 (`cargo release 0.2.0 --execute`) works too.
 
+Without a level, cargo-release ships the version `Cargo.toml` already carries
+instead of bumping it. That is how the first release is cut: `docs/ROADMAP.md`
+names `v0.1.0` as the first useful one and the manifest is already at `0.1.0`,
+so a level here would tag `v0.1.1` and the release the roadmap promised would
+never exist.
+
+```sh
+cargo release             # a rehearsal of the version in Cargo.toml
+cargo release --execute   # tags it as it stands
+```
+
 ## What the command does
 
 `release.toml` is the configuration. Running from `main`, cargo-release:
 
-1. bumps `[workspace.package] version` in `Cargo.toml`, which both crates
-   inherit — one version for the workspace, never two;
+1. sets `[workspace.package] version` in `Cargo.toml` to the version being
+   released, which both crates inherit — one version for the workspace, never
+   two — leaving it as it stands when no level was given;
 2. runs `scripts/changelog.sh update <version>`, which prepends the version's
    section to `CHANGELOG.md`, built from the conventional commits since the
    previous tag;
@@ -70,3 +82,7 @@ The tag is already pushed, so fix the cause and re-run the failed job from the
 Actions tab. If the tag itself was wrong, delete it locally and on the remote,
 drop the release commit, and cut the version again — no release exists until
 the workflow creates one.
+
+Do not delete the tag and then re-run the job: `gh release create` is called
+with `--verify-tag`, so it stops rather than inventing the tag again at the tip
+of `main`, which would attach the binary this run built to a different commit.

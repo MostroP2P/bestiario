@@ -90,7 +90,12 @@ jobs:
           # A version with a pre-release suffix (0.2.0-rc.1) is not a stable one.
           prerelease=""
           case "$version" in *-*) prerelease="--prerelease" ;; esac
+          # --verify-tag: without it, a `gh release create` for a tag that is
+          # no longer on the remote — deleted while recovering a failed release
+          # — creates one at the tip of the default branch, and the release
+          # would then point somewhere other than the binary attached to it.
           gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
             --title "bestiario ${version}" \
             --notes-file notes.md \
             $prerelease \
