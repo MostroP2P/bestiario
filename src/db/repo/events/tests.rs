@@ -331,3 +331,111 @@ async fn an_empty_archive_can_speak_for_nothing() {
         None
     );
 }
+
+/// Records that `kind` was asked for from `from`, which is what a
+/// `--from`-bounded backfill or a resuming `sync` does.
+async fn asked_for_from(pool: &SqlitePool, kind: u16, from: i64) {
+    crate::db::repo::indexed_kinds::record(pool, kind, from, AUGUST)
+        .await
+        .expect("record");
+}
+
+#[tokio::test]
+async fn a_kind_the_relay_keeps_one_of_is_covered_from_when_it_was_asked_for() {
+    // Arrange: a relay keeps exactly one kind 30078 per publisher, so a
+    // backfill reaching back to January comes home with one stamped today
+    // however far back it asked. Its earliest stored event says when this
+    // archive started, not how far back the network can be spoken for.
+    let pool = migrated().await;
+    stored(&pool, "fee", 8383, JANUARY).await;
+    asked_for_from(&pool, 8383, JANUARY).await;
+    stored(&pool, "rates", 30078, AUGUST).await;
+    asked_for_from(&pool, 30078, JANUARY).await;
+
+    // Act
+    let both = earliest_created_at(&pool, &[8383, 30078], &EVERYTHING)
+        .await
+        .expect("read");
+
+    // Assert
+    assert_eq!(
+        both,
+        Some(JANUARY),
+        "the single copy the relay kept is not a floor"
+    );
+}
+
+#[tokio::test]
+async fn a_single_copy_kind_asked_for_late_still_bounds_the_floor() {
+    // Arrange: rates were only ever asked for from August, so January has
+    // no rates behind it whatever the archive happens to hold.
+    let pool = migrated().await;
+    stored(&pool, "fee", 8383, JANUARY).await;
+    stored(&pool, "rates", 30078, AUGUST).await;
+    asked_for_from(&pool, 30078, AUGUST).await;
+
+    // Act / Assert
+    assert_eq!(
+        earliest_created_at(&pool, &[8383, 30078], &EVERYTHING)
+            .await
+            .expect("read"),
+        Some(AUGUST)
+    );
+}
+
+#[tokio::test]
+async fn a_single_copy_kind_nobody_asked_for_falls_back_to_what_was_stored() {
+    // Arrange: nothing recorded the request, so the only evidence of how
+    // far back this kind reaches is the event itself. Conservative, and
+    // exactly what the floor was before `indexed_kinds` had a row.
+    let pool = migrated().await;
+    stored(&pool, "fee", 8383, JANUARY).await;
+    stored(&pool, "rates", 30078, AUGUST).await;
+
+    // Act / Assert
+    assert_eq!(
+        earliest_created_at(&pool, &[8383, 30078], &EVERYTHING)
+            .await
+            .expect("read"),
+        Some(AUGUST)
+    );
+}
+
+#[tokio::test]
+async fn a_single_copy_kind_neither_asked_for_nor_stored_speaks_for_nothing() {
+    let pool = migrated().await;
+    stored(&pool, "fee", 8383, JANUARY).await;
+
+    assert_eq!(
+        earliest_created_at(&pool, &[8383, 30078], &EVERYTHING)
+            .await
+            .expect("read"),
+        None
+    );
+}
+
+#[tokio::test]
+async fn an_instance_scoped_floor_is_not_lowered_by_a_network_wide_request() {
+    // Arrange: the reviewer's worry, made concrete. Alpha was backfilled
+    // from the beginning, so `indexed_kinds` records rates as asked for
+    // from 0 — a network-wide row, with no instance column to narrow. Beta
+    // joined in August. Reading that 0 as Beta's floor would report
+    // confirmed zeros for months before Beta existed.
+    let pool = migrated().await;
+    stored_by(&pool, "alpha-order", 38383, JANUARY, ALPHA).await;
+    stored_by(&pool, "alpha-rates", 30078, JANUARY, ALPHA).await;
+    asked_for_from(&pool, 30078, 0).await;
+    asked_for_from(&pool, 38383, 0).await;
+    stored_by(&pool, "beta-order", 38383, AUGUST, BETA).await;
+    stored_by(&pool, "beta-rates", 30078, AUGUST, BETA).await;
+
+    // Act
+    let beta = earliest_created_at(&pool, &[38383, 30078], &only(BETA))
+        .await
+        .expect("read");
+
+    // Assert: the scoped floor of the archive itself holds the line — a
+    // report can never reach back past the first event of the instance it
+    // covers, whatever an unscoped `indexed_kinds` row says.
+    assert_eq!(beta, Some(AUGUST));
+}

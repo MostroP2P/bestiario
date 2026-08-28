@@ -34,6 +34,25 @@ pub const INDEXED_KINDS: [u16; 6] = [
     relay_list::KIND,
 ];
 
+/// The kinds a relay holds exactly one of per publisher.
+///
+/// An instance publishes one profile, one rate sheet and one relay list,
+/// each replacing the last, so a relay has one copy of each however long it
+/// has been running. The rest accumulate: an order and a dispute are
+/// addressable per trade and a dev fee is not replaceable at all, so a relay
+/// holds as many as its retention allows and the oldest one says how far
+/// back that reaches.
+///
+/// The distinction matters to [`crate::db::repo::events::earliest_created_at`]
+/// alone, and only because the two are opposite there. For an accumulating
+/// kind the earliest event stored is evidence of reach. For one of these it
+/// is evidence of nothing but when this archive started: a backfill asking
+/// for January's rates is handed today's, and reading that as a coverage
+/// floor would move the floor of every report to the day the indexer was
+/// deployed — publishing an archive that holds the year as one that holds
+/// today.
+pub const SINGLE_COPY_KINDS: [u16; 3] = [info::KIND, rates::KIND, relay_list::KIND];
+
 /// A filter for one kind, narrowed to `range` and to whichever author set
 /// that kind is entitled to; `None` when this run must not ask for it at
 /// all.

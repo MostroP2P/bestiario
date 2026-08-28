@@ -416,10 +416,33 @@ floor. A kind nobody ever asked for is unknown history, and a report
 reading it can speak for no bucket at all rather than print zeros for
 months nothing looked at.
 
-All three floors are read within the report's own scope, so an
+Three kinds invert the second floor and are read from `indexed_kinds`
+whether or not the archive holds one: the instance profile (38385), the
+rate sheet (30078) and the relay list (10002). Each replaces the last, so a
+relay holds exactly one per publisher however far back a filter reaches —
+a backfill asking for January's rates is handed today's. Their earliest
+stored event therefore dates the archive rather than the history behind it,
+and taking it as a floor would pull every report forward to the day the
+indexer was deployed, publishing an archive that holds the year as one that
+holds today. What was asked for is the honest claim for a kind with no
+history to expire: the relay was asked from that floor and handed over
+everything it had. When nothing recorded the request, the earliest stored
+event stands in — the conservative reading.
+
+The two `events` floors are read within the report's own scope, so an
 `--instance` report is told how far back *that* instance was indexed. Only
 the instance half of the scope applies: `events` stores each event verbatim
 and carries no `network` column.
+
+`indexed_kinds` is keyed by kind alone and answers for the deployment, not
+for an instance: it records that a relay was asked, and a relay is asked
+about every instance at once. A scoped report is not told a wider reach
+because of it, because the first of the three floors is the earliest event
+*of that instance* — a report can never reach back past the instance it
+covers, whatever an unscoped row says. What the network-wide row cannot do
+is narrow the window further for one instance among several, and for a kind
+with a single relay-side copy there is no per-instance history to narrow it
+with.
 
 A report whose figures combine families takes the floor of every kind they
 read — the dispute rate divides disputes by the orders that left pending,
