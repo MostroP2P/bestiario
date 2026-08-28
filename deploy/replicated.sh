@@ -46,19 +46,43 @@ fi
 # nothing, or replicating over this one's bucket prefix. So the interval lives
 # here, in the process that already has the index.
 #
-# `publish` only reads the database. It computes, signs and sends; it stores
-# nothing. That is what makes this safe: two readers and one writer against one
-# SQLite file in WAL mode is ordinary, and litestream still sees exactly one
-# process writing.
+# `publish` reads the archive to compute the snapshot and writes once, at the
+# end: a single transaction recording the run and the documents it sent. So it
+# is a second writer, not a second reader — which is still ordinary for one
+# SQLite file in WAL mode, the two being serialised by the write lock and the
+# busy timeout the pool sets, and which litestream replicates like any other
+# write to the file it watches.
 #
 # BESTIARIO_PUBLISH_EVERY is a `sleep` duration, so `21600`, `6h` and `90m` all
 # work. Unset means never.
 publish_every() {
+    # A TERM from the shutdown below means "no more publications". It ends the
+    # wait for the next interval at once, but a publication already in flight
+    # is left to finish: the shell defers a trap until the foreground command
+    # returns, and that is exactly the behaviour wanted here. `publish` sends
+    # to the relays first and records what it sent afterwards, so a run killed
+    # between the two leaves documents on the relays that the archive does not
+    # know it published.
+    stopping=""
+    trap 'stopping=yes' TERM
+
     # The first publication waits out a whole interval rather than firing at
     # startup. A container that is crash-looping restarts every few seconds,
     # and publishing on each start would sign and broadcast a document storm
     # to the relays — the one failure here that other people would notice.
-    while sleep "$BESTIARIO_PUBLISH_EVERY"; do
+    while [ -z "$stopping" ]; do
+        # Slept in the background and waited for, rather than slept in the
+        # foreground: `wait` returns the moment the signal arrives, where
+        # `sleep 6h` as a foreground command would hold the trap — and the
+        # container's shutdown — for up to six hours.
+        sleep "$BESTIARIO_PUBLISH_EVERY" &
+        sleep_pid=$!
+        wait "$sleep_pid" || true
+        if [ -n "$stopping" ]; then
+            kill "$sleep_pid" 2>/dev/null || true
+            break
+        fi
+
         if bestiario publish; then
             echo "bestiario-replicated: published" >&2
         else
@@ -69,6 +93,37 @@ publish_every() {
         fi
     done
 }
+
+# A cadence is one environment variable away from being a document storm.
+# `sleep 0` returns immediately, so `0` — or `0s`, or `0.0` — would publish in
+# a tight loop: with a key, signing and broadcasting a snapshot as fast as the
+# relays accept it; without one, burning a core and filling the log. Anything
+# `sleep` cannot read at all is the same typo caught one step earlier.
+#
+# The check is a positive number with an optional unit, which is what the
+# documented values are. `sleep` on some systems takes more (`1h 30m`, `1d`);
+# refusing those costs an operator a unit conversion and is worth it here.
+publish_every_is_valid() {
+    every="${1%[smhd]}"
+    case "$every" in
+        # Not a number: empty, a stray character, or two decimal points.
+        '' | *[!0-9.]* | *.*.*) return 1 ;;
+    esac
+    # Zero in every spelling — `0`, `00`, `0.0`, `.0` — has no non-zero digit.
+    case "$every" in
+        *[1-9]*) return 0 ;;
+    esac
+    return 1
+}
+
+# Refused at startup, before the daemon is up, rather than left to be
+# discovered from the log of a worker that is publishing every few
+# milliseconds. It costs a crash loop, which the deployment already alerts on
+# and which names the variable and the value in its first line.
+if [ -n "${BESTIARIO_PUBLISH_EVERY:-}" ] && ! publish_every_is_valid "$BESTIARIO_PUBLISH_EVERY"; then
+    echo "bestiario-replicated: BESTIARIO_PUBLISH_EVERY is '${BESTIARIO_PUBLISH_EVERY}', which is not a positive sleep duration — use a value like 6h, 90m or 21600, or unset it to publish never" >&2
+    exit 1
+fi
 
 # Announced at startup, before anything can go wrong, so the logs say what the
 # worker intends to do rather than leaving it to be inferred from silence.
@@ -128,6 +183,51 @@ litestream restore -if-db-not-exists -if-replica-exists "$BESTIARIO_DB_PATH"
 # Started after the backfill, never during it: publishing halfway through the
 # history walk would sign a snapshot of a partial index and present it as the
 # network.
-[ -z "${BESTIARIO_PUBLISH_EVERY:-}" ] || publish_every &
+publisher=""
+if [ -n "${BESTIARIO_PUBLISH_EVERY:-}" ]; then
+    publish_every &
+    publisher=$!
+fi
 
-exec litestream replicate -exec "$command"
+# Supervised rather than `exec`ed, which is what having a second process here
+# costs. Under `exec` this shell would be replaced, App Platform's SIGTERM
+# would reach litestream alone, and the publisher — a sibling nobody is
+# waiting for — would be killed by the container going away, possibly in the
+# middle of a run and possibly after litestream had already replicated for the
+# last time. So the shell stays as pid 1 and shuts the two down in order.
+litestream replicate -exec "$command" &
+litestream=$!
+
+# The order is the whole point: the publisher is stopped and waited for first,
+# so that a publication in flight finishes and its record reaches the bucket,
+# and only then is litestream asked to stop replicating. A run longer than the
+# platform's grace period is still killed — the wait cannot buy more time than
+# the container has — but it is no longer cut short by a shutdown that had
+# nothing else left to do.
+terminating=""
+shutdown() {
+    terminating="yes"
+    if [ -n "$publisher" ]; then
+        kill -TERM "$publisher" 2>/dev/null || true
+        wait "$publisher" 2>/dev/null || true
+    fi
+    kill -TERM "$litestream" 2>/dev/null || true
+}
+trap shutdown TERM INT
+
+status=0
+wait "$litestream" || status=$?
+if [ -n "$terminating" ]; then
+    # A `wait` the signal interrupted returns 128+SIGTERM whatever litestream
+    # then goes on to do, so waiting a second time is how the shell holds the
+    # container open until the final pages have actually reached the bucket —
+    # and litestream's status afterwards is not something this `wait` can
+    # report anyway.
+    wait "$litestream" 2>/dev/null || true
+    # A shutdown that was asked for is not a failure. Exiting 143 here would
+    # make an ordinary deploy indistinguishable from the crash the deployment
+    # alerts on.
+    status=0
+fi
+
+exit "$status"
