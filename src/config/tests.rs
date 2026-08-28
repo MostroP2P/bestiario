@@ -623,3 +623,64 @@ fn rejects_a_per_instance_override_given_both_as_hex_and_as_npub() {
         }
     );
 }
+
+// ---- [publish] (docs/NOSTR-PUBLICATION.md §9.1)
+
+#[test]
+fn publication_defaults_to_the_relays_the_indexer_reads() {
+    // The useful default, and filled in on load rather than left as a
+    // rule: every reader after validation sees a real list.
+    let settings = Settings::from_toml_str(VALID).expect("valid");
+
+    assert_eq!(settings.publish.relays, settings.nostr.relays);
+    assert_eq!(
+        settings.publish.max_content_bytes,
+        bestiario_stats::publish::size::DEFAULT_MAX_CONTENT_BYTES
+    );
+}
+
+#[test]
+fn publication_relays_are_configured_separately_from_the_ones_read() {
+    // Reading a relay and writing to it are different trust decisions: an
+    // operator who indexes from a dozen relays has not agreed to sign
+    // events onto all twelve.
+    let toml = format!("{VALID}\n[publish]\nrelays = [\"wss://write.example\"]\n");
+
+    let settings = Settings::from_toml_str(&toml).expect("valid");
+
+    assert_eq!(settings.publish.relays, vec!["wss://write.example"]);
+    assert_ne!(settings.publish.relays, settings.nostr.relays);
+}
+
+#[test]
+fn a_publication_relay_that_is_not_a_websocket_is_refused() {
+    let toml = format!("{VALID}\n[publish]\nrelays = [\"https://relay.example\"]\n");
+
+    let error = Settings::from_toml_str(&toml).expect_err("not a websocket URL");
+
+    assert!(
+        error.to_string().contains("[publish].relays"),
+        "the message has to name the section that is wrong: {error}"
+    );
+}
+
+#[test]
+fn a_ceiling_of_zero_is_refused_rather_than_refusing_every_document() {
+    let toml = format!("{VALID}\n[publish]\nmax_content_bytes = 0\n");
+
+    let error = Settings::from_toml_str(&toml).expect_err("a ceiling of zero");
+
+    assert_eq!(
+        error.to_string(),
+        ValidationError::PublishCeilingIsZero.to_string()
+    );
+}
+
+#[test]
+fn a_ceiling_the_operator_sets_is_the_one_that_applies() {
+    let toml = format!("{VALID}\n[publish]\nmax_content_bytes = 16384\n");
+
+    let settings = Settings::from_toml_str(&toml).expect("valid");
+
+    assert_eq!(settings.publish.max_content_bytes, 16_384);
+}

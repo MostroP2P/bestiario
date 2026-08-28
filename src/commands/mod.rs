@@ -13,6 +13,7 @@ pub mod compare;
 pub mod instances;
 pub mod market;
 pub mod order;
+pub mod publish;
 pub mod query;
 pub mod range;
 pub mod rebuild;
@@ -72,6 +73,9 @@ async fn dispatch(context: &Context<'_>) -> Result<()> {
         }
         Command::Market { fiat } => market::run(context, fiat, now()).await,
         Command::Orders { order_id } => order::run(context, order_id, now()).await,
+        Command::Publish { dry_run, out } => {
+            publish::run(context, *dry_run, out.as_deref(), now()).await
+        }
         Command::Rebuild { from_raw } => rebuild::run(context, *from_raw).await,
         Command::Stats(stats) => match stats {
             StatsCommand::Orders { by } => stats::orders::run(context, *by, now()).await,

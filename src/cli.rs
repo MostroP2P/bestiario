@@ -112,6 +112,22 @@ pub enum Command {
         order_id: String,
     },
 
+    /// Compute the publishable snapshot of docs/NOSTR-PUBLICATION.md.
+    ///
+    /// Signs nothing and publishes nothing: `--dry-run` prints what would
+    /// be published, with sizes and hashes, and `--out` writes the same
+    /// documents as files.
+    Publish {
+        /// Print the snapshot — every document, its size and its payload
+        /// hash — without writing or signing anything.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Also write every document as `<d>.json` into this directory.
+        #[arg(long, value_name = "DIR")]
+        out: Option<PathBuf>,
+    },
+
     /// Regenerate the projections from the stored versions.
     Rebuild {
         /// Also regenerate the version tables from the raw events.

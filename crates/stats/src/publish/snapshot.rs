@@ -261,6 +261,18 @@ pub struct Document {
     pub period: Option<Window>,
 }
 
+impl Document {
+    /// The event's `content`: the envelope, serialised.
+    ///
+    /// The one place that says what goes on the wire, so the size gate of
+    /// §9.1 weighs the bytes the signer will sign. Weighing the payload
+    /// instead would let a document pass the gate and still be refused by
+    /// a relay, for the envelope around it.
+    pub fn content(&self) -> String {
+        serde_json::to_string(&self.envelope).expect("an envelope of plain data serialises")
+    }
+}
+
 /// Every document of one publication run (§7).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Snapshot {
