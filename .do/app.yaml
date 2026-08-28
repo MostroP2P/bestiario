@@ -27,12 +27,26 @@ workers:
       deploy_on_push: true
 
     instance_size_slug: apps-s-1vcpu-1gb
-    instance_count: 1
 
-    # `sync` follows the relays live. The image's CMD says the same thing;
-    # stating it here keeps the spec readable on its own and leaves room for
-    # `backfill` on a first run.
-    run_command: bestiario sync
+    # `backfill` walks the relays' history, `sync` follows them live, and the
+    # daemon needs both: `sync` alone subscribes from roughly now, so a
+    # deployment that skipped the backfill would report on the last few days
+    # and silently call it the network. Both are wrapped so the index is
+    # restored from Spaces before either runs and streamed back as they write.
+    #
+    # The backfill repeats on every restart, which is deliberate. It is
+    # idempotent — events already stored come back as duplicates and are
+    # dropped — and it costs a couple of minutes, in exchange for an index
+    # that repairs itself if the replica is ever lost or truncated.
+    # One command, no shell operators: run_command is not guaranteed to reach a
+    # shell, and one carrying `&&` exits non-zero before the daemon starts.
+    # BESTIARIO_BACKFILL_FIRST below asks for the history walk instead.
+    run_command: bestiario-replicated sync
+
+    # Not a knob. litestream's lock lives inside the SQLite file, so it cannot
+    # see a second container replicating the same bucket prefix; two instances
+    # would interleave writes into one replica and corrupt it.
+    instance_count: 1
 
     envs:
       # ---------------------------------------------------------------------
@@ -62,6 +76,14 @@ workers:
         scope: RUN_TIME
         value: "mainnet"
 
+      # `sync` alone subscribes from roughly now and never walks the relays'
+      # history, so the index would hold the last few days and present them as
+      # the network. Assembled inside deploy/replicated.sh, where a shell is
+      # guaranteed. Idempotent, so repeating it on every start is cheap.
+      - key: BESTIARIO_BACKFILL_FIRST
+        scope: RUN_TIME
+        value: "true"
+
       - key: BESTIARIO__INDEXER__BACKFILL_FROM
         scope: RUN_TIME
         value: "1735689600"
@@ -69,13 +91,53 @@ workers:
       # ---------------------------------------------------------------------
       # Where to write
       #
-      # The App Platform filesystem is ephemeral: this database is lost on
-      # every deploy, restart and rescale, and the index is rebuilt from the
-      # relays. Read docs/DEPLOY.md before treating it as durable storage.
+      # The App Platform filesystem is ephemeral, so /data survives nothing.
+      # litestream makes it a cache of a Spaces bucket instead: restored
+      # before the daemon starts, streamed back out as it writes. The index
+      # now outlives the container; see docs/DEPLOY.md.
+      #
+      # BESTIARIO__DATABASE__URL and BESTIARIO_DB_PATH must name the same
+      # file. Both are already set in the image and are repeated here only
+      # because a deployment that changes one has to change the other.
       # ---------------------------------------------------------------------
       - key: BESTIARIO__DATABASE__URL
         scope: RUN_TIME
         value: "sqlite:///data/bestiario.db"
+
+      - key: BESTIARIO_DB_PATH
+        scope: RUN_TIME
+        value: "/data/bestiario.db"
+
+      - key: LITESTREAM_BUCKET
+        scope: RUN_TIME
+        value: "mostro-bestiario-index"
+
+      # A prefix inside the bucket, not a filename. Two deployments sharing
+      # one prefix replicate over each other.
+      - key: LITESTREAM_PATH
+        scope: RUN_TIME
+        value: "bestiario"
+
+      - key: LITESTREAM_REGION
+        scope: RUN_TIME
+        value: "nyc3"
+
+      - key: LITESTREAM_ENDPOINT
+        scope: RUN_TIME
+        value: "nyc3.digitaloceanspaces.com"
+
+      # A Spaces key scoped to readwrite on that one bucket, and nothing
+      # else. Replace both placeholders before deploying; `doctl apps update`
+      # encrypts them in place.
+      - key: LITESTREAM_ACCESS_KEY_ID
+        scope: RUN_TIME
+        type: SECRET
+        value: "REPLACE_ME"
+
+      - key: LITESTREAM_SECRET_ACCESS_KEY
+        scope: RUN_TIME
+        type: SECRET
+        value: "REPLACE_ME"
 
       - key: RUST_LOG
         scope: RUN_TIME
@@ -109,14 +171,15 @@ workers:
 #
 # `jobs` run around a deploy and nowhere else, so the only shape available
 # would be a POST_DEPLOY job — and a job is a component of its own, with its
-# own container and its own ephemeral `/data`. It cannot read the SQLite
-# database the `indexer` worker has been filling: `bestiario publish` would
-# run against an empty archive and replace the addressable documents with
-# statistics computed from nothing.
+# own container and its own ephemeral `/data`. Without the litestream
+# variables above it starts from an empty database and `bestiario publish`
+# replaces the addressable documents with statistics computed from nothing;
+# with them, it is a second writer against one bucket prefix, which is the
+# one thing replication cannot survive.
 #
-# Publication therefore has to run where the archive is — inside the indexer
-# process, or against a database both components share. docs/DEPLOY.md
-# covers the options.
+# Publication therefore runs where the archive is: inside this worker, or
+# from a component with a LITESTREAM_PATH of its own. docs/DEPLOY.md covers
+# the options.
 
 alerts:
   - rule: DEPLOYMENT_FAILED
