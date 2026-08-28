@@ -1,6 +1,18 @@
 use super::*;
 use crate::metric::Value;
-use crate::publish::address::{Bucket, Resolution};
+use crate::publish::address::{Bucket, Month, Resolution, Year};
+
+/// A month bucket from plain numbers, as every test here writes one.
+fn month_of(year: i32, month: u32) -> Bucket {
+    Bucket::Month {
+        year: Year::new(year).expect("a four-digit year"),
+        month: Month::new(month).expect("a month of the year"),
+    }
+}
+
+fn year_of(year: i32) -> Bucket {
+    Bucket::Year(Year::new(year).expect("a four-digit year"))
+}
 
 /// 2026-08-27T00:00:00Z, a Thursday.
 const THURSDAY: i64 = 1_787_788_800;
@@ -183,16 +195,7 @@ fn the_month_partitions_roll_over_into_the_next_year() {
 
     assert_eq!(
         months,
-        vec![
-            Bucket::Month {
-                year: 2025,
-                month: 12
-            },
-            Bucket::Month {
-                year: 2026,
-                month: 1
-            },
-        ],
+        vec![month_of(2025, 12), month_of(2026, 1),],
         "December is followed by the January of the next year, not by a thirteenth month"
     );
 }
@@ -203,5 +206,5 @@ fn a_monthly_partition_is_a_year_and_it_spans_every_year_covered() {
 
     let years = across.partitions(Resolution::Monthly, JANUARY);
 
-    assert_eq!(years, vec![Bucket::Year(2025), Bucket::Year(2026)]);
+    assert_eq!(years, vec![year_of(2025), year_of(2026)]);
 }
