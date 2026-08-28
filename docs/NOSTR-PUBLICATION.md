@@ -1,9 +1,14 @@
 # bestiario — Nostr publication
 
-Status: draft v0.1 (2026-08-27). Companion to `docs/SPEC.md`, which stays the
+Status: draft v0.2 (2026-08-28). Companion to `docs/SPEC.md`, which stays the
 source of truth for schema, metrics and report formats. This document
 specifies one feature in full — publishing the computed figures as signed
 Nostr events — and is referenced from SPEC §13 as a phase of its own.
+
+This is the normative format. `docs/NOSTR-CLIENT.md` is the catalogue built
+on top of it: every document that is actually published and every figure
+inside it, written for somebody building a client rather than implementing
+the format.
 
 Section numbers of the form §N without a document name refer to this
 document. References into the main specification are written `SPEC §N`.
@@ -111,6 +116,7 @@ Examples:
 index
 summary:30d
 orders:7d
+orders:30d:i:6320ee5e…d425
 volume:30d:n:mainnet
 series:orders:daily:2026-01
 series:volume:monthly:2026
@@ -232,10 +238,13 @@ period outside it as zero; see §6.3.
 ### 5.1 Index growth
 
 The index grows with the number of partitions: roughly one entry per report
-per month. It will eventually approach the size limit of §9.1. When it does,
-it shards by year — `index:2026`, `index:2027` — with the unqualified `index`
-listing the hot documents, the resolutions available, and the year shards.
-The client algorithm (§10) is written so that this change is additive.
+per month. It also grows with the *network*, at five entries per instance for
+the scoped documents of §6.1.1 — a little under a kilobyte each, so a dozen
+instances is already the larger half of the index. It will eventually
+approach the size limit of §9.1. When it does, it shards by year —
+`index:2026`, `index:2027` — with the unqualified `index` listing the hot
+documents, the resolutions available, and the year shards. The client
+algorithm (§10) is written so that this change is additive.
 
 ## 6. Document formats
 
@@ -316,6 +325,68 @@ last_seen_at` and is the same shape, which is why the five `instances`
 documents restate on every run alongside the five `disputes` ones — and why
 those ten are re-signed whole even though most of what they carry is a
 profile that has not moved in weeks.
+
+#### 6.1.1 Scoped documents: one instance's orders, by currency
+
+The grammar of §3 admits a `scope` on any window document. What is actually
+published under one is the `orders` report, per instance:
+
+```
+orders:24h:i:<pubkey>
+orders:7d:i:<pubkey>
+orders:30d:i:<pubkey>
+orders:90d:i:<pubkey>
+orders:all:i:<pubkey>
+```
+
+One set per instance the archive knows — every instance the `instances`
+document of the same snapshot lists, whether or not it traded, for the same
+reason that document is published over an empty archive: a client cannot
+tell a document that does not exist from a relay withholding one.
+
+The payload is the report envelope of §6.1, and its metrics are the §6.1
+activity block twice over:
+
+- the instance's own figures, under the names the network-wide document
+  uses — `orders.created`, `orders.completed`, `orders.open_now` and the
+  rest, so one reader parses both scopes;
+- the same block again per currency that instance traded in the window,
+  with the code as a segment: `orders.ARS.created`, `orders.ARS.open_now`,
+  `orders.USD.created`.
+
+That cross of instance against currency is the one figure no other document
+carries. `instances` and `compare` give one row per instance and `market`
+gives the network's currency concentration; neither says that this instance
+has thirteen ARS orders and two USD ones.
+
+**The currency blocks partition the instance's orders.** An order names
+exactly one currency and belongs to exactly one instance, so a client may
+sum them — across currencies for the instance's total, across instances for
+the network's — and nothing is counted twice. This is not true of payment
+methods, which an order names several of and which are therefore attributed
+rather than divided (SPEC §6.3); it is why currencies get blocks and methods
+do not.
+
+A currency the instance never traded in the window has no block at all,
+rather than a block of zeros. Absence here is the §6.3 rule applied to a
+dimension instead of to a bucket: what is not published is what nobody
+published.
+
+**Why the network-wide `orders:<window>` carries no currency blocks.** It
+could, and the figures would be exactly the sum of these. What it could not
+carry is a *bounded* number of them. An instance's currencies are the
+handful it lists in its kind 38385; the network's are every code any
+instance has ever published, and nine figures per code over a hundred codes
+walks the largest document in the snapshot into the ceiling of §9.1 — where
+the failure mode is a run that publishes nothing at all. A client that wants
+the network's mix by currency sums the per-instance documents, which costs
+one extra `REQ` and has no such cliff.
+
+**Only `orders` is scoped.** The full cross product of report × window ×
+instance is forty documents per instance for figures that are, for the other
+seven reports, already published one row per instance in `compare` and
+`instances`. §13.4 is the standing question about widening this; the answer
+today is that it is not widened.
 
 ### 6.2 Series partitions
 
@@ -510,6 +581,29 @@ other, with its own `snapshot_id`, and the index goes last as always.
 Series partitions MUST NOT carry a NIP-40 `expiration` tag. Hot window
 documents MAY.
 
+### 9.4 Write volume
+
+§9.1 bounds how large a document may be; nothing so far bounds how *many* a
+run sends. A snapshot is now a burst: eight reports over five windows, the
+series partitions of every covered month and year, five documents per
+instance (§6.1.1), and the index. A dozen instances puts it above a hundred
+events, sent back to back over one connection.
+
+Relays meter writes. A limit in the tens of events per minute is ordinary,
+and a relay that hits one does not usually explain itself: it stops
+answering `OK`, and the documents it stopped answering for are the tail of
+the run. That failure is loud here rather than silent — a document no relay
+accepted fails the run and the index naming it is not sent (§7) — which is
+the right behaviour and not a comfortable one, because the run that fails
+is every run.
+
+Two things follow for an operator. Publish to relays whose write limits you
+know, ideally one you run (§13.2). And note that the skip of §8 does most
+of the work in the steady state: a run over an archive that gained a few
+orders re-sends the documents whose figures moved and the index, not the
+hundred. It is the first run against a fresh relay, and any `--republish`
+(§9.3), that sends everything at once.
+
 ## 10. Client algorithm
 
 Normative for `mostro.world` and recommended for any other consumer:
@@ -587,10 +681,15 @@ Aggregation stays in `crates/stats`, with no I/O, as everywhere else.
 3. **Auth** — relays requiring NIP-42 complicate every client for no benefit
    here. Proposal: the default relay set excludes them, and the daemon warns
    when a configured relay advertises it.
-4. **Per-instance series** — the full cross product (report × resolution ×
-   bucket × instance) is a large number of documents. Proposal: publish
-   per-instance series only for `orders` and `volume`, at monthly resolution,
-   and let the site fetch network-wide detail only.
+4. **Per-instance documents beyond `orders`** — the window half of this is
+   settled: `orders:<window>:i:<pubkey>` is published for every instance
+   (§6.1.1), because the cross of instance against currency exists nowhere
+   else. The rest is still open. Per-instance *series* remain unpublished —
+   the full cross product (report × resolution × bucket × instance) is a
+   large number of documents; the proposal, if they are ever wanted, is
+   `orders` and `volume` at monthly resolution only. Scoping the other six
+   window reports is likewise unpublished: `compare` and `instances` already
+   carry their per-instance figures a row at a time.
 5. **Signature verification in-browser** — which library, and whether the
    site fails closed (render nothing) or degrades to the static snapshot with
    a visible warning. Proposal: fail closed for signature failure, degrade for

@@ -2,10 +2,12 @@
 //!
 //! Every document of a publication run, computed from one reading of the
 //! archive and sharing one `snapshot_id`: the window documents of §6.1,
-//! carrying the SPEC §10 metric records verbatim, and the series partitions
-//! of §6.2 in their columnar form. Each comes with the hash of §5, taken
-//! over its `payload` alone — the figures, never the clock around them —
-//! so that "did this document change" is a question about the answer.
+//! carrying the SPEC §10 metric records verbatim; the per-instance `orders`
+//! documents of §6.1.1, which are window documents narrowed to one scope;
+//! and the series partitions of §6.2 in their columnar form. Each comes
+//! with the hash of §5, taken over its `payload` alone — the figures, never
+//! the clock around them — so that "did this document change" is a question
+//! about the answer.
 //!
 //! # One aggregation, not two
 //!
@@ -40,13 +42,16 @@
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+use crate::activity::{self, Order};
 use crate::bucket::Coverage;
 use crate::metric::{Metric, MetricKind, Value};
 use crate::series::{self, Data};
 use crate::window::{Period, Window};
 use crate::{compare, instances, market, summary};
 
-use super::address::{Address, Bucket, Partition as Slot, Report, Resolution, Window as Span};
+use super::address::{
+    Address, Bucket, Partition as Slot, Report, Resolution, Scope, Window as Span,
+};
 use super::document::{Envelope, Run, rfc3339};
 
 /// A half-open span as the documents write it: RFC 3339, UTC.
@@ -153,6 +158,72 @@ fn window_metrics(report: Report, data: &Data, window: Window, now: i64) -> Vec<
             now,
         ),
     }
+}
+
+/// The reports published narrowed to one instance (§3 `scope`).
+///
+/// Only `orders`, and the restraint is the point. The address grammar
+/// admits a scope on every report, so the cross product of report ×
+/// window × instance is available and is exactly what §13.4 warns about:
+/// eight reports over five windows is forty documents *per instance*,
+/// for figures that are mostly already published one row per instance in
+/// `compare` and `instances`. What those two cannot carry is the cross of
+/// instance against currency — a block per currency per instance would be
+/// a document of its own inside a network-wide one — and that is the gap
+/// these documents fill.
+pub const SCOPED_REPORTS: [Report; 1] = [Report::Orders];
+
+/// The figures of an instance-scoped `orders` document (§6.1.1): the
+/// instance's own activity block, and one such block per currency it
+/// traded in the window.
+///
+/// The whole-scope block comes first and is the same nine figures the
+/// network-wide document carries, so a client reads `orders.created` the
+/// same way whatever the scope; the per-currency blocks add the segment
+/// the slice is named by — `orders.ARS.created` — exactly as
+/// `stats orders --by fiat` names them.
+///
+/// # Why the currency blocks are here and not in the network document
+///
+/// An order names exactly one currency and belongs to exactly one
+/// instance, so the currency blocks *partition* the instance's orders and
+/// a client may sum them: across currencies for the instance's total,
+/// across instances for the network's. Nothing is attributed twice, which
+/// is not true of payment methods (see [`crate::market`]) and is why they
+/// get no such treatment.
+///
+/// That is also the answer to the obvious question — why the network-wide
+/// `orders:<window>` document carries no currency blocks. It could, and
+/// the figures would be the sum of these; what it cannot carry is a
+/// bounded number of them. An instance's currencies are the handful it
+/// lists in its 38385, while the network's are every code any instance
+/// ever published, and nine figures per code over a hundred codes is the
+/// largest document in the snapshot walking into the ceiling of §9.1 —
+/// where the failure mode is a publication run that refuses to publish
+/// anything at all. Summing the per-instance documents gives the client
+/// the same answer with no such cliff.
+/// `own` is that instance's orders and nothing else — the whole history in
+/// scope, not the window's, since the deltas need the period before and
+/// the `_now` counts need every live order. Taken as a slice rather than
+/// filtered here because the five windows of one instance are five calls
+/// over the same orders, and re-selecting them per window would walk the
+/// network's whole order list five times per instance for an answer that
+/// does not depend on the window at all.
+pub fn instance_metrics(
+    own: &[Order],
+    window: Window,
+    coverage: Coverage,
+    now: i64,
+) -> Vec<Metric> {
+    let mut metrics = activity::metrics("orders", &activity::summarise(own, window, now));
+    metrics.extend(activity::report(
+        own,
+        window,
+        now,
+        Some(activity::Dimension::Fiat),
+        coverage,
+    ));
+    metrics
 }
 
 /// The series family behind a report, for the reports that have one.
@@ -430,6 +501,49 @@ impl Snapshot {
                             period: Some(partition.period),
                         });
                     }
+                }
+            }
+        }
+
+        // The scoped documents last, so the network-wide ones a client
+        // renders first are also the ones a listing reads first. Profiles
+        // come in the order the archive gave them, which is the order the
+        // `instances` document lists them in.
+        for profile in &data.profiles {
+            // A pubkey the grammar of §3 cannot name has no address, and a
+            // document published under a `d` that `Address::parse` refuses
+            // is one no conforming client will ever construct. Skipped
+            // rather than published unfetchably; an indexed pubkey is 32
+            // bytes rendered as lowercase hex, so this is a guard on the
+            // type and not on anything the network has been seen to do.
+            let Some(scope) = Scope::instance(&profile.pubkey) else {
+                continue;
+            };
+            let own: Vec<Order> = data
+                .orders
+                .iter()
+                .filter(|order| order.pubkey == profile.pubkey)
+                .cloned()
+                .collect();
+            for report in SCOPED_REPORTS {
+                for span in Span::ALL {
+                    let window = window_of(span, coverage, now);
+                    let metrics = instance_metrics(&own, window, coverage, now);
+                    let payload = window_payload(window, &metrics);
+                    documents.push(Document {
+                        address: Address::Window {
+                            report,
+                            window: span,
+                            scope: Some(scope.clone()),
+                        },
+                        hash: hash_of(&payload),
+                        updated_at: now,
+                        envelope: Envelope::first(
+                            &run,
+                            serde_json::to_value(&payload).expect("plain data"),
+                        ),
+                        period: None,
+                    });
                 }
             }
         }

@@ -29,9 +29,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use nostr_sdk::local_relay::{LocalRelay, LocalRelayBuilder, RateLimit};
 use nostr_sdk::prelude::{
-    Client, Event, EventBuilder, Filter, FinalizeEvent as _, Keys, Kind, MockRelay, PublicKey,
-    SecretKey, Tag,
+    Client, Event, EventBuilder, Filter, FinalizeEvent as _, Keys, Kind, PublicKey, SecretKey, Tag,
 };
 use tempfile::TempDir;
 
@@ -295,7 +295,7 @@ fn envelope(stdout: &str, command: &str) -> serde_json::Value {
 #[tokio::test(flavor = "multi_thread")]
 async fn backfill_then_every_report_against_the_local_relay() {
     // Arrange
-    let relay = MockRelay::run().await.expect("start the local relay");
+    let relay = local_relay().await;
     let events = fixtures();
     for event in &events {
         relay.add_event(event.clone()).await.expect("seed");
@@ -424,6 +424,23 @@ async fn backfill_then_every_report_against_the_local_relay() {
     again["generated_at"] = serde_json::Value::Null;
     assert_eq!(again, summary, "rebuild changed the summary");
 
+    // The documents themselves, written out under the dump directory when
+    // one is given, so `docs/NOSTR-CLIENT.md` — the catalogue a client
+    // author reads — can be checked against a real snapshot rather than
+    // against a memory of one.
+    if let Some(dir) = &dump_dir {
+        let documents = dir.join("documents");
+        bestiario(
+            &settings,
+            &[
+                "publish",
+                "--dry-run",
+                "--out",
+                documents.to_str().expect("a utf-8 dump path"),
+            ],
+        );
+    }
+
     // Act: publish the snapshot for real — signed, to the relay the
     // fixtures came from. `--dry-run` has already run above, as one of the
     // README's examples; this is the half of §12 that a key turns on.
@@ -483,9 +500,16 @@ async fn backfill_then_every_report_against_the_local_relay() {
     // `instances` windows, where `silent_for` is `now - last_seen_at` — the
     // same shape, and the reason those documents are re-signed whole every
     // run despite carrying mostly static profile figures.
+    //
+    // The per-instance `orders` documents (§6.1.1) are all in the
+    // unchanged count, which is the check that matters for them: their
+    // figures are counts over a window anchored to the archive, so an
+    // instance that traded nothing in the intervening second restates
+    // nothing — sixty documents that cost a run with no new events
+    // nothing at all.
     let again = bestiario_at(&settings, &["publish"], SECOND_RUN);
     assert!(
-        again.contains("10 document(s) sent, 42 unchanged"),
+        again.contains("10 document(s) sent, 102 unchanged"),
         "a second run over an unchanged archive re-signed figures that did not move: {again}"
     );
     assert_eq!(
@@ -658,8 +682,32 @@ async fn backfill_then_every_report_against_the_local_relay() {
     assert_eq!(runs.len(), 1, "one publication, one snapshot_id: {runs:?}");
 }
 
+/// The local relay this test publishes to, with a write rate limit that a
+/// whole snapshot fits under.
+///
+/// `MockRelay::run` defaults to 60 notes per minute, and a snapshot is
+/// more events than that: eight reports over five windows, the series
+/// partitions, and an `orders` document per instance (§6.1.1). Under the
+/// default the tail of the run is dropped by the relay and the test fails
+/// on a limit of the harness rather than on anything about the format.
+///
+/// Raised rather than worked around, because what it would otherwise be
+/// testing is the rate limit. The production shape of this constraint is
+/// real and is stated in `docs/NOSTR-PUBLICATION.md` §9.4: a snapshot is a
+/// burst of writes, and a relay that meters them drops the tail.
+async fn local_relay() -> LocalRelay {
+    let relay = LocalRelayBuilder::default()
+        .rate_limit(RateLimit {
+            notes_per_minute: 10_000,
+            ..RateLimit::default()
+        })
+        .build();
+    relay.run().await.expect("start the local relay");
+    relay
+}
+
 /// Every kind 30666 document the relay is holding.
-async fn relay_documents(relay: &MockRelay) -> Vec<Event> {
+async fn relay_documents(relay: &LocalRelay) -> Vec<Event> {
     let client = Client::default();
     client.add_relay(relay.url().await).await.expect("add");
     client.connect().await;
