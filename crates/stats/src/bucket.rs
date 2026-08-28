@@ -7,13 +7,17 @@
 //!
 //! # Why an empty bucket is not the same as an absent one
 //!
-//! A day nobody traded is a fact, and it is reported as zero. A day before
-//! the archive begins is not: relays keep orders for about a fortnight, so
-//! a series reaching back past the first backfill would show zeros for days
-//! the network was busy — a flat line nobody published, and the most
-//! misleading thing a chart of this data could draw. Those buckets report
-//! `—` instead, keeping their rows and their names so a consumer sees the
-//! shape of the window and the hole in it.
+//! A day nobody traded is a fact, and it is reported as zero. A day
+//! outside what the archive holds is not: relays keep orders for about a
+//! fortnight, so a series reaching back past the first backfill would show
+//! zeros for days the network was busy — a flat line nobody published, and
+//! the most misleading thing a chart of this data could draw. Those buckets
+//! report `—` instead, keeping their rows and their names so a consumer
+//! sees the shape of the window and the hole in it.
+//!
+//! The rule is the same at the other end, when the extent has one: a day
+//! past the archive's last event is a day nobody indexed, and drawing it at
+//! zero is the same flat line read the other way round.
 
 use crate::metric::Metric;
 use crate::window::{Period, Window};
@@ -24,15 +28,17 @@ pub struct Coverage {
     /// `created_at` of the earliest stored event; `None` when the archive
     /// holds none, and then it can speak for nothing.
     earliest: Option<i64>,
-    /// `created_at` of the latest stored event.
+    /// `created_at` of the latest stored event; `None` when the extent
+    /// was never read, and then there is no ceiling to enforce.
     ///
-    /// Reported, never enforced: `covers` does not consult it, because a
-    /// bucket after the last event is a period the archive *can* speak
-    /// for — nothing happened in it, and zero is the honest answer there.
-    /// Only the floor would lie. It lives here because the index of
-    /// `docs/NOSTR-PUBLICATION.md` §5 states the extent at both ends, and
-    /// that extent is a fact about the same archive this type already
-    /// describes.
+    /// Enforced like the floor. `docs/NOSTR-PUBLICATION.md` §6.3 puts
+    /// both ends under one rule — a bucket outside `coverage` is `null`
+    /// in every column, a partition wholly outside it is no document —
+    /// and §5 has a client take that `coverage` from the index. An
+    /// archive that published zeros past its own stated ceiling would
+    /// contradict the block a client reads to know what the zeros mean,
+    /// which is the flat line §6.3 exists to prevent, drawn at the other
+    /// end.
     latest: Option<i64>,
 }
 
@@ -69,11 +75,15 @@ impl Coverage {
 
     /// Whether `window` reaches into what the archive holds.
     ///
-    /// A window that straddles the first event is covered: part of it is
-    /// answerable, and the figures say what was published in that part.
+    /// Overlap, not containment: a window that straddles either end is
+    /// covered, because part of it is answerable and the figures say what
+    /// was found in that part. Only a window entirely before the first
+    /// event or entirely after the last is not. The window is half-open,
+    /// so a window opening exactly on the last event still holds it.
     pub fn covers(&self, window: Window) -> bool {
         self.earliest
             .is_some_and(|earliest| window.until > earliest)
+            && self.latest.is_none_or(|latest| window.from <= latest)
     }
 
     /// `created_at` of the earliest stored event, if there is one.
@@ -87,10 +97,16 @@ impl Coverage {
     }
 
     /// The series partitions the archive can speak for at `resolution`,
-    /// from the one holding its earliest event to the one holding `now`,
-    /// oldest first — what a publication run has to compute
-    /// (`docs/NOSTR-PUBLICATION.md` §6.3: a partition entirely outside
-    /// coverage is no document).
+    /// from the one holding its earliest event to the one holding the
+    /// last of `latest` and `now`, oldest first — what a publication run
+    /// has to compute (`docs/NOSTR-PUBLICATION.md` §6.3: a partition
+    /// entirely outside coverage is no document).
+    ///
+    /// The ceiling is the extent's, not the clock's: a run in September
+    /// over an archive whose last event is in August has no September
+    /// partition to publish, and offering one would put a month of
+    /// invented zeros under a `coverage` block that says the archive
+    /// stops in August.
     pub fn partitions(
         &self,
         resolution: crate::publish::address::Resolution,
@@ -102,9 +118,10 @@ impl Coverage {
         let Some(earliest) = self.earliest.filter(|earliest| *earliest <= now) else {
             return Vec::new();
         };
+        let until = self.latest.map_or(now, |latest| latest.min(now));
         let (Some(first), Some(last)) = (
             DateTime::<Utc>::from_timestamp(earliest, 0),
-            DateTime::<Utc>::from_timestamp(now, 0),
+            DateTime::<Utc>::from_timestamp(until, 0),
         ) else {
             return Vec::new();
         };

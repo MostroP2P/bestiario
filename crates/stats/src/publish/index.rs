@@ -14,8 +14,21 @@
 //!    revision and a fresh signature on every run, and the skip of §8,
 //!    the cache of §10 and the point of `revision` would all be dead
 //!    letters.
-//! 3. **What is current.** The `snapshot_id` of §7, carried by the
-//!    envelope like every other document's.
+//! 3. **What is current.** The `snapshot_id` of §7, named at the top
+//!    level of the index itself.
+//!
+//! # The one document with no envelope
+//!
+//! §6 splits every other document into the run and the `payload` it
+//! wraps, and hashes only the payload. The index is the stated exception:
+//! nothing hashes it — it is what the hashes are *in* — and it is
+//! republished on every run by definition. So `publisher`, `coverage`,
+//! `resolutions` and `documents` sit at the top level beside
+//! `schema_version`, `snapshot_id` and `generated_at`, with no `payload`
+//! to nest them under and no `revision` to count. §10 has a client read
+//! `snapshot_id`, `coverage` and `resolutions` straight off the index;
+//! wrapping them a level deeper would put them where no conforming client
+//! looks.
 //!
 //! `coverage` states the archive's real extent, both ends. A client MUST
 //! NOT render a period outside it as zero (§6.3) — which is what makes an
@@ -37,7 +50,7 @@ use std::collections::BTreeMap;
 use serde::Serialize;
 
 use super::address::Address;
-use super::document::{Envelope, rfc3339};
+use super::document::{SCHEMA_VERSION, rfc3339};
 use super::snapshot::{Document, Snapshot};
 
 /// Who published a snapshot, as the index names them.
@@ -82,19 +95,42 @@ pub struct Entry {
     pub restated_because: Option<String>,
 }
 
-/// The `payload` of the index document.
+/// The index document (§5), whole.
+///
+/// The one document with no envelope/payload split: nothing hashes the
+/// index — it is what the hashes are *in* — and it is republished on
+/// every run by definition, since naming the current snapshot is its
+/// whole job. So there is no `payload` to hash and no `revision` to
+/// count, and `publisher`, `coverage`, `resolutions` and `documents` sit
+/// at the top level beside the run's own fields, which is where §10 has a
+/// client read them.
+///
+/// Field order is part of the format — the run first, the answer after —
+/// and serde keeps declaration order, so the struct *is* the order.
 ///
 /// `resolutions` is a `BTreeMap` rather than an insertion-ordered map for
-/// the same reason every other payload here serialises deterministically:
-/// §8 skips a document whose payload has not changed, and a map that
-/// ordered its keys by chance would make the index a new revision on
-/// every run.
+/// the same reason every other document here serialises deterministically:
+/// §8 skips a document whose figures have not changed, and a map that
+/// ordered its keys by chance would give the index new bytes, and clients
+/// a new event to re-verify, on every run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct Payload {
+pub struct Index {
+    pub schema_version: u32,
+    pub snapshot_id: String,
+    /// RFC 3339, UTC.
+    pub generated_at: String,
     pub publisher: Publisher,
     pub coverage: Extent,
     pub resolutions: BTreeMap<String, Available>,
     pub documents: Vec<Entry>,
+}
+
+impl Index {
+    /// The `d` an index is published under (§3) — the only address a
+    /// client has to know a priori.
+    pub fn address(&self) -> Address {
+        Address::Index { year: None }
+    }
 }
 
 impl Snapshot {
@@ -102,8 +138,11 @@ impl Snapshot {
     ///
     /// The index is not one of them: it is how a client finds the rest,
     /// and an index listing itself would be a hash of a hash of itself.
-    pub fn index(&self, publisher: &Publisher) -> Document {
-        let payload = Payload {
+    pub fn index(&self, publisher: &Publisher) -> Index {
+        Index {
+            schema_version: SCHEMA_VERSION,
+            snapshot_id: self.run.snapshot_id.clone(),
+            generated_at: rfc3339(self.run.generated_at),
             publisher: publisher.clone(),
             coverage: Extent {
                 first_event_at: self.coverage.earliest().map(rfc3339),
@@ -111,16 +150,6 @@ impl Snapshot {
             },
             resolutions: resolutions(&self.documents),
             documents: self.documents.iter().map(entry).collect(),
-        };
-
-        Document {
-            address: Address::Index { year: None },
-            hash: super::snapshot::hash_of(&payload),
-            envelope: Envelope::first(
-                &self.run,
-                serde_json::to_value(&payload).expect("plain data"),
-            ),
-            period: None,
         }
     }
 }
