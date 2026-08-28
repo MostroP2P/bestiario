@@ -39,9 +39,49 @@ if [ "${BESTIARIO_BACKFILL_FIRST:-}" = "true" ]; then
     backfill_first="yes"
 fi
 
+# Publication, on an interval, beside the daemon.
+#
+# App Platform has no scheduler and a POST_DEPLOY job would be a second
+# container with its own empty /data — publishing statistics computed from
+# nothing, or replicating over this one's bucket prefix. So the interval lives
+# here, in the process that already has the index.
+#
+# `publish` only reads the database. It computes, signs and sends; it stores
+# nothing. That is what makes this safe: two readers and one writer against one
+# SQLite file in WAL mode is ordinary, and litestream still sees exactly one
+# process writing.
+#
+# BESTIARIO_PUBLISH_EVERY is a `sleep` duration, so `21600`, `6h` and `90m` all
+# work. Unset means never.
+publish_every() {
+    # The first publication waits out a whole interval rather than firing at
+    # startup. A container that is crash-looping restarts every few seconds,
+    # and publishing on each start would sign and broadcast a document storm
+    # to the relays — the one failure here that other people would notice.
+    while sleep "$BESTIARIO_PUBLISH_EVERY"; do
+        if bestiario publish; then
+            echo "bestiario-replicated: published" >&2
+        else
+            # A failed publication must not end the loop. Relays refuse
+            # connections, keys expire, and the next interval is a better
+            # answer than a worker that has quietly stopped publishing.
+            echo "bestiario-replicated: publish failed, next attempt in ${BESTIARIO_PUBLISH_EVERY}" >&2
+        fi
+    done
+}
+
+# Announced at startup, before anything can go wrong, so the logs say what the
+# worker intends to do rather than leaving it to be inferred from silence.
+if [ -n "${BESTIARIO_PUBLISH_EVERY:-}" ]; then
+    echo "bestiario-replicated: publishing every ${BESTIARIO_PUBLISH_EVERY}" >&2
+else
+    echo "bestiario-replicated: BESTIARIO_PUBLISH_EVERY is unset, not publishing" >&2
+fi
+
 if [ -z "${LITESTREAM_BUCKET:-}" ]; then
     echo "bestiario-replicated: LITESTREAM_BUCKET is unset, running without replication" >&2
     [ -z "$backfill_first" ] || bestiario backfill
+    [ -z "${BESTIARIO_PUBLISH_EVERY:-}" ] || publish_every &
     exec bestiario "$@"
 fi
 
@@ -84,5 +124,10 @@ litestream restore -if-db-not-exists -if-replica-exists "$BESTIARIO_DB_PATH"
 # redoes it on the next start, which is exactly what an idempotent backfill is
 # for.
 [ -z "$backfill_first" ] || bestiario backfill
+
+# Started after the backfill, never during it: publishing halfway through the
+# history walk would sign a snapshot of a partial index and present it as the
+# network.
+[ -z "${BESTIARIO_PUBLISH_EVERY:-}" ] || publish_every &
 
 exec litestream replicate -exec "$command"

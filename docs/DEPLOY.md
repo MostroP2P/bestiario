@@ -216,6 +216,44 @@ come back. The replica *is* the durable copy; the relays are not a backup of
 it. A deployment that cannot accept that risk wants Postgres, not a second
 replica.
 
+## Publishing on an interval
+
+App Platform has no scheduler, and a `POST_DEPLOY` job is not one: it is a
+second container with its own empty `/data`, which either publishes
+statistics computed from nothing or replicates over this worker's bucket
+prefix. So the interval lives in the worker, in the process that already has
+the index.
+
+```
+BESTIARIO_PUBLISH_EVERY=6h
+```
+
+A `sleep` duration — `21600`, `6h` and `90m` all work. Unset means never, and
+the wrapper says which of the two it is in its first line of log, so silence
+is never ambiguous.
+
+This is safe beside `sync` because `publish` only reads: it computes, signs
+and sends, and stores nothing. Two readers and one writer against one SQLite
+file in WAL mode is ordinary, and litestream still sees exactly one process
+writing.
+
+Three behaviours worth knowing before choosing a value:
+
+- **The first publication waits out a whole interval.** Publishing at startup
+  would mean a crash-looping container signing and broadcasting a document
+  storm. The cost is that an interval longer than the worker's uptime
+  publishes nothing, ever, and says nothing about it — keep it comfortably
+  shorter than the gap between deploys.
+- **It starts after the backfill, never during.** Publishing halfway through
+  the history walk would sign a snapshot of a partial index and present it as
+  the network.
+- **A failed publication does not end the loop.** Relays refuse connections
+  and keys expire; the next interval is a better answer than a worker that
+  has quietly stopped publishing. Each failure is logged.
+
+Changing the cadence is an env var, so `doctl apps update` with an edited
+spec — no rebuild.
+
 ## What is watched, and what is not
 
 A worker has no health check, because it listens on nothing. App Platform

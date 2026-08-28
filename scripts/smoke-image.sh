@@ -95,6 +95,21 @@ check "without a bucket the wrapper runs the daemon unreplicated" 1 \
     -e "BESTIARIO__INDEXER__INSTANCES=$INSTANCE" \
     -- summary
 
+# The publication interval announces itself at startup, so that a worker that
+# is not publishing says so rather than being indistinguishable from one that
+# is publishing and failing quietly.
+check "an unset interval is announced, not assumed" 1 \
+    "BESTIARIO_PUBLISH_EVERY is unset, not publishing" \
+    -e "BESTIARIO__NOSTR__RELAYS=wss://relay.example" \
+    -e "BESTIARIO__INDEXER__INSTANCES=$INSTANCE" \
+    -- summary
+
+check "a set interval is announced" 1 "publishing every 6h" \
+    -e "BESTIARIO__NOSTR__RELAYS=wss://relay.example" \
+    -e "BESTIARIO__INDEXER__INSTANCES=$INSTANCE" \
+    -e "BESTIARIO_PUBLISH_EVERY=6h" \
+    -- summary
+
 if [[ "$failures" -ne 0 ]]; then
     printf '\n%s smoke check(s) failed\n' "$failures" >&2
     exit 1
