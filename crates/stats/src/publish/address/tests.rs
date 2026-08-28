@@ -275,3 +275,37 @@ fn a_year_and_a_month_hold_only_the_numbers_the_grammar_spells() {
     // A year renders padded, which is what makes `0007` a round trip.
     assert_eq!(Year::new(7).expect("a year").to_string(), "0007");
 }
+
+// ---- constructing a scope, rather than parsing one (§3)
+
+#[test]
+fn an_instance_scope_is_built_only_from_a_pubkey_the_grammar_can_name() {
+    // Arrange / Act / Assert — the same rule `parse` enforces, applied to
+    // the other direction: a scope that cannot be built is a document
+    // that is never addressed, rather than one addressed unfetchably.
+    assert_eq!(
+        Scope::instance(PUBKEY),
+        Some(Scope::Instance(PUBKEY.to_string()))
+    );
+    assert_eq!(Scope::instance(&PUBKEY[..32]), None);
+    assert_eq!(Scope::instance(&PUBKEY.to_uppercase()), None);
+    assert_eq!(Scope::instance(""), None);
+}
+
+#[test]
+fn a_built_instance_scope_renders_to_an_address_that_parses_back() {
+    // Arrange
+    let scope = Scope::instance(PUBKEY).expect("a pubkey the grammar can name");
+    let address = Address::Window {
+        report: Report::Orders,
+        window: Window::Days30,
+        scope: Some(scope.clone()),
+    };
+
+    // Act
+    let rendered = address.to_string();
+
+    // Assert
+    assert_eq!(rendered, format!("orders:30d:i:{PUBKEY}"));
+    assert_eq!(Address::parse(&rendered), Ok(address));
+}
