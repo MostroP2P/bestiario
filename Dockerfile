@@ -57,11 +57,28 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
+# litestream replicates the index to object storage, so that a container with
+# a clean filesystem restores it instead of rebuilding it from the relays.
+# See deploy/replicated.sh and docs/DEPLOY.md.
+#
+# Pinned by version *and* by checksum: this binary is fetched over the network
+# at build time from outside the repository, and a tag can be moved.
+ARG LITESTREAM_VERSION=0.5.16
+ARG LITESTREAM_SHA256=9e29112380a942e4a62ee07773684396cb8b308dc4d67e130bef41f75e937f0a
+ADD https://github.com/benbjohnson/litestream/releases/download/v${LITESTREAM_VERSION}/litestream-${LITESTREAM_VERSION}-linux-x86_64.tar.gz /tmp/litestream.tar.gz
+RUN echo "${LITESTREAM_SHA256}  /tmp/litestream.tar.gz" | sha256sum -c - \
+ && tar -xzf /tmp/litestream.tar.gz -C /usr/local/bin litestream \
+ && rm /tmp/litestream.tar.gz \
+ && litestream version
+
 # Unprivileged: the daemon reads relays and writes one SQLite file, and needs
 # nothing that root would give it.
 RUN useradd --system --create-home --uid 10001 bestiario
 
 COPY --from=builder /src/target/release/bestiario /usr/local/bin/bestiario
+COPY deploy/litestream.yml /etc/litestream.yml
+COPY deploy/replicated.sh /usr/local/bin/bestiario-replicated
+RUN chmod 0755 /usr/local/bin/bestiario-replicated
 
 # The working directory doubles as the database directory. On App Platform it
 # is ephemeral — see docs/DEPLOY.md for what that costs and how to avoid it.
@@ -72,7 +89,16 @@ USER bestiario
 # No settings.toml is shipped. The image is configured entirely through
 # BESTIARIO__* (src/config/mod.rs), which is why a missing file at the default
 # path is not an error.
-ENV BESTIARIO__DATABASE__URL="sqlite:///data/bestiario.db"
+#
+# The two database variables name the same file and are declared together so
+# they cannot drift apart: bestiario is told a SQLite URL, litestream is told a
+# filesystem path, and replicating a different file than the daemon writes
+# would back up an empty database without ever failing.
+ENV BESTIARIO_DB_PATH="/data/bestiario.db" \
+    BESTIARIO__DATABASE__URL="sqlite:///data/bestiario.db"
 
-ENTRYPOINT ["/usr/local/bin/bestiario"]
+# The wrapper, not the binary, so that one image has one contract. With no
+# bucket configured it execs bestiario unchanged, which is what every local
+# `docker run … summary` gets; with one, the same invocation replicates.
+ENTRYPOINT ["/usr/local/bin/bestiario-replicated"]
 CMD ["sync"]

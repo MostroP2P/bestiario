@@ -27,12 +27,16 @@ workers:
       deploy_on_push: true
 
     instance_size_slug: apps-s-1vcpu-1gb
-    instance_count: 1
 
-    # `sync` follows the relays live. The image's CMD says the same thing;
-    # stating it here keeps the spec readable on its own and leaves room for
-    # `backfill` on a first run.
-    run_command: bestiario sync
+    # `sync` follows the relays live, wrapped so the index is restored from
+    # Spaces before it starts and streamed back as it writes. `bestiario sync`
+    # alone still works and still loses the database on every deploy.
+    run_command: bestiario-replicated sync
+
+    # Not a knob. litestream's lock lives inside the SQLite file, so it cannot
+    # see a second container replicating the same bucket prefix; two instances
+    # would interleave writes into one replica and corrupt it.
+    instance_count: 1
 
     envs:
       # ---------------------------------------------------------------------
@@ -69,13 +73,53 @@ workers:
       # ---------------------------------------------------------------------
       # Where to write
       #
-      # The App Platform filesystem is ephemeral: this database is lost on
-      # every deploy, restart and rescale, and the index is rebuilt from the
-      # relays. Read docs/DEPLOY.md before treating it as durable storage.
+      # The App Platform filesystem is ephemeral, so /data survives nothing.
+      # litestream makes it a cache of a Spaces bucket instead: restored
+      # before the daemon starts, streamed back out as it writes. The index
+      # now outlives the container; see docs/DEPLOY.md.
+      #
+      # BESTIARIO__DATABASE__URL and BESTIARIO_DB_PATH must name the same
+      # file. Both are already set in the image and are repeated here only
+      # because a deployment that changes one has to change the other.
       # ---------------------------------------------------------------------
       - key: BESTIARIO__DATABASE__URL
         scope: RUN_TIME
         value: "sqlite:///data/bestiario.db"
+
+      - key: BESTIARIO_DB_PATH
+        scope: RUN_TIME
+        value: "/data/bestiario.db"
+
+      - key: LITESTREAM_BUCKET
+        scope: RUN_TIME
+        value: "mostro-bestiario-index"
+
+      # A prefix inside the bucket, not a filename. Two deployments sharing
+      # one prefix replicate over each other.
+      - key: LITESTREAM_PATH
+        scope: RUN_TIME
+        value: "bestiario"
+
+      - key: LITESTREAM_REGION
+        scope: RUN_TIME
+        value: "nyc3"
+
+      - key: LITESTREAM_ENDPOINT
+        scope: RUN_TIME
+        value: "nyc3.digitaloceanspaces.com"
+
+      # A Spaces key scoped to readwrite on that one bucket, and nothing
+      # else. Replace both placeholders before deploying; `doctl apps update`
+      # encrypts them in place.
+      - key: LITESTREAM_ACCESS_KEY_ID
+        scope: RUN_TIME
+        type: SECRET
+        value: "REPLACE_ME"
+
+      - key: LITESTREAM_SECRET_ACCESS_KEY
+        scope: RUN_TIME
+        type: SECRET
+        value: "REPLACE_ME"
 
       - key: RUST_LOG
         scope: RUN_TIME
