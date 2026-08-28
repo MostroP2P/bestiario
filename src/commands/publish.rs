@@ -385,6 +385,10 @@ async fn load(
         orders: load::activity::orders(pool, &scope).await?,
         fees: load::dev_fees::load(pool, &scope).await?,
         disputes: load::disputes::load(pool, &scope).await?,
+        // The `instances` and `compare` documents are about the instances
+        // themselves, and are the only place a client learns that an
+        // instance exists at all.
+        profiles: load::instances::profiles(pool, &scope).await?,
         dev_fee_pct: Some(Assumption {
             per_instance: assumptions.dev_fee_percentage.clone(),
             default: assumptions.dev_fee_percentage_default,

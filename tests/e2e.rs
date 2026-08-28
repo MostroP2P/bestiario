@@ -476,13 +476,16 @@ async fn backfill_then_every_report_against_the_local_relay() {
     // event in it moves nothing. Anchored to the clock, all twenty
     // window documents would restate here.
     //
-    // The five that do restate are the disputes family, and they are not
-    // this rule's exception but its other half: an open dispute
-    // publishes its age, which is `now - opened_at` and is about the
-    // clock on purpose (§6.7). Those figures really did move.
+    // The ten that do restate are not this rule's exception but its other
+    // half: they publish a figure that is *about* the clock, and those
+    // figures really did move. Five are the disputes family, where an open
+    // dispute's age is `now - opened_at` (§6.7). The other five are the
+    // `instances` windows, where `silent_for` is `now - last_seen_at` — the
+    // same shape, and the reason those documents are re-signed whole every
+    // run despite carrying mostly static profile figures.
     let again = bestiario_at(&settings, &["publish"], SECOND_RUN);
     assert!(
-        again.contains("5 document(s) sent, 27 unchanged"),
+        again.contains("10 document(s) sent, 42 unchanged"),
         "a second run over an unchanged archive re-signed figures that did not move: {again}"
     );
     assert_eq!(
@@ -507,17 +510,19 @@ async fn backfill_then_every_report_against_the_local_relay() {
         "an addressable kind keeps one event per `d`, so a republication replaces rather than adds"
     );
     // Read off every document whose payload the clock does not move —
-    // which is every one of them but the disputes family, whose open
-    // disputes publish their age (§6.7). Those restate a second at a
-    // time no matter what `--republish` does, and asserting over them
-    // would be asserting about the clock rather than about §9.3.
+    // which is every one of them but two: the disputes family, whose open
+    // disputes publish their age (§6.7), and the `instances` windows,
+    // whose profiles publish how long each has been silent. Both restate a
+    // second at a time no matter what `--republish` does, and asserting
+    // over them would be asserting about the clock rather than about §9.3.
+    let clock_bound = |address: &str| address.contains("disputes") || address.contains("instances");
     let revisions: BTreeSet<&str> = after
         .iter()
         .filter(|event| {
             !event
                 .tags
                 .identifier()
-                .is_some_and(|address| address.contains("disputes"))
+                .is_some_and(|address| clock_bound(&address))
         })
         .filter_map(|event| {
             event
