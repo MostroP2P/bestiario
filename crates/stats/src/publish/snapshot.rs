@@ -142,7 +142,17 @@ pub fn hash_of(payload: &impl Serialize) -> String {
 /// not get a miss because the document happens to have no series.
 fn window_metrics(report: Report, data: &Data, window: Window, now: i64) -> Vec<Metric> {
     match report {
-        Report::Orders => series::block_of(series::Family::Activity, data, window, now),
+        // The only report whose window document carries more than its
+        // family's block: the network's mix by currency (§6.1.1), which is
+        // added here and not in `series::Family::Activity` so that it
+        // reaches this document and not the series. A column per currency
+        // per bucket would put the size problem of §9.1 in the one shape
+        // that already repeats a row per day.
+        Report::Orders => {
+            let mut metrics = series::block_of(series::Family::Activity, data, window, now);
+            metrics.extend(fiat_counts(&data.orders, window, now));
+            metrics
+        }
         Report::Volume => series::block_of(series::Family::Volume, data, window, now),
         Report::DevFees => series::block_of(series::Family::DevFees, data, window, now),
         Report::Disputes => series::block_of(series::Family::Disputes, data, window, now),
@@ -158,6 +168,48 @@ fn window_metrics(report: Report, data: &Data, window: Window, now: i64) -> Vec<
             now,
         ),
     }
+}
+
+/// The network's orders by currency: four counts per currency traded in
+/// the window, under `orders.<CODE>.created`, `.completed`, `.canceled`
+/// and `.open_now`.
+///
+/// # Four figures and not nine
+///
+/// The instance-scoped documents carry the whole §6.1 block per currency
+/// ([`instance_metrics`]) because an instance's currencies are the handful
+/// it lists in its 38385. The network's are every code any instance ever
+/// published, and that list has no ceiling while §9.1 does — at roughly
+/// eighty-five bytes a metric, nine figures over a hundred codes is some
+/// seventy-six kilobytes and past the default limit, where the failure
+/// mode is a run that publishes nothing at all. Four is a quarter of that
+/// and leaves the largest document in the snapshot with room.
+///
+/// Which four is not arbitrary. They are the figures that *sum*: an order
+/// names one currency, so the blocks partition the window's orders and a
+/// client may add them up or compare them against the whole-network row
+/// above. The rates and the deltas do not sum — a completion rate is not
+/// the sum of completion rates — and `completion_rate` is anyway
+/// `completed / (completed + canceled)`, which a client derives from two
+/// of these. What is left, `abandonment_rate` and the deltas, is in the
+/// scoped documents for whoever wants it per instance.
+pub fn fiat_counts(orders: &[Order], window: Window, now: i64) -> Vec<Metric> {
+    activity::slice(orders, activity::Dimension::Fiat)
+        .into_iter()
+        .flat_map(|(code, group)| {
+            let group: Vec<Order> = group.into_iter().cloned().collect();
+            let activity = activity::summarise(&group, window, now);
+            [
+                ("created", activity.created),
+                ("completed", activity.completed),
+                ("canceled", activity.canceled),
+                ("open_now", activity.open_now),
+            ]
+            .map(|(name, count)| {
+                Metric::observed(format!("orders.{code}.{name}"), Value::Count(count as i64))
+            })
+        })
+        .collect()
 }
 
 /// The reports published narrowed to one instance (§3 `scope`).

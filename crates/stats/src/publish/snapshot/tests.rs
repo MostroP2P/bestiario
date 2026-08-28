@@ -996,3 +996,105 @@ fn every_address_a_snapshot_publishes_parses_back() {
         );
     }
 }
+
+// ---- the network's currency counts (§6.1.1)
+
+#[test]
+fn the_network_orders_document_counts_orders_by_currency() {
+    // Arrange / Act — Alpha traded ARS twice and USD once, Beta COP once.
+    let snapshot = Snapshot::compute(&two_instances(), Coverage::since(JULY), "run", SEPTEMBER);
+
+    // Assert — the mix a client renders without fetching an instance.
+    assert_eq!(count_of(&snapshot, "orders:all", "orders.ARS.created"), 2);
+    assert_eq!(count_of(&snapshot, "orders:all", "orders.USD.created"), 1);
+    assert_eq!(count_of(&snapshot, "orders:all", "orders.COP.created"), 1);
+}
+
+#[test]
+fn a_currency_count_is_the_sum_of_the_instances_that_traded_it() {
+    // The claim §6.1.1 makes to a client: the per-instance documents add
+    // up to the network one, because an order has one currency and one
+    // instance. Asserted rather than described, since a client that sums
+    // them and gets a different number has no way to tell which is wrong.
+    let snapshot = Snapshot::compute(&two_instances(), Coverage::since(JULY), "run", SEPTEMBER);
+
+    for code in ["ARS", "USD", "COP"] {
+        let name = format!("orders.{code}.created");
+        let per_instance: i64 = [ALPHA, BETA]
+            .into_iter()
+            .map(|pubkey| {
+                metrics_of(&snapshot, &format!("orders:all:i:{pubkey}"))
+                    .into_iter()
+                    .find(|(found, _)| *found == name)
+                    .map_or(0, |(_, value)| value.as_i64().expect("a count"))
+            })
+            .sum();
+
+        assert_eq!(
+            per_instance,
+            count_of(&snapshot, "orders:all", &name),
+            "{code} does not add up"
+        );
+    }
+}
+
+#[test]
+fn the_networks_currency_blocks_carry_counts_and_no_rates() {
+    // Four counts per currency, not the nine figures the scoped documents
+    // carry. The network's currency list is unbounded and the ceiling of
+    // §9.1 is not, so what is published here is the part that sums — and
+    // `completion_rate` is `completed / (completed + canceled)`, which a
+    // client derives from two of them.
+    let snapshot = Snapshot::compute(&two_instances(), Coverage::since(JULY), "run", SEPTEMBER);
+    let names: Vec<String> = metrics_of(&snapshot, "orders:all")
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect();
+
+    for suffix in ["created", "completed", "canceled", "open_now"] {
+        let name = format!("orders.ARS.{suffix}");
+        assert!(names.contains(&name), "{name} is missing from {names:?}");
+    }
+    for suffix in [
+        "completion_rate",
+        "abandonment_rate",
+        "created_delta",
+        "completed_delta",
+        "in_progress_now",
+    ] {
+        let name = format!("orders.ARS.{suffix}");
+        assert!(
+            !names.contains(&name),
+            "{name} should not be published here"
+        );
+    }
+
+    // The instance-scoped document is the one that carries all nine.
+    let scoped: Vec<String> = metrics_of(&snapshot, &format!("orders:all:i:{ALPHA}"))
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect();
+    assert!(scoped.contains(&"orders.ARS.completion_rate".to_string()));
+}
+
+#[test]
+fn the_orders_series_gains_no_column_per_currency() {
+    // The window document's currency blocks must not reach the series. A
+    // column per currency per bucket is the size problem of §9.1 in the
+    // one document shape that already repeats a row per day.
+    let snapshot = Snapshot::compute(&two_instances(), Coverage::since(JULY), "run", SEPTEMBER);
+    let document = snapshot
+        .documents
+        .iter()
+        .find(|document| document.address.to_string() == "series:orders:daily:2026-08")
+        .expect("a daily partition of August");
+    let payload = serde_json::to_value(document.envelope.payload()).expect("serialises");
+
+    for column in payload["columns"].as_array().expect("columns") {
+        let name = column["name"].as_str().expect("name");
+        assert!(
+            !["ARS", "USD", "COP"].iter().any(|code| name.contains(code)),
+            "{name} plots one currency"
+        );
+    }
+}
