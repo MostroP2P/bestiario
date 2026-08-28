@@ -735,3 +735,128 @@ fn the_variable_is_not_read_when_the_configuration_loads() {
 
     Settings::from_toml_str(&toml).expect("an unexported variable is not a load error");
 }
+
+/// Sets every variable in `pairs`, runs `body`, and removes them again before
+/// returning, so that a failing assertion cannot leak process state into the
+/// rest of the run.
+///
+/// The lock is taken here rather than by the callers: the environment is
+/// process-wide, and a test that wrote it without holding the lock would
+/// corrupt whichever other test happened to be reading at that moment.
+fn with_env<T>(pairs: &[(&str, &str)], body: impl FnOnce() -> T) -> T {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+    // SAFETY: every test that touches the environment goes through here and
+    // holds ENV_LOCK, so no other thread is reading it while this one writes.
+    unsafe {
+        for (name, value) in pairs {
+            std::env::set_var(name, value);
+        }
+    }
+
+    let outcome = body();
+
+    // SAFETY: as above.
+    unsafe {
+        for (name, _) in pairs {
+            std::env::remove_var(name);
+        }
+    }
+
+    outcome
+}
+
+#[test]
+fn an_absent_optional_file_leaves_the_environment_to_supply_everything() {
+    // The container image of `Dockerfile` ships no settings.toml: the whole
+    // configuration arrives as BESTIARIO__* from the app spec.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("settings.toml");
+
+    let settings = with_env(
+        &[
+            ("BESTIARIO__NOSTR__RELAYS", "wss://relay.mostro.network"),
+            ("BESTIARIO__INDEXER__ACCEPT_UNKNOWN_INSTANCES", "true"),
+        ],
+        || Settings::load_optional(&path),
+    )
+    .expect("an environment-only configuration");
+
+    assert_eq!(settings.nostr.relays, ["wss://relay.mostro.network"]);
+    assert!(settings.indexer.accept_unknown_instances);
+    // The settings the environment said nothing about fall back to the same
+    // values settings.toml.example documents.
+    assert_eq!(settings.database.url, "sqlite://bestiario.db");
+    assert_eq!(settings.indexer.networks, vec![Network::Mainnet]);
+    assert_eq!(settings.report.reference_currency, "USD");
+}
+
+#[test]
+fn an_absent_optional_file_is_validated_like_any_other_configuration() {
+    // Tolerating the missing file must not tolerate the empty configuration
+    // it leaves behind: an indexer with no relays reads nothing and reports
+    // zeros, which is exactly what validation exists to prevent.
+    let dir = tempfile::tempdir().expect("temp dir");
+
+    let error = with_env(&[], || {
+        Settings::load_optional(&dir.path().join("settings.toml"))
+    })
+    .expect_err("nothing configured");
+
+    assert!(
+        matches!(error, ConfigError::Invalid(ValidationError::NoRelays)),
+        "got {error:?}"
+    );
+}
+
+#[test]
+fn a_list_setting_is_split_on_commas_when_it_comes_from_the_environment() {
+    // A deployment configures relays and instances through single variables;
+    // without splitting, the whole string would be read as one relay URL.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let pubkey = "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390";
+
+    let settings = with_env(
+        &[
+            (
+                "BESTIARIO__NOSTR__RELAYS",
+                "wss://relay.mostro.network,wss://nos.lol",
+            ),
+            ("BESTIARIO__INDEXER__INSTANCES", pubkey),
+            ("BESTIARIO__INDEXER__NETWORKS", "mainnet,testnet"),
+        ],
+        || Settings::load_optional(&dir.path().join("settings.toml")),
+    )
+    .expect("valid settings");
+
+    assert_eq!(
+        settings.nostr.relays,
+        ["wss://relay.mostro.network", "wss://nos.lol"]
+    );
+    assert_eq!(settings.indexer.instances, [pubkey]);
+    assert_eq!(
+        settings.indexer.networks,
+        vec![Network::Mainnet, Network::Testnet]
+    );
+    // [publish].relays still defaults to [nostr].relays, list or not.
+    assert_eq!(settings.publish.relays, settings.nostr.relays);
+}
+
+#[test]
+fn a_single_underscore_variable_is_not_read_as_a_settings_override() {
+    // BESTIARIO_PUBLISH_NSEC holds the signing key and is named by, not part
+    // of, the configuration. The prefix is `BESTIARIO__`, so it is left alone;
+    // were it consumed, `deny_unknown_fields` would reject the whole load.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let path = dir.path().join("settings.toml");
+    std::fs::write(&path, VALID).expect("write settings");
+
+    with_env(
+        &[(
+            "BESTIARIO_PUBLISH_NSEC",
+            "nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5",
+        )],
+        || Settings::load(&path),
+    )
+    .expect("the signing key is not a settings key");
+}

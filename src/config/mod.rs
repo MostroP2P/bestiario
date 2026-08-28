@@ -30,8 +30,37 @@ pub use secret::{EnvRef, Secret};
 
 /// Environment prefix and separator: `BESTIARIO__DATABASE__URL` overrides
 /// `[database].url`.
+///
+/// The separator is two underscores rather than one so that a single
+/// underscore is free to mean nothing at all: `BESTIARIO_PUBLISH_NSEC`, which
+/// holds the signing key of `docs/SPEC.md` §12, is named by the configuration
+/// and never read as part of it.
 const ENV_PREFIX: &str = "BESTIARIO";
 const ENV_SEPARATOR: &str = "__";
+
+/// Separator inside one variable that stands for a list, so that
+/// `BESTIARIO__NOSTR__RELAYS="wss://a,wss://b"` is two relays and not one URL
+/// with a comma in it.
+const ENV_LIST_SEPARATOR: &str = ",";
+
+/// The settings that are lists. Splitting is declared per key rather than
+/// applied to every value: a comma is legal inside a great many strings, and a
+/// setting silently turning into a two-element list is the same expensive kind
+/// of failure the rest of this module exists to prevent.
+const ENV_LIST_KEYS: [&str; 4] = [
+    "nostr.relays",
+    "indexer.instances",
+    "indexer.networks",
+    "publish.relays",
+];
+
+/// The path `--config` defaults to.
+///
+/// Its absence is tolerated by [`Settings::load_optional`] and by nothing
+/// else. A container image ships no `settings.toml` and is configured entirely
+/// through `BESTIARIO__*`; a path someone typed and misspelled must still fail
+/// loudly rather than quietly index with defaults.
+pub const DEFAULT_CONFIG_PATH: &str = "settings.toml";
 
 /// Separator between the human-readable part and the data of a bech32
 /// string, as in `npub1…`.
@@ -132,10 +161,13 @@ pub enum ValidationError {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Settings {
+    #[serde(default)]
     pub nostr: NostrSettings,
+    #[serde(default)]
     pub indexer: IndexerSettings,
     #[serde(default)]
     pub assumptions: AssumptionSettings,
+    #[serde(default)]
     pub database: DatabaseSettings,
     #[serde(default)]
     pub report: ReportSettings,
@@ -147,7 +179,9 @@ pub struct Settings {
 #[serde(deny_unknown_fields)]
 pub struct NostrSettings {
     /// Relays to connect to. Additional ones may be discovered via NIP-65
-    /// when `discover_relays` is set.
+    /// when `discover_relays` is set. Empty is refused by validation: there is
+    /// no defensible default set of relays to read the network from.
+    #[serde(default)]
     pub relays: Vec<String>,
     #[serde(default)]
     pub discover_relays: bool,
@@ -198,6 +232,7 @@ pub struct AssumptionSettings {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DatabaseSettings {
+    #[serde(default = "default_database_url")]
     pub url: String,
 }
 
@@ -255,6 +290,10 @@ fn default_resume_overlap_secs() -> u64 {
     3600
 }
 
+fn default_database_url() -> String {
+    "sqlite://bestiario.db".to_string()
+}
+
 fn default_networks() -> Vec<Network> {
     vec![Network::Mainnet]
 }
@@ -265,6 +304,35 @@ fn default_dev_fee_percentage() -> f64 {
 
 fn default_reference_currency() -> String {
     "USD".to_string()
+}
+
+impl Default for NostrSettings {
+    fn default() -> Self {
+        Self {
+            relays: Vec::new(),
+            discover_relays: false,
+            resume_overlap_secs: default_resume_overlap_secs(),
+        }
+    }
+}
+
+impl Default for IndexerSettings {
+    fn default() -> Self {
+        Self {
+            instances: Vec::new(),
+            accept_unknown_instances: false,
+            networks: default_networks(),
+            backfill_from: 0,
+        }
+    }
+}
+
+impl Default for DatabaseSettings {
+    fn default() -> Self {
+        Self {
+            url: default_database_url(),
+        }
+    }
 }
 
 impl Default for AssumptionSettings {
@@ -286,15 +354,34 @@ impl Default for ReportSettings {
 
 impl Settings {
     /// Loads `path`, layers `BESTIARIO__*` environment overrides on top,
-    /// normalizes and validates.
+    /// normalizes and validates. A missing file is an error.
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
+        Self::load_with(path, true)
+    }
+
+    /// As [`Settings::load`], but a missing file is not an error: the
+    /// environment layer alone then has to produce a usable configuration.
+    ///
+    /// This is not a fallback to defaults. Every setting that has no sound
+    /// default — the relays, and something to index — is still checked by
+    /// [`Self::validate`], so an empty environment fails at startup with the
+    /// same message it would give for an empty file.
+    pub fn load_optional(path: &Path) -> Result<Self, ConfigError> {
+        Self::load_with(path, false)
+    }
+
+    fn load_with(path: &Path, file_required: bool) -> Result<Self, ConfigError> {
+        let mut environment = config::Environment::with_prefix(ENV_PREFIX)
+            .separator(ENV_SEPARATOR)
+            .list_separator(ENV_LIST_SEPARATOR)
+            .try_parsing(true);
+        for key in ENV_LIST_KEYS {
+            environment = environment.with_list_parse_key(key);
+        }
+
         let raw = config::Config::builder()
-            .add_source(config::File::from(path).required(true))
-            .add_source(
-                config::Environment::with_prefix(ENV_PREFIX)
-                    .separator(ENV_SEPARATOR)
-                    .try_parsing(true),
-            )
+            .add_source(config::File::from(path).required(file_required))
+            .add_source(environment)
             .build()?
             .try_deserialize::<Settings>()?;
 
