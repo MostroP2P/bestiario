@@ -40,6 +40,7 @@ pub mod lifecycle;
 pub mod market;
 pub mod metric;
 pub mod percentile;
+pub mod publish;
 pub mod rates;
 pub mod series;
 pub mod summary;

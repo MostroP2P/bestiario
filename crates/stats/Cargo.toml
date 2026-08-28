@@ -20,9 +20,8 @@ chrono.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
-
-# Tests only: the metric type is checked against the JSON `docs/SPEC.md` §10
-# describes, and serde alone cannot spell that out. On the allowlist of
-# scripts/check-stats-deps.sh, and a serialiser performs no I/O of its own.
-[dev-dependencies]
+# A serialiser, and no more: the publication envelope of
+# docs/NOSTR-PUBLICATION.md §6 carries its payload as a JSON value, and the
+# hash of §5 is taken over bytes this crate has to produce itself. On the
+# allowlist of scripts/check-stats-deps.sh; it opens nothing.
 serde_json.workspace = true
