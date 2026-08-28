@@ -1186,9 +1186,12 @@ snapshot a site can serve before its relay connection is live:
 bestiario publish --out ./snapshot
 ```
 
-Signing and publication to the relays arrive with the signing key
-(`[publish].nsec`); until then an invocation that asks for neither
-`--dry-run` nor `--out` is refused rather than quietly doing nothing.
+Signing and publication to the relays arrive with the signing key, which
+§12 of the spec places at `[publish].nsec`. The section takes no such key
+yet: `relays` and `max_content_bytes` are the two it accepts, and a key it
+does not know is a configuration error rather than a setting that waits for
+the feature. Until then an invocation that asks for neither `--dry-run` nor
+`--out` is refused rather than quietly doing nothing.
 
 ## Development
 

@@ -125,6 +125,16 @@ pub async fn compute(
     // so stating anything earlier in the index would advertise coverage
     // the documents themselves withhold. The ceiling has no such duty and
     // is the plain extent.
+    //
+    // Read before the figures, and that order is load-bearing. These are
+    // separate reads, so an ingest running alongside can land an event
+    // between them; taking the extent first means the figures can only be
+    // a superset of what the index claims, never a subset. A run that
+    // loaded first could state a floor below data it does not have and
+    // publish the flat line at zero §6.3 exists to prevent. The surplus
+    // is harmless in the other direction: an event newer than the ceiling
+    // either falls in a bucket already covered, or in one no partition
+    // was computed for, and the next run picks it up.
     let coverage = Coverage::from_extent(
         events::earliest_created_at(pool, &crate::nostr::filters::INDEXED_KINDS, &scope).await?,
         events::latest_created_at(pool, &scope).await?,
