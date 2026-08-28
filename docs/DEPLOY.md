@@ -53,9 +53,10 @@ Two variables, and telling them apart matters:
 - `BESTIARIO_PUBLISH_NSEC` is the **key**. One underscore, so it falls
   outside the `BESTIARIO__` prefix and is never read as a setting.
 
-Only the second is a secret, and it is the only value in `.do/app.yaml`
-marked `type: SECRET`. The indirection is what lets the spec be committed:
-it names where the key lives without ever containing it.
+Only the second is a secret, and it is marked `type: SECRET` in
+`.do/app.yaml` — as are the two Spaces credentials below. The indirection is
+what lets the spec be committed: it names where the key lives without ever
+containing it.
 
 The key is read when a run actually signs. A worker that only runs `sync`
 neither needs the variable nor fails without it.
@@ -149,8 +150,8 @@ same invocation replicates.
 | `LITESTREAM_PATH` | A prefix *inside* the bucket, not a filename. |
 | `LITESTREAM_REGION` | `nyc3`, and the default for the endpoint. |
 | `LITESTREAM_ENDPOINT` | `nyc3.digitaloceanspaces.com`. |
-| `LITESTREAM_ACCESS_KEY_ID` | Spaces key, scoped `readwrite` to the one bucket. |
-| `LITESTREAM_SECRET_ACCESS_KEY` | Its secret. The only value here that is encrypted. |
+| `LITESTREAM_ACCESS_KEY_ID` | Spaces key, scoped `readwrite` to the one bucket. Stored as a `SECRET`. |
+| `LITESTREAM_SECRET_ACCESS_KEY` | Its secret, likewise a `SECRET`. |
 | `BESTIARIO_DB_PATH` | The file litestream replicates. |
 
 `BESTIARIO_DB_PATH` and `BESTIARIO__DATABASE__URL` must name the same file.
@@ -178,12 +179,21 @@ optional:
   from the same process as `sync`, or from a prefix of its own.
 
 The honest caveat: App Platform may briefly overlap the old and new
-containers during a deploy, and nothing here prevents that window. The
-exposure is bounded rather than eliminated — bestiario never overwrites
-history (`docs/SPEC.md` §5), so the recovery from a damaged replica is to
-empty the prefix and re-run `backfill`, which costs minutes, not data. If
-that is not good enough for a given deployment, Postgres is the answer, not
-a second replica.
+containers during a deploy, and nothing here prevents that window.
+
+If a replica is damaged, **copy the prefix aside before touching it** and try
+to restore from it — `litestream restore -o /tmp/check.db` names a different
+output file and leaves the replica alone, so a partial recovery is still on
+the table. Only once that is exhausted, empty the prefix and re-run
+`backfill`.
+
+That last step is a real loss, not a free reset. bestiario never overwrites
+history (`docs/SPEC.md` §5), so nothing is corrupted silently — but a
+backfill reaches only as far back as the relays still hold, and they expire
+events. Whatever the index had recorded from before that horizon does not
+come back. The replica *is* the durable copy; the relays are not a backup of
+it. A deployment that cannot accept that risk wants Postgres, not a second
+replica.
 
 ### Postgres, still
 

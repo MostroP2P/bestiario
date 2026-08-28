@@ -46,6 +46,15 @@ export LITESTREAM_PATH LITESTREAM_REGION LITESTREAM_ENDPOINT
 # it cannot see a second container holding the same bucket prefix — two of them
 # would interleave writes into one replica and corrupt it. Keep instance_count
 # at 1, and give any second deployment its own LITESTREAM_PATH.
-exec litestream replicate \
-    -restore-if-db-not-exists \
-    -exec "bestiario $*"
+# litestream's -exec takes one string and hands it to a shell, so the argument
+# boundaries have to survive being written down. `$*` would not: it joins on
+# spaces, and `publish --out "/data/my snapshots"` would reach bestiario as two
+# arguments instead of one. Quote each argument instead, closing and reopening
+# the quoting around any embedded single quote — '\'' is the only form a POSIX
+# shell reads back as the character itself.
+command="bestiario"
+for arg in "$@"; do
+    command="$command '$(printf '%s' "$arg" | sed "s/'/'\\\\''/g")'"
+done
+
+exec litestream replicate -restore-if-db-not-exists -exec "$command"

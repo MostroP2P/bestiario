@@ -29,6 +29,28 @@ RUN mkdir -p src crates/stats/src \
  && cargo build --release --locked \
  && rm -rf src crates
 
+# litestream replicates the index to object storage (deploy/replicated.sh).
+# Fetched here rather than in the runtime stage because this one already has
+# curl, and because the archive has to match the architecture being built for:
+# a native arm64 build that installed the x86_64 binary would fail on the
+# first exec, not at build time.
+#
+# Pinned by version *and* by checksum, per architecture: this comes over the
+# network from outside the repository, and a tag can be moved.
+ARG TARGETARCH
+ARG LITESTREAM_VERSION=0.5.16
+RUN set -eu; \
+    case "${TARGETARCH:-amd64}" in \
+      amd64) arch=x86_64; sha=9e29112380a942e4a62ee07773684396cb8b308dc4d67e130bef41f75e937f0a ;; \
+      arm64) arch=arm64;  sha=678022e4103145302598e35d37f8718392d42e153feeb1e2d4a64dd0cd3aaf10 ;; \
+      *) echo "no litestream build pinned for architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL -o /tmp/litestream.tar.gz \
+      "https://github.com/benbjohnson/litestream/releases/download/v${LITESTREAM_VERSION}/litestream-${LITESTREAM_VERSION}-linux-${arch}.tar.gz"; \
+    echo "${sha}  /tmp/litestream.tar.gz" | sha256sum -c -; \
+    tar -xzf /tmp/litestream.tar.gz -C /usr/local/bin litestream; \
+    rm /tmp/litestream.tar.gz
+
 # The real sources. `--locked` so the image is built from the versions
 # resolved in Cargo.lock and not from whatever resolves today.
 #
@@ -57,25 +79,12 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
-# litestream replicates the index to object storage, so that a container with
-# a clean filesystem restores it instead of rebuilding it from the relays.
-# See deploy/replicated.sh and docs/DEPLOY.md.
-#
-# Pinned by version *and* by checksum: this binary is fetched over the network
-# at build time from outside the repository, and a tag can be moved.
-ARG LITESTREAM_VERSION=0.5.16
-ARG LITESTREAM_SHA256=9e29112380a942e4a62ee07773684396cb8b308dc4d67e130bef41f75e937f0a
-ADD https://github.com/benbjohnson/litestream/releases/download/v${LITESTREAM_VERSION}/litestream-${LITESTREAM_VERSION}-linux-x86_64.tar.gz /tmp/litestream.tar.gz
-RUN echo "${LITESTREAM_SHA256}  /tmp/litestream.tar.gz" | sha256sum -c - \
- && tar -xzf /tmp/litestream.tar.gz -C /usr/local/bin litestream \
- && rm /tmp/litestream.tar.gz \
- && litestream version
-
 # Unprivileged: the daemon reads relays and writes one SQLite file, and needs
 # nothing that root would give it.
 RUN useradd --system --create-home --uid 10001 bestiario
 
 COPY --from=builder /src/target/release/bestiario /usr/local/bin/bestiario
+COPY --from=builder /usr/local/bin/litestream /usr/local/bin/litestream
 COPY deploy/litestream.yml /etc/litestream.yml
 COPY deploy/replicated.sh /usr/local/bin/bestiario-replicated
 RUN chmod 0755 /usr/local/bin/bestiario-replicated
