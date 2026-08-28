@@ -128,7 +128,14 @@ fn fixtures() -> Vec<Event> {
 /// The key the E2E publisher signs with: a throwaway, generated once, and
 /// the only key in this repository. It signs nothing but the documents a
 /// local relay holds for the length of one test.
+///
+/// It reaches the binary through the environment of the child process, the
+/// way a real one does — never through the settings file, which refuses to
+/// hold a key at all.
 const PUBLISHER_NSEC: &str = "nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5";
+
+/// The variable `[publish].nsec` points at, here as anywhere.
+const PUBLISHER_NSEC_VAR: &str = "BESTIARIO_PUBLISH_NSEC";
 
 /// A settings file pointing at the local relay and a fresh database.
 ///
@@ -155,7 +162,7 @@ backfill_from = {FROM}
 url = "sqlite://{}"
 
 [publish]
-nsec = "{PUBLISHER_NSEC}"
+nsec = "env:{PUBLISHER_NSEC_VAR}"
 "#,
             database.display()
         ),
@@ -164,16 +171,31 @@ nsec = "{PUBLISHER_NSEC}"
     path
 }
 
-/// Runs the binary with `args`, asserting it exited zero, and returns its
-/// stdout.
-fn bestiario(settings: &Path, args: &[&str]) -> String {
-    let output = Command::new(env!("CARGO_BIN_EXE_bestiario"))
+/// Runs the binary with `args`, and with the signing key exported into its
+/// environment or deliberately absent from it.
+///
+/// The environment is the child's alone: a test that exported the key into
+/// its own process would export it into every test running beside it.
+fn invoke(settings: &Path, args: &[&str], key_exported: bool) -> std::process::Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_bestiario"));
+    command
         .env("BESTIARIO_NOW", NOW)
+        .env_remove(PUBLISHER_NSEC_VAR);
+    if key_exported {
+        command.env(PUBLISHER_NSEC_VAR, PUBLISHER_NSEC);
+    }
+    command
         .arg("--config")
         .arg(settings)
         .args(args)
         .output()
-        .expect("run bestiario");
+        .expect("run bestiario")
+}
+
+/// Runs the binary with `args`, asserting it exited zero, and returns its
+/// stdout.
+fn bestiario(settings: &Path, args: &[&str]) -> String {
+    let output = invoke(settings, args, true);
 
     assert!(
         output.status.success(),
@@ -187,14 +209,8 @@ fn bestiario(settings: &Path, args: &[&str]) -> String {
 
 /// Runs the binary with `args`, asserting it exited non-zero, and returns
 /// its stderr — for the refusals that are the point of the invocation.
-fn bestiario_refuses(settings: &Path, args: &[&str]) -> String {
-    let output = Command::new(env!("CARGO_BIN_EXE_bestiario"))
-        .env("BESTIARIO_NOW", NOW)
-        .arg("--config")
-        .arg(settings)
-        .args(args)
-        .output()
-        .expect("run bestiario");
+fn bestiario_refuses(settings: &Path, args: &[&str], key_exported: bool) -> String {
+    let output = invoke(settings, args, key_exported);
 
     assert!(
         !output.status.success(),
@@ -405,20 +421,29 @@ async fn backfill_then_every_report_against_the_local_relay() {
     // And the snapshot the run computed is the snapshot the relay holds:
     // every `s` tag names this run, which is what lets a client ask for a
     // whole publication in one filter (§7).
-    // And an operator who has configured no key at all is told so, rather
-    // than getting a run that reads the whole archive and sends nothing.
+    // And the two ways of having no key are told apart. Configuring none
+    // at all is one run that would otherwise read the whole archive and
+    // send nothing.
     let keyless = dir.path().join("keyless.toml");
     fs::write(
         &keyless,
         fs::read_to_string(&settings)
             .expect("settings")
-            .replace(&format!("nsec = \"{PUBLISHER_NSEC}\""), ""),
+            .replace(&format!("nsec = \"env:{PUBLISHER_NSEC_VAR}\""), ""),
     )
     .expect("write keyless settings");
-    let refusal = bestiario_refuses(&keyless, &["publish"]);
+    let refusal = bestiario_refuses(&keyless, &["publish"], true);
     assert!(
         refusal.contains("no signing key"),
         "a keyless run has to say why it did nothing: {refusal}"
+    );
+
+    // Naming a variable nobody exported is the other, and it names the
+    // variable — which is the only thing that says what to export.
+    let refusal = bestiario_refuses(&settings, &["publish"], false);
+    assert!(
+        refusal.contains(PUBLISHER_NSEC_VAR),
+        "an unexported key has to name the variable: {refusal}"
     );
 
     let runs: BTreeSet<&str> = published

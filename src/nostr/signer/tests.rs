@@ -1,6 +1,7 @@
 //! What a key may be spelled as, and what a signed document carries.
 
 use super::*;
+use crate::config::EnvRef;
 use crate::stats::bucket::Coverage;
 use crate::stats::publish::snapshot::Snapshot;
 use crate::stats::series::Data;
@@ -76,35 +77,34 @@ fn a_public_key_is_not_a_signing_key() {
 
 // ---- where the key comes from (§12)
 
+/// `[publish].nsec = "env:NAME"`, parsed the way the configuration does.
+fn reference(name: &str) -> EnvRef {
+    #[derive(serde::Deserialize)]
+    struct Holder {
+        nsec: EnvRef,
+    }
+    toml::from_str::<Holder>(&format!("nsec = \"env:{name}\""))
+        .expect("a reference")
+        .nsec
+}
+
 #[test]
 fn no_key_configured_is_not_an_error() {
-    assert!(resolve(None, None).expect("nothing to resolve").is_none());
+    assert!(resolve(None).expect("nothing to resolve").is_none());
 }
 
 #[test]
-fn a_key_file_holds_the_key() {
-    let dir = tempfile::tempdir().expect("a temporary directory");
-    let path = dir.path().join("bestiario.nsec");
-    std::fs::write(&path, format!("{NSEC}\n")).expect("write the key");
-
-    let keys = resolve(None, Some(&path))
-        .expect("a readable key file")
-        .expect("a key");
-
-    assert_eq!(
-        keys.public_key(),
-        parse(NSEC, "x").expect("a key").public_key()
-    );
-}
-
-#[test]
-fn a_key_file_that_cannot_be_read_names_the_path() {
+fn a_variable_nobody_exported_is_named_in_the_refusal() {
+    // The operator picked the name; it is the only thing that tells them
+    // which variable to export.
     let error =
-        resolve(None, Some(Path::new("/nowhere/bestiario.nsec"))).expect_err("no such file");
+        resolve(Some(&reference("BESTIARIO_NOTHING_EXPORTED_THIS"))).expect_err("not exported");
 
     assert!(
-        error.to_string().contains("/nowhere/bestiario.nsec"),
-        "the operator has to be told which path was tried: {error}"
+        error
+            .to_string()
+            .contains("BESTIARIO_NOTHING_EXPORTED_THIS"),
+        "the refusal has to name the variable: {error}"
     );
 }
 

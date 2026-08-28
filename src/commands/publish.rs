@@ -40,7 +40,7 @@ use sqlx::SqlitePool;
 use nostr_sdk::prelude::{Keys, ToBech32 as _};
 
 use crate::commands::Context;
-use crate::config::{AssumptionSettings, PublishSettings, Secret};
+use crate::config::{AssumptionSettings, PublishSettings};
 use crate::db::load::{self, Scope};
 use crate::db::repo::events;
 use crate::nostr::client::RelayClient;
@@ -77,14 +77,14 @@ impl Publication {
 pub async fn run(context: &Context<'_>, dry_run: bool, out: Option<&Path>, now: i64) -> Result<()> {
     refuse_scoped(context)?;
     let settings = &context.settings.publish;
-    let keys = signer::resolve(
-        settings.nsec.as_ref().map(Secret::expose),
-        settings.nsec_file.as_deref(),
-    )?;
+    // Before the archive is read: a run that discovers it cannot sign
+    // should discover it in the first second, not after thirty documents.
+    let keys = signer::resolve(settings.nsec.as_ref())?;
     anyhow::ensure!(
         dry_run || out.is_some() || keys.is_some(),
-        "`publish` has no signing key: set [publish].nsec or [publish].nsec_file, \
-         or pass --dry-run to review the snapshot, or --out <dir> to write it as files"
+        "`publish` has no signing key: point [publish].nsec at an environment \
+         variable holding one, or pass --dry-run to review the snapshot, or \
+         --out <dir> to write it as files"
     );
 
     let publication = compute(

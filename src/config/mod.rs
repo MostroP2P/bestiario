@@ -15,16 +15,18 @@
 //! that names the offending value.
 
 use std::collections::BTreeMap;
-use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use nostr_sdk::prelude::{FromBech32, PublicKey};
 use serde::Deserialize;
 
 use crate::network::Network;
 
+mod secret;
 #[cfg(test)]
 mod tests;
+
+pub use secret::{EnvRef, Secret};
 
 /// Environment prefix and separator: `BESTIARIO__DATABASE__URL` overrides
 /// `[database].url`.
@@ -124,21 +126,6 @@ pub enum ValidationError {
          including the index"
     )]
     PublishCeilingIsZero,
-
-    /// Neither spelling has precedence, so a file that sets both is
-    /// ambiguous — and the wrong guess signs a snapshot with a key the
-    /// operator did not mean to publish under.
-    #[error(
-        "[publish] sets both nsec and nsec_file: keep one, since neither is \
-         the other's default"
-    )]
-    PublishKeyAmbiguous,
-
-    /// The whole point of checking it here is that the alternative is a
-    /// run that reads the archive, computes every document and only then
-    /// finds it cannot sign the first one.
-    #[error("[publish].nsec is not a signing key: expected `nsec1…` or 64 hexadecimal characters")]
-    PublishKeyMalformed,
 }
 
 /// The whole of `settings.toml`, validated.
@@ -240,43 +227,14 @@ pub struct PublishSettings {
     /// lowers it; none raises it.
     #[serde(default = "default_max_content_bytes")]
     pub max_content_bytes: usize,
-    /// The signing key of §12, written into the file. Convenient, and the
-    /// less careful of the two: a secret in a configuration file is a
-    /// secret in every backup of it.
-    #[serde(default)]
-    pub nsec: Option<Secret>,
-    /// A file holding nothing but the key — the same key, kept where it
-    /// can have its own permissions and stay out of the configuration an
-    /// operator pastes into an issue.
+    /// Where the signing key of §12 lives: the *name* of an environment
+    /// variable, written as `nsec = "env:BESTIARIO_PUBLISH_NSEC"`.
     ///
-    /// Read when a run actually signs, never at startup: a `stats`
-    /// invocation that never publishes should not open the secret.
+    /// Never the key itself — see [`EnvRef`]. The variable is read when a
+    /// run actually signs, so a `stats` invocation on a machine that
+    /// publishes nothing neither needs it nor fails without it.
     #[serde(default)]
-    pub nsec_file: Option<PathBuf>,
-}
-
-/// A configured secret: `Deserialize` like the string it is, and `Debug`
-/// like nothing at all.
-///
-/// `Settings` is `Debug`, and a `Debug` that prints a private key puts it
-/// in the first log line somebody pastes into a bug report. The redaction
-/// still shows the field as *set*, because "the key is configured" is not
-/// the secret.
-#[derive(Clone, PartialEq, Eq, Deserialize)]
-#[serde(transparent)]
-pub struct Secret(String);
-
-impl Secret {
-    /// The value itself, at the one point that needs it: the signer.
-    pub fn expose(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Debug for Secret {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("[redacted]")
-    }
+    pub nsec: Option<EnvRef>,
 }
 
 fn default_max_content_bytes() -> usize {
@@ -289,7 +247,6 @@ impl Default for PublishSettings {
             relays: Vec::new(),
             max_content_bytes: default_max_content_bytes(),
             nsec: None,
-            nsec_file: None,
         }
     }
 }
@@ -416,13 +373,6 @@ impl Settings {
         }
         if self.publish.max_content_bytes == 0 {
             return Err(ValidationError::PublishCeilingIsZero);
-        }
-        if self.publish.nsec.is_some() && self.publish.nsec_file.is_some() {
-            return Err(ValidationError::PublishKeyAmbiguous);
-        }
-        if let Some(nsec) = &self.publish.nsec {
-            crate::nostr::signer::parse(nsec.expose(), "[publish].nsec")
-                .map_err(|_| ValidationError::PublishKeyMalformed)?;
         }
         Ok(())
     }

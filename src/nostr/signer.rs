@@ -5,13 +5,14 @@
 //! [`Document`] the stats crate computed into an event a relay will accept.
 //! Nothing here talks to a relay; that is [`super::client`].
 //!
-//! # Why the key is never a flag
+//! # Why the key is in the environment
 //!
-//! §12 says the key comes from `[publish].nsec` or a file, and never from
-//! a command-line flag. A flag is readable in `ps` by every user on the
-//! machine and lands in the shell history of the one who typed it; a
-//! configuration file has permissions, and a file path has them without
-//! the key ever being pasted anywhere at all.
+//! §12 keeps the key out of the command line: a flag is readable in `ps`
+//! by every user on the machine and lands in the shell history of the one
+//! who typed it. It is kept out of `settings.toml` for the same kind of
+//! reason — that file is copied between machines, committed, and pasted
+//! into issues. What the file holds is the *name* of an environment
+//! variable, and this module is where that name becomes a key.
 //!
 //! # Why the event's clock is the run's
 //!
@@ -21,9 +22,9 @@
 //! the archive — and it keeps a run that takes a minute to sign from
 //! looking like a minute of separate publications.
 
-use std::path::Path;
-
 use nostr_sdk::prelude::*;
+
+use crate::config::EnvRef;
 
 use crate::stats::publish::document::{self, KIND, Run};
 use crate::stats::publish::snapshot::Document;
@@ -34,12 +35,14 @@ mod tests;
 /// Anything that can go wrong between a configured key and [`Keys`].
 #[derive(Debug, thiserror::Error)]
 pub enum KeyError {
-    #[error("could not read the signing key from `{path}`")]
-    Unreadable {
-        path: String,
-        #[source]
-        source: std::io::Error,
-    },
+    /// Named rather than described: the operator chose the variable, and
+    /// the name they chose is the only thing that tells them which one to
+    /// export.
+    #[error(
+        "the environment variable `{name}`, named by [publish].nsec, is not set: \
+         export the signing key into it"
+    )]
+    MissingEnv { name: String },
 
     /// The reason is the library's, which names the checksum or the
     /// length; repeating it in our own words would say less.
@@ -69,25 +72,18 @@ pub fn parse(raw: &str, setting: &str) -> Result<Keys, KeyError> {
 
 /// The key an operator configured, if they configured one.
 ///
-/// The file is read here rather than at startup: a `stats` invocation that
-/// never publishes should not open the secret, and should not fail because
-/// the machine it runs on does not hold one. The two arguments are already
-/// known to be mutually exclusive — the configuration refuses a file
-/// alongside an inline key — so the order they are tried in is not a
-/// precedence.
-pub fn resolve(nsec: Option<&str>, file: Option<&Path>) -> Result<Option<Keys>, KeyError> {
-    if let Some(raw) = nsec {
-        return parse(raw, "[publish].nsec").map(Some);
-    }
-
-    let Some(path) = file else {
+/// Read here rather than when the configuration loads, so that a `stats`
+/// invocation on a machine that publishes nothing neither needs the
+/// variable nor fails without it. `publish` resolves before it reads the
+/// archive, so an unexported variable still fails loudly and early.
+pub fn resolve(reference: Option<&EnvRef>) -> Result<Option<Keys>, KeyError> {
+    let Some(reference) = reference else {
         return Ok(None);
     };
-    let raw = std::fs::read_to_string(path).map_err(|source| KeyError::Unreadable {
-        path: path.display().to_string(),
-        source,
+    let secret = reference.read_env().ok_or_else(|| KeyError::MissingEnv {
+        name: reference.name().to_string(),
     })?;
-    parse(&raw, &format!("the key file `{}`", path.display())).map(Some)
+    parse(secret.expose(), &format!("`{}`", reference.name())).map(Some)
 }
 
 /// One document, signed: kind 30666, the tag set of §11, and the

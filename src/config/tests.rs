@@ -687,14 +687,6 @@ fn a_ceiling_the_operator_sets_is_the_one_that_applies() {
 
 // ---- [publish] the signing key (docs/NOSTR-PUBLICATION.md §12)
 
-/// A throwaway key, generated once and used nowhere: the tests need a
-/// well-formed `nsec1…`, and a well-formed one is a real key.
-const NSEC: &str = "nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5";
-
-/// The same key as 64 hexadecimal characters, which is the other spelling
-/// an operator may reasonably paste.
-const NSEC_HEX: &str = "67dea2ed018072d675f5415ecfaed7d2597555e202d85b3d65ea4e58d2d92ffa";
-
 #[test]
 fn a_publication_without_a_key_signs_nothing_and_is_not_an_error() {
     // Reviewing a snapshot is the whole of rows 46-49, and neither
@@ -703,79 +695,43 @@ fn a_publication_without_a_key_signs_nothing_and_is_not_an_error() {
     let settings = Settings::from_toml_str(VALID).expect("valid");
 
     assert_eq!(settings.publish.nsec, None);
-    assert_eq!(settings.publish.nsec_file, None);
 }
 
 #[test]
-fn a_signing_key_is_accepted_as_an_nsec_and_as_hex() {
-    for spelling in [NSEC, NSEC_HEX] {
-        let toml = format!("{VALID}\n[publish]\nnsec = \"{spelling}\"\n");
+fn a_signing_key_is_configured_as_the_name_of_an_environment_variable() {
+    let toml = format!("{VALID}\n[publish]\nnsec = \"env:BESTIARIO_PUBLISH_NSEC\"\n");
 
-        let settings = Settings::from_toml_str(&toml)
-            .unwrap_or_else(|error| panic!("`{spelling}` is a key: {error}"));
-
-        assert!(settings.publish.nsec.is_some());
-    }
-}
-
-#[test]
-fn a_malformed_signing_key_is_refused_at_startup_rather_than_after_the_snapshot() {
-    // The alternative is a run that reads the whole archive, computes
-    // thirty documents and then discovers it cannot sign the first one.
-    let toml = format!("{VALID}\n[publish]\nnsec = \"nsec1nonsense\"\n");
-
-    let error = Settings::from_toml_str(&toml).expect_err("not a key");
-
-    assert!(
-        error.to_string().contains("[publish].nsec"),
-        "the message has to name the setting that is wrong: {error}"
-    );
-}
-
-#[test]
-fn a_key_given_both_inline_and_as_a_file_is_refused_rather_than_ranked() {
-    // Neither spelling has precedence, and guessing one would sign with a
-    // key the operator did not mean to use.
-    let toml =
-        format!("{VALID}\n[publish]\nnsec = \"{NSEC}\"\nnsec_file = \"/etc/bestiario.nsec\"\n");
-
-    let error = Settings::from_toml_str(&toml).expect_err("two keys");
-
-    assert_eq!(
-        error.to_string(),
-        ValidationError::PublishKeyAmbiguous.to_string()
-    );
-}
-
-#[test]
-fn a_key_file_is_not_read_at_startup_and_its_path_is_kept_verbatim() {
-    // Reading it here would make every `stats` invocation open the secret,
-    // and would fail the ones that never publish.
-    let toml = format!("{VALID}\n[publish]\nnsec_file = \"/nowhere/bestiario.nsec\"\n");
-
-    let settings = Settings::from_toml_str(&toml).expect("an unread path is not an error");
-
-    assert_eq!(
-        settings.publish.nsec_file.as_deref(),
-        Some(Path::new("/nowhere/bestiario.nsec"))
-    );
-}
-
-#[test]
-fn a_configured_key_never_appears_in_the_debug_rendering_of_the_settings() {
-    // `Settings` is Debug, and a Debug that prints a private key puts it
-    // in the first log line somebody pastes into an issue.
-    let toml = format!("{VALID}\n[publish]\nnsec = \"{NSEC}\"\n");
     let settings = Settings::from_toml_str(&toml).expect("valid");
 
-    let rendered = format!("{settings:?}");
+    assert_eq!(
+        settings.publish.nsec.as_ref().map(EnvRef::name),
+        Some("BESTIARIO_PUBLISH_NSEC")
+    );
+}
+
+#[test]
+fn a_key_written_into_the_settings_file_is_refused() {
+    // A configuration file is copied between machines, committed and
+    // pasted into issues; a key in it is a key in all three.
+    let toml = format!(
+        "{VALID}\n[publish]\nnsec = \
+         \"nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5\"\n"
+    );
+
+    let error = Settings::from_toml_str(&toml).expect_err("a literal key");
 
     assert!(
-        !rendered.contains(NSEC) && !rendered.contains(NSEC_HEX),
-        "the key leaked into Debug: {rendered}"
+        error.to_string().contains("could not load configuration"),
+        "the key never reaches a validated Settings: {error}"
     );
-    assert!(
-        rendered.contains("[redacted]"),
-        "and the field is still visibly set: {rendered}"
-    );
+}
+
+#[test]
+fn the_variable_is_not_read_when_the_configuration_loads() {
+    // Naming a variable nothing exported is not an error until something
+    // needs to sign: `stats` on a machine that publishes nothing should
+    // neither need the key nor fail without it.
+    let toml = format!("{VALID}\n[publish]\nnsec = \"env:NOTHING_EXPORTED_THIS\"\n");
+
+    Settings::from_toml_str(&toml).expect("an unexported variable is not a load error");
 }

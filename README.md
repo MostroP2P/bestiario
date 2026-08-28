@@ -1108,16 +1108,29 @@ relays = ["wss://relay.mostro.network"]
 # smaller limitation.max_content_length in its NIP-11 document lowers it;
 # none raises it.
 max_content_bytes = 65536
-# The signing key, as `nsec1…` or as 64 hexadecimal characters. Never a
-# command-line flag: a flag is readable in `ps` by every user on the
-# machine, and lands in the shell history of the one who typed it.
-nsec = "nsec1…"
-# Or, better, the path of a file holding nothing but that key — where it
-# can have its own permissions and stay out of the configuration file an
-# operator pastes into an issue. Setting both is an error rather than a
-# precedence: neither is the other's default.
-# nsec_file = "/etc/bestiario/publish.nsec"
+# Where the signing key lives: the NAME of an environment variable, never
+# the key itself. `nsec = "nsec1…"` is refused.
+nsec = "env:BESTIARIO_PUBLISH_NSEC"
 ```
+
+```sh
+export BESTIARIO_PUBLISH_NSEC=nsec1…
+bestiario publish
+```
+
+The key is never written into this file and never passed as a flag. A flag
+is readable in `ps` by every user on the machine and lands in the shell
+history of whoever typed it; a configuration file is copied between
+machines, committed, and pasted into issues. So `settings.toml` holds the
+*name* of the variable, and a literal key in that field is a configuration
+error rather than a setup that works and quietly leaks — the type the field
+parses into cannot hold a secret at all.
+
+The variable is read when a run actually signs, not when the configuration
+loads. `bestiario stats orders` on a machine that publishes nothing neither
+needs the key nor fails without it, and `publish` resolves it before it
+reads a single row, so an unexported variable fails in the first second and
+says which variable to export.
 
 The pubkey that key belongs to is the whole of what a reader trusts. A
 client verifies a signature, not a hostname, so moving the daemon to
