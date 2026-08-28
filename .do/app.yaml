@@ -28,6 +28,30 @@ workers:
 
     instance_size_slug: apps-s-1vcpu-1gb
 
+    # A worker has no health check — nothing polls it, because it listens on
+    # nothing — so a crash loop is invisible unless something counts the
+    # restarts. App Platform restarts a failed container indefinitely and
+    # reports the app as ACTIVE throughout.
+    #
+    # The threshold is deliberately low. This daemon should restart on deploys
+    # and not otherwise; three restarts inside five minutes is already a loop,
+    # not a blip.
+    alerts:
+      - rule: RESTART_COUNT
+        operator: GREATER_THAN
+        value: 3
+        window: FIVE_MINUTES
+        disabled: false
+
+      # The backfill holds a window of events in memory, so memory pressure
+      # shows up as an OOM kill and then as the restart loop above. This fires
+      # first, while there is still something to look at.
+      - rule: MEM_UTILIZATION
+        operator: GREATER_THAN
+        value: 85
+        window: TEN_MINUTES
+        disabled: false
+
     # `backfill` walks the relays' history, `sync` follows them live, and the
     # daemon needs both: `sync` alone subscribes from roughly now, so a
     # deployment that skipped the backfill would report on the last few days
@@ -181,5 +205,13 @@ workers:
 # from a component with a LITESTREAM_PATH of its own. docs/DEPLOY.md covers
 # the options.
 
+# App-level alerts. The component's own are declared above, next to the
+# component they watch.
+#
+# What none of these can see: replication going quietly wrong. litestream
+# keeps running when a sync fails, so a bucket that stopped receiving writes
+# looks exactly like one that is up to date, and no App Platform rule reaches
+# inside the container to notice. docs/DEPLOY.md says what does cover it.
 alerts:
   - rule: DEPLOYMENT_FAILED
+  - rule: DEPLOYMENT_LIVE
