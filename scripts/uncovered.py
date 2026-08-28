@@ -44,9 +44,19 @@ import sys
 def line_counts(entry: dict) -> dict[int, int]:
     """The execution count of every executable line of `entry`.
 
-    Each segment's count holds from its own line until the line the next
-    segment starts on; where several spans cover one line, the largest
-    count wins, which is how llvm itself folds regions into lines.
+    Each segment's count holds from its own line *through* the line the
+    next segment starts on, and where several spans reach one line the
+    largest count wins — which is how llvm itself folds regions into
+    lines (`LineCoverageStats`: begin from the count carried in, then take
+    the maximum with every region entering on the line).
+
+    The boundary line is included on purpose. A segment begins part-way
+    along its line, so the text before that column still belongs to the
+    span before it. Stopping one line short reads the closing brace of an
+    `if let` with no `else` as executed zero times while the loop around
+    it ran a hundred: the *branch* was never taken, but the line was, and
+    this is a line gate. Region coverage is a different measurement, and
+    reporting it under this heading blocks on braces.
     """
     segments = sorted(entry.get("segments", []), key=lambda segment: (segment[0], segment[1]))
     counts: dict[int, int] = {}
@@ -55,8 +65,8 @@ def line_counts(entry: dict) -> dict[int, int]:
         if not has_count or is_gap:
             continue
 
-        following = segments[index + 1][0] if index + 1 < len(segments) else line + 1
-        for covered in range(line, max(following, line + 1)):
+        last = segments[index + 1][0] if index + 1 < len(segments) else line
+        for covered in range(line, max(last, line) + 1):
             counts[covered] = max(counts.get(covered, 0), count)
 
     return counts
