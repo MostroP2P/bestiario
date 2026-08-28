@@ -1,0 +1,18 @@
+# The host's build artifacts. Copying them into the build context costs
+# hundreds of megabytes, and the builder compiles from source regardless.
+/target
+
+/.git
+/.github
+
+# Never bake an operator's own configuration, or their database, into an
+# image: the settings name the signing key's variable, and the database is
+# rebuilt from the relays.
+/settings.toml
+/bestiario.db
+/bestiario.db-shm
+/bestiario.db-wal
+
+/docs
+/README.md
+/AGENTS.md
