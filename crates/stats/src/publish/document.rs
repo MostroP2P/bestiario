@@ -13,6 +13,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 use super::address::{Address, Bucket, Report, Scope, Window};
+use crate::window::Window as Span;
 
 /// The addressable kind every document is published under (§2): the one
 /// candidate a reader remembers without consulting the spec.
@@ -32,13 +33,6 @@ pub struct Run {
     pub snapshot_id: String,
     /// Unix seconds.
     pub generated_at: i64,
-}
-
-/// The span a series partition covers, in unix seconds, half-open.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Period {
-    pub from: i64,
-    pub until: i64,
 }
 
 /// One Nostr tag: a name and one or more values.
@@ -64,10 +58,12 @@ impl Tag {
 
 /// The tags of §11 for one document, in the order the table lists them.
 ///
-/// `period` is only meaningful for a series partition and only ever given
-/// for one; a window document is relative to the run and has no fixed
-/// span to name.
-pub fn tags(address: &Address, run: &Run, revision: u32, period: Option<Period>) -> Vec<Tag> {
+/// A series partition names its `resolution` and `period`, both read off
+/// the address rather than passed alongside it: the address already says
+/// which month or year the partition covers, and a caller that could
+/// forget the period would eventually sign a document without one. A
+/// window document is relative to the run and has no fixed span to name.
+pub fn tags(address: &Address, run: &Run, revision: u32) -> Vec<Tag> {
     let mut tags = vec![
         Tag::single("d", address.to_string()),
         Tag::single("s", run.snapshot_id.clone()),
@@ -75,14 +71,13 @@ pub fn tags(address: &Address, run: &Run, revision: u32, period: Option<Period>)
         Tag::single("alt", alt(address)),
     ];
 
-    if let Address::Series { resolution, .. } = address {
-        tags.push(Tag::single("resolution", resolution.as_str()));
-        if let Some(period) = period {
-            tags.push(Tag {
-                name: "period".to_string(),
-                values: vec![rfc3339(period.from), rfc3339(period.until)],
-            });
-        }
+    if let Address::Series { partition, .. } = address {
+        let Span { from, until } = partition.window();
+        tags.push(Tag::single("resolution", partition.resolution().as_str()));
+        tags.push(Tag {
+            name: "period".to_string(),
+            values: vec![rfc3339(from), rfc3339(until)],
+        });
     }
 
     tags.push(Tag::single("revision", revision.to_string()));
@@ -118,14 +113,13 @@ fn alt(address: &Address) -> String {
         ),
         Address::Series {
             report,
-            resolution,
-            bucket,
+            partition,
             scope,
         } => format!(
             "bestiario {} series, {} buckets, {}{}",
             describe(*report),
-            resolution.as_str(),
-            partition(*bucket),
+            partition.resolution().as_str(),
+            spanned(partition.bucket()),
             scoped(scope)
         ),
     }
@@ -154,11 +148,20 @@ fn span(window: Window) -> &'static str {
     }
 }
 
-fn partition(bucket: Bucket) -> String {
+fn spanned(bucket: Bucket) -> String {
     match bucket {
         Bucket::Month { .. } => format!("month {bucket}"),
         Bucket::Year(_) => format!("year {bucket}"),
     }
+}
+
+/// Why a document's figures moved (§8): what every revision above the
+/// first carries, and what the first cannot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Restatement {
+    /// Unix seconds.
+    pub at: i64,
+    pub because: String,
 }
 
 /// A document's content (§6): the run around the answer.
@@ -167,41 +170,72 @@ fn partition(bucket: Bucket) -> String {
 /// keeps declaration order, so the struct *is* the order. The two
 /// restatement fields are absent rather than null when there was none: an
 /// absent restatement is not a restatement with empty reasons.
+///
+/// The fields are read-only from outside because two of them move
+/// together: a revision above the first *is* a restatement and carries
+/// its provenance (§8), and the first revision has nothing to restate.
+/// [`Envelope::first`] and [`Envelope::restated`] are the two states, and
+/// there is no third.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Envelope {
-    pub schema_version: u32,
-    pub snapshot_id: String,
+    schema_version: u32,
+    snapshot_id: String,
     /// RFC 3339, UTC.
-    pub generated_at: String,
-    pub revision: u32,
+    generated_at: String,
+    revision: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub restated_at: Option<String>,
+    restated_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub restated_because: Option<String>,
+    restated_because: Option<String>,
     /// The figures, and only the figures: the part the hash of §5 covers.
-    pub payload: serde_json::Value,
+    payload: serde_json::Value,
 }
 
 impl Envelope {
-    pub fn new(run: &Run, revision: u32, payload: serde_json::Value) -> Self {
+    /// The first publication of a document: revision 1, nothing restated.
+    pub fn first(run: &Run, payload: serde_json::Value) -> Self {
         Self {
             schema_version: SCHEMA_VERSION,
             snapshot_id: run.snapshot_id.clone(),
             generated_at: rfc3339(run.generated_at),
-            revision,
+            revision: 1,
             restated_at: None,
             restated_because: None,
             payload,
         }
     }
 
-    /// The same document, marked as restated at `at` for `because` (§8).
-    pub fn restated(self, at: i64, because: &str) -> Self {
-        Self {
-            restated_at: Some(rfc3339(at)),
-            restated_because: Some(because.to_string()),
-            ..self
-        }
+    /// A later revision, which is a restatement and says why (§8).
+    /// `revision` is the number this publication carries, and must be
+    /// above the first: `None` when it is not.
+    pub fn restated(
+        run: &Run,
+        revision: u32,
+        restatement: Restatement,
+        payload: serde_json::Value,
+    ) -> Option<Self> {
+        (revision > 1).then(|| Self {
+            revision,
+            restated_at: Some(rfc3339(restatement.at)),
+            restated_because: Some(restatement.because),
+            ..Self::first(run, payload)
+        })
+    }
+
+    pub fn snapshot_id(&self) -> &str {
+        &self.snapshot_id
+    }
+
+    pub fn generated_at(&self) -> &str {
+        &self.generated_at
+    }
+
+    pub fn revision(&self) -> u32 {
+        self.revision
+    }
+
+    pub fn payload(&self) -> &serde_json::Value {
+        &self.payload
     }
 }
 

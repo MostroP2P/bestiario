@@ -140,6 +140,23 @@ impl Bucket {
         }
     }
 
+    /// The span this partition covers: the whole month or year, UTC,
+    /// half-open like every window.
+    pub fn window(self) -> crate::window::Window {
+        use chrono::{TimeZone, Utc};
+        let first = |year: i32, month: u32| {
+            Utc.with_ymd_and_hms(year, month, 1, 0, 0, 0)
+                .single()
+                .map_or(i64::MAX, |at| at.timestamp())
+        };
+        let (from, until) = match self {
+            Self::Month { year, month: 12 } => (first(year, 12), first(year + 1, 1)),
+            Self::Month { year, month } => (first(year, month), first(year, month + 1)),
+            Self::Year(year) => (first(year, 1), first(year + 1, 1)),
+        };
+        crate::window::Window::new(from, until)
+    }
+
     /// Whether this bucket has the shape `resolution` calls for.
     fn fits(self, resolution: Resolution) -> bool {
         matches!(
@@ -169,6 +186,39 @@ impl fmt::Display for Bucket {
             Self::Month { year, month } => write!(f, "{year:04}-{month:02}"),
             Self::Year(year) => write!(f, "{year:04}"),
         }
+    }
+}
+
+/// A resolution and a bucket that fit each other — the only pair a series
+/// address can carry, so that `Display` cannot emit a string `parse`
+/// would refuse. Built through [`Partition::new`] alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Partition {
+    resolution: Resolution,
+    bucket: Bucket,
+}
+
+impl Partition {
+    /// `bucket` at `resolution`, or `None` when the shapes disagree: a
+    /// month of monthly buckets is one bucket, and a year of daily ones is
+    /// too large for one document (§3, §9.2).
+    pub fn new(resolution: Resolution, bucket: Bucket) -> Option<Self> {
+        bucket
+            .fits(resolution)
+            .then_some(Self { resolution, bucket })
+    }
+
+    pub fn resolution(self) -> Resolution {
+        self.resolution
+    }
+
+    pub fn bucket(self) -> Bucket {
+        self.bucket
+    }
+
+    /// The span the partition covers.
+    pub fn window(self) -> crate::window::Window {
+        self.bucket.window()
     }
 }
 
@@ -226,8 +276,7 @@ pub enum Address {
     /// `series:<report>:<resolution>:<bucket>[<scope>]`.
     Series {
         report: Report,
-        resolution: Resolution,
-        bucket: Bucket,
+        partition: Partition,
         scope: Option<Scope>,
     },
 }
@@ -296,8 +345,8 @@ impl Address {
                         input: input.clone(),
                         found: resolution.to_string(),
                     })?;
-                let bucket = Bucket::parse(bucket)
-                    .filter(|bucket| bucket.fits(resolution))
+                let partition = Bucket::parse(bucket)
+                    .and_then(|bucket| Partition::new(resolution, bucket))
                     .ok_or_else(|| ParseError::Bucket {
                         input: input.clone(),
                         found: bucket.to_string(),
@@ -306,8 +355,7 @@ impl Address {
                 let scope = Self::scope(&input, rest, "4 or 6")?;
                 Ok(Self::Series {
                     report,
-                    resolution,
-                    bucket,
+                    partition,
                     scope,
                 })
             }
@@ -378,14 +426,14 @@ impl fmt::Display for Address {
             ),
             Self::Series {
                 report,
-                resolution,
-                bucket,
+                partition,
                 scope,
             } => write!(
                 f,
-                "series:{}:{}:{bucket}{}",
+                "series:{}:{}:{}{}",
                 report.as_str(),
-                resolution.as_str(),
+                partition.resolution().as_str(),
+                partition.bucket(),
                 rendered(scope)
             ),
         }

@@ -77,11 +77,14 @@ fn a_series_partition_names_its_resolution_and_bucket() {
         parses("series:disputes:weekly:2026-03"),
         Address::Series {
             report: Report::Disputes,
-            resolution: Resolution::Weekly,
-            bucket: Bucket::Month {
-                year: 2026,
-                month: 3
-            },
+            partition: Partition::new(
+                Resolution::Weekly,
+                Bucket::Month {
+                    year: 2026,
+                    month: 3
+                }
+            )
+            .expect("a month of weeks"),
             scope: None,
         }
     );
@@ -89,8 +92,8 @@ fn a_series_partition_names_its_resolution_and_bucket() {
         parses("series:volume:monthly:2025:n:signet"),
         Address::Series {
             report: Report::Volume,
-            resolution: Resolution::Monthly,
-            bucket: Bucket::Year(2025),
+            partition: Partition::new(Resolution::Monthly, Bucket::Year(2025))
+                .expect("a year of months"),
             scope: Some(Scope::Network("signet".to_string())),
         }
     );
@@ -103,6 +106,21 @@ fn a_daily_or_weekly_partition_is_a_month_and_a_monthly_one_is_a_year() {
     refused("series:orders:daily:2026");
     refused("series:orders:weekly:2026");
     refused("series:orders:monthly:2026-01");
+
+    // And the same rule holds for an address built rather than parsed, so
+    // that `Display` can never emit a string `parse` refuses.
+    assert!(Partition::new(Resolution::Daily, Bucket::Year(2026)).is_none());
+    assert!(Partition::new(Resolution::Weekly, Bucket::Year(2026)).is_none());
+    assert!(
+        Partition::new(
+            Resolution::Monthly,
+            Bucket::Month {
+                year: 2026,
+                month: 1
+            }
+        )
+        .is_none()
+    );
 }
 
 #[test]
