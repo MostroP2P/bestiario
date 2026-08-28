@@ -417,3 +417,125 @@ fn the_documents_of_a_snapshot_are_in_a_stable_order() {
         .collect();
     assert_eq!(order_once, order_again);
 }
+
+// ---- a week belongs to one month, and a bucket that has not happened
+// yet is absent (§3, §6.3)
+
+fn july() -> Bucket {
+    Bucket::Month {
+        year: 2026,
+        month: 7,
+    }
+}
+
+fn weekly(bucket: Bucket) -> Partition {
+    partition(
+        &data(),
+        Report::Orders,
+        Resolution::Weekly,
+        bucket,
+        Coverage::since(JULY),
+        SEPTEMBER,
+    )
+    .expect("inside coverage")
+}
+
+fn keys(partition: &Partition) -> Vec<String> {
+    partition
+        .payload
+        .rows
+        .iter()
+        .map(|row| row[0].as_str().expect("key").to_string())
+        .collect()
+}
+
+#[test]
+fn a_week_straddling_a_month_is_filed_under_one_partition_only() {
+    let july = keys(&weekly(july()));
+    let august = keys(&weekly(august()));
+
+    assert!(
+        !july.iter().any(|week| august.contains(week)),
+        "one ISO week, one key, one set of figures: july={july:?} august={august:?}"
+    );
+    // 2026-08-01 is a Saturday, so the week it falls in opened on
+    // 2026-07-27 and is July's — the month its first day falls in.
+    assert_eq!(july.last().map(String::as_str), Some("2026-W31"));
+    assert_eq!(august.first().map(String::as_str), Some("2026-W32"));
+
+    // And every row opens on a Monday, a week after the one before it —
+    // the property an off-by-one day in the week arithmetic breaks while
+    // still producing the right number of rows.
+    let mondays = rows_of(
+        Resolution::Weekly,
+        super::super::address::Partition::new(
+            Resolution::Weekly,
+            Bucket::Month {
+                year: 2026,
+                month: 8,
+            },
+        )
+        .expect("a weekly month")
+        .window(),
+    );
+    assert_eq!(mondays.len(), 5);
+    for (index, (key, week)) in mondays.iter().enumerate() {
+        assert_eq!(*key, format!("2026-W{}", 32 + index));
+        assert_eq!(week.until - week.from, 7 * 86_400);
+        assert_eq!(
+            (week.from + 3 * 86_400).rem_euclid(7 * 86_400),
+            0,
+            "{key} does not open on a Monday"
+        );
+    }
+}
+
+#[test]
+fn a_weekly_row_is_a_whole_week_rather_than_the_part_inside_the_month() {
+    let august = weekly(august());
+    let json = payload_of(&august);
+    let columns = column_names(&json);
+    let created = columns.iter().position(|name| name == "created").unwrap();
+
+    // The August partition opens on the 3rd, not the 1st: the days before
+    // it were counted in July's last week, and counting them twice is the
+    // failure a clipped week produces.
+    assert_eq!(json["period"]["from"], "2026-08-01T00:00:00+00:00");
+    assert_eq!(keys(&august).len(), 5, "the five weeks that open in August");
+    assert!(
+        json["rows"][0][created].is_number(),
+        "a whole week is still a week the archive can speak for"
+    );
+}
+
+#[test]
+fn a_bucket_that_has_not_happened_yet_is_absent_rather_than_zero() {
+    // now = 2026-08-04, three days into the month the partition covers.
+    let now = AUGUST + 3 * DAY;
+    let partition = partition(
+        &data(),
+        Report::Orders,
+        Resolution::Daily,
+        august(),
+        Coverage::since(JULY),
+        now,
+    )
+    .expect("inside coverage");
+    let json = payload_of(&partition);
+    let columns = column_names(&json);
+    let created = columns.iter().position(|name| name == "created").unwrap();
+
+    assert_eq!(json["rows"].as_array().expect("rows").len(), 31);
+    assert_eq!(
+        json["rows"][2][created], 0,
+        "a quiet day that happened is a real zero"
+    );
+    for day in 3..31 {
+        assert!(
+            json["rows"][day][created].is_null(),
+            "row {day} = {:?}: a chart that dips to zero for the rest of the month \
+             is a more convincing lie than one that stops",
+            json["rows"][day]
+        );
+    }
+}
