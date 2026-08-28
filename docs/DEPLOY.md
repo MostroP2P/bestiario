@@ -216,6 +216,41 @@ come back. The replica *is* the durable copy; the relays are not a backup of
 it. A deployment that cannot accept that risk wants Postgres, not a second
 replica.
 
+## What is watched, and what is not
+
+A worker has no health check, because it listens on nothing. App Platform
+restarts a failed container indefinitely and reports the app as `ACTIVE`
+throughout, so a daemon crash-looping is invisible unless something counts
+the restarts. The spec declares three alerts:
+
+| Rule | Where | Why |
+| --- | --- | --- |
+| `RESTART_COUNT` > 3 in 5 min | Component | A crash loop. The daemon should restart on deploys and not otherwise. |
+| `MEM_UTILIZATION` > 85% in 10 min | Component | The backfill holds a window of events in memory; this fires before the OOM kill turns into the loop above. |
+| `DEPLOYMENT_FAILED` / `DEPLOYMENT_LIVE` | App | A deploy that fails and rolls back leaves the app running the *previous* command, which is how a broken `run_command` once went unnoticed. |
+
+Alerts have no destination in the spec. They go to the account's
+notification settings, so check that someone actually receives them — an
+alert delivered nowhere is worse than none, because it is believed to exist.
+
+### The gap: replication is not watched
+
+None of this can see replication going quietly wrong. litestream keeps
+running when a sync fails, and no App Platform rule reaches inside the
+container to notice. A bucket that stopped receiving writes an hour ago looks
+exactly like one that is up to date — until the next restart, which restores
+an hour-old index and reports on it without complaint.
+
+Nothing here covers that. What would: an external check on the age of the
+newest object under the bucket prefix, alerting when it exceeds a few
+minutes.
+
+```sh
+s3cmd ls -r s3://mostro-bestiario-index/bestiario/ | sort | tail -1
+```
+
+That is a cron job somewhere that is not this app, and it does not exist yet.
+
 ### Postgres, still
 
 Replication makes the index durable; it does not make SQLite a networked
