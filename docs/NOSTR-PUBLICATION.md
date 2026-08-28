@@ -367,20 +367,45 @@ methods, which an order names several of and which are therefore attributed
 rather than divided (SPEC §6.3); it is why currencies get blocks and methods
 do not.
 
-A currency the instance never traded in the window has no block at all,
-rather than a block of zeros. Absence here is the §6.3 rule applied to a
-dimension instead of to a bucket: what is not published is what nobody
-published.
+A currency the instance did not trade has no block at all, rather than a
+block of zeros. Absence here is the §6.3 rule applied to a dimension
+instead of to a bucket: what is not published is what nobody published.
+The same holds for the network's blocks.
 
-**Why the network-wide `orders:<window>` carries no currency blocks.** It
-could, and the figures would be exactly the sum of these. What it could not
-carry is a *bounded* number of them. An instance's currencies are the
-handful it lists in its kind 38385; the network's are every code any
-instance has ever published, and nine figures per code over a hundred codes
-walks the largest document in the snapshot into the ceiling of §9.1 — where
-the failure mode is a run that publishes nothing at all. A client that wants
-the network's mix by currency sums the per-instance documents, which costs
-one extra `REQ` and has no such cliff.
+"Did not trade" is decided on the figures the block would carry: a
+currency is published when any of them is above zero, and omitted when
+every one is zero. The distinction matters because the grouping is over
+the whole archive and not over the window — the deltas need the period
+before it and the `_now` counts need every live order — so a currency
+whose last order closed months ago still reaches it. Without the rule,
+`orders:24h` would carry a block for every code the network has ever
+traded, growing forever, which is the size argument these blocks are
+published under turned on its head. A currency being traded right now is
+not zero in `open_now`, so nothing live is dropped.
+
+Neither reaches the series. `series:orders:*` has no column per currency and
+will not gain one: a column per code per bucket is this same size argument
+in the one document shape that already repeats a row per day.
+
+**The network-wide `orders:<window>` carries the same currencies, four
+figures deep.** Its blocks are `orders.<CODE>.created`, `.completed`,
+`.canceled` and `.open_now` — no rates, no deltas, no `in_progress_now`.
+
+The asymmetry is a size argument and nothing else. An instance's currencies
+are the handful it lists in its kind 38385; the network's are every code any
+instance has ever published, and that list has no ceiling while §9.1 does.
+At roughly eighty-five bytes a metric, nine figures over a hundred codes is
+some seventy-six kilobytes — past the default limit, in the largest document
+of the snapshot, where the failure mode is a run that publishes nothing at
+all. Four figures is a quarter of that.
+
+Which four is not arbitrary either: they are the figures that *sum*. A
+client may add a currency's blocks across instances and get the network's,
+or compare them against the whole-network row above. Rates do not sum — a
+completion rate is not the sum of completion rates — and `completion_rate`
+is anyway `completed / (completed + canceled)`, which a client derives from
+two of the four. What is left is published per instance for whoever wants it
+there.
 
 **Only `orders` is scoped.** The full cross product of report × window ×
 instance is forty documents per instance for figures that are, for the other
