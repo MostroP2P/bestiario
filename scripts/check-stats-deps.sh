@@ -15,7 +15,7 @@
 set -euo pipefail
 
 MANIFEST="crates/stats/Cargo.toml"
-ALLOWED=(chrono serde serde_json thiserror uuid)
+ALLOWED=(chrono serde serde_json sha2 thiserror uuid)
 
 # Every [dependencies], [dev-dependencies], [build-dependencies] and
 # [target.*.dependencies] table, reduced to the crate names they declare.
