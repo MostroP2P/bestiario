@@ -131,6 +131,14 @@ impl Index {
     pub fn address(&self) -> Address {
         Address::Index { year: None }
     }
+
+    /// The `content` an index event carries: the whole document, since
+    /// there is no envelope wrapping a payload here. Weighed against the
+    /// ceiling of §9.1 like every other document — §5.1 shards the index
+    /// by year for exactly that reason.
+    pub fn content(&self) -> String {
+        serde_json::to_string(self).expect("an index of plain data serialises")
+    }
 }
 
 impl Snapshot {

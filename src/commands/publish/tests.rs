@@ -10,14 +10,8 @@ const NOW: i64 = 1_787_800_000;
 fn publication(coverage: Coverage, ceiling: Ceiling) -> Publication {
     let snapshot = Snapshot::compute(&Data::default(), coverage, &snapshot_id(NOW), NOW);
     let index = snapshot.index(&publisher());
-    let measured = size::measure(
-        &snapshot
-            .documents
-            .iter()
-            .cloned()
-            .chain(std::iter::once(index.clone()))
-            .collect::<Vec<_>>(),
-    );
+    let mut measured = size::measure(&snapshot.documents);
+    measured.push(size::measure_index(&index));
 
     Publication {
         snapshot,
@@ -134,15 +128,16 @@ fn an_empty_archive_says_so_rather_than_printing_two_blanks() {
 fn every_document_is_listed_with_its_size_and_an_abbreviated_hash() {
     let publication = publication(Coverage::since(NOW - 86_400), Ceiling::configured(65_536));
     let first = publication.measured.first().expect("documents");
+    let hash = first.hash.as_deref().expect("a document is hashed");
 
     let listing = listing(&publication);
 
     assert!(
-        listing.contains(&format!("{}…", &first.hash[..16])),
+        listing.contains(&format!("{}…", &hash[..16])),
         "a review is not a 64-character comparison: {listing}"
     );
     assert!(
-        !listing.contains(&first.hash[..]),
+        !listing.contains(hash),
         "the whole digest belongs in the index and in --out, not in a table"
     );
     assert!(
@@ -161,7 +156,7 @@ fn the_index_is_listed_last_because_it_is_published_last() {
 
     let addresses: Vec<String> = publication
         .documents()
-        .map(|document| document.address.to_string())
+        .map(|(address, _)| address)
         .collect();
 
     assert_eq!(
@@ -170,4 +165,28 @@ fn the_index_is_listed_last_because_it_is_published_last() {
         "an index naming a set of hashes implies those documents are already there (§7)"
     );
     assert_eq!(addresses.len(), publication.snapshot.documents.len() + 1);
+}
+
+#[test]
+fn the_index_is_weighed_with_the_rest_and_listed_without_a_hash() {
+    // §9.1 weighs every document, the index included — §5.1 shards it by
+    // year for that very reason. But nothing hashes the index (§6), so
+    // the column that names a digest has none to name.
+    let publication = publication(Coverage::since(NOW - 86_400), Ceiling::configured(65_536));
+    let index = publication
+        .measured
+        .last()
+        .expect("the index, weighed last");
+
+    let listing = listing(&publication);
+
+    assert_eq!(index.address.to_string(), "index");
+    assert!(index.bytes > 0, "the index counts against the ceiling too");
+    assert_eq!(index.hash, None);
+    assert!(
+        listing
+            .lines()
+            .any(|line| line.starts_with("index ") && line.ends_with('—')),
+        "a dash where a digest would go, as everywhere else a figure is absent: {listing}"
+    );
 }

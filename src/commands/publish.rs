@@ -33,29 +33,36 @@ use crate::db::load::{self, Scope};
 use crate::db::repo::events;
 use crate::nostr::nip11;
 use crate::stats::bucket::Coverage;
-use crate::stats::publish::index::Publisher;
+use crate::stats::publish::index::{Index, Publisher};
 use crate::stats::publish::size::{self, Ceiling, Measured};
-use crate::stats::publish::snapshot::{Document, Snapshot};
+use crate::stats::publish::snapshot::Snapshot;
 use crate::stats::series::{Assumption, Data, Priced};
 
 /// A snapshot, computed and weighed: everything a review needs and
 /// everything the signer of the next row will be handed.
 pub struct Publication {
     pub snapshot: Snapshot,
-    pub index: Document,
+    pub index: Index,
     pub ceiling: Ceiling,
     pub relays_asked: usize,
     pub measured: Vec<Measured>,
 }
 
 impl Publication {
-    /// The index last, as §7 requires of publication and as a listing
-    /// should therefore read: the documents it names come first.
-    pub fn documents(&self) -> impl Iterator<Item = &Document> {
+    /// Every document as a `d` and the `content` published under it, the
+    /// index last — the order §7 requires of publication, and the one a
+    /// listing should therefore read in: the documents the index names
+    /// come first. Pairs rather than one type because the index is not a
+    /// [`Document`]; §6 exempts it from the envelope the rest carry.
+    pub fn documents(&self) -> impl Iterator<Item = (String, String)> + '_ {
         self.snapshot
             .documents
             .iter()
-            .chain(std::iter::once(&self.index))
+            .map(|document| (document.address.to_string(), document.content()))
+            .chain(std::iter::once((
+                self.index.address().to_string(),
+                self.index.content(),
+            )))
     }
 }
 
@@ -136,14 +143,8 @@ pub async fn compute(
         },
     );
 
-    let measured = size::measure(
-        &snapshot
-            .documents
-            .iter()
-            .cloned()
-            .chain(std::iter::once(index.clone()))
-            .collect::<Vec<_>>(),
-    );
+    let mut measured = size::measure(&snapshot.documents);
+    measured.push(size::measure_index(&index));
 
     Ok(Publication {
         snapshot,
@@ -280,7 +281,13 @@ pub fn listing(publication: &Publication) -> String {
             "{:<width$}  {:>7}  {}\n",
             document.address.to_string(),
             document.bytes,
-            abbreviated(&document.hash),
+            document.hash.as_deref().map_or_else(
+                // Nothing hashes the index (§6), so there is no digest to
+                // abbreviate and a dash says so, as it does everywhere
+                // else a figure is absent.
+                || "—".to_string(),
+                abbreviated,
+            ),
             width = width
         ));
     }
@@ -311,11 +318,10 @@ fn write(publication: &Publication, directory: &Path) -> Result<()> {
     std::fs::create_dir_all(directory)
         .with_context(|| format!("creating {}", directory.display()))?;
 
-    for document in publication.documents() {
-        let name = format!("{}.json", document.address.to_string().replace(':', "-"));
+    for (address, content) in publication.documents() {
+        let name = format!("{}.json", address.replace(':', "-"));
         let path = directory.join(&name);
-        std::fs::write(&path, document.content())
-            .with_context(|| format!("writing {}", path.display()))?;
+        std::fs::write(&path, content).with_context(|| format!("writing {}", path.display()))?;
     }
 
     Ok(())

@@ -13,6 +13,7 @@
 //! number is not, and it lives here with the documents it weighs.
 
 use super::address::Address;
+use super::index::Index;
 use super::snapshot::Document;
 
 /// The publisher's own ceiling when the configuration does not set one.
@@ -72,7 +73,11 @@ pub struct Measured {
     pub bytes: usize,
     /// The payload hash of §5, carried alongside so a review of a
     /// snapshot answers "how big" and "did it change" from one listing.
-    pub hash: String,
+    ///
+    /// `None` for the index, the one document nothing hashes (§6): it is
+    /// what the hashes are *in*, and a review has nothing to compare it
+    /// against between runs. Its size still counts.
+    pub hash: Option<String>,
 }
 
 /// Every document of a snapshot, weighed in the order it was computed.
@@ -82,9 +87,21 @@ pub fn measure(documents: &[Document]) -> Vec<Measured> {
         .map(|document| Measured {
             address: document.address.clone(),
             bytes: document.content().len(),
-            hash: document.hash.clone(),
+            hash: Some(document.hash.clone()),
         })
         .collect()
+}
+
+/// The index, weighed the same way. Separate because the index is not a
+/// [`Document`] — §6 exempts it from the envelope every other document
+/// carries — but §9.1 weighs it all the same, and §5.1 shards it by year
+/// when it stops fitting.
+pub fn measure_index(index: &Index) -> Measured {
+    Measured {
+        address: index.address(),
+        bytes: index.content().len(),
+        hash: None,
+    }
 }
 
 /// The documents that do not fit under `ceiling`.
