@@ -200,14 +200,19 @@ fn series_defaults_to_monthly_buckets_with_no_split() {
 }
 
 #[test]
-fn the_config_path_defaults_to_settings_toml_and_is_overridable() {
-    assert_eq!(
-        expect_parse(&["summary"]).config,
-        std::path::PathBuf::from("settings.toml")
-    );
+fn an_omitted_config_flag_is_distinguishable_from_an_explicit_one() {
+    // The flag is an Option rather than a defaulted path so that
+    // `--config settings.toml` stays distinguishable from no flag at all:
+    // only the omission may tolerate a missing file.
+    assert_eq!(expect_parse(&["summary"]).config, None);
     assert_eq!(
         expect_parse(&["summary", "--config", "/etc/bestiario.toml"]).config,
-        std::path::PathBuf::from("/etc/bestiario.toml")
+        Some(std::path::PathBuf::from("/etc/bestiario.toml"))
+    );
+    assert_eq!(
+        expect_parse(&["summary", "--config", "settings.toml"]).config,
+        Some(std::path::PathBuf::from("settings.toml")),
+        "naming the default path explicitly is still an explicit path"
     );
 }
 

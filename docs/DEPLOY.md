@@ -94,16 +94,26 @@ optimisation, it is the only way in.
 a `worker` component rather than a `service`: no port, no health check, no
 public URL — and workers require a paid plan.
 
-**No scheduler.** App Platform `jobs` run `PRE_DEPLOY`, `POST_DEPLOY` or
-`FAILED_DEPLOY`, and nowhere else. There is no cron. The commented-out job in
-`.do/app.yaml` publishes once per deploy, which is a deployment trigger and
-not a publication schedule. Publishing on a real cadence needs one of:
+**No scheduler, and no publication job.** App Platform `jobs` run
+`PRE_DEPLOY`, `POST_DEPLOY` or `FAILED_DEPLOY`, and nowhere else. There is no
+cron.
+
+A POST_DEPLOY job would not merely be a deployment trigger rather than a
+schedule — it would publish the wrong thing. A job is a component of its own,
+with its own container and its own ephemeral `/data`, so it cannot read the
+database the `indexer` worker has been filling. `bestiario publish` there runs
+against an empty archive and replaces the addressable documents with
+statistics computed from nothing. `.do/app.yaml` therefore defines no job.
+
+Publication has to run where the archive is. The options, none of which this
+spec takes yet:
 
 - a `--every` interval inside the daemon, so one worker both syncs and
-  publishes — the option that keeps the deployment a single component;
-- a DigitalOcean Function on a schedule, or any external cron, invoking the
-  app;
-- a separate always-on worker whose command is a sleep loop around `publish`.
+  publishes against the same file — the option that keeps the deployment a
+  single component, and the one to reach for first;
+- a shared database — Postgres, per the ephemeral-filesystem section below —
+  after which a separate component may publish safely, whether that is a job,
+  an external cron, or a DigitalOcean Function.
 
 ## The ephemeral filesystem
 

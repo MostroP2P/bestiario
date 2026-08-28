@@ -40,17 +40,18 @@ pub struct Context<'a> {
 
 /// Loads configuration, opens the database and runs the requested command.
 pub async fn run(cli: &Cli) -> Result<()> {
-    // A missing file is tolerated only at the default path, where it means
-    // "configured through the environment" — the shape of the container
-    // deployment, which ships no settings.toml. Anywhere else the path was
-    // typed on purpose, and a typo has to fail rather than index with
-    // defaults.
-    let settings = if cli.config == Path::new(DEFAULT_CONFIG_PATH) {
-        Settings::load_optional(&cli.config)
-    } else {
-        Settings::load(&cli.config)
-    }
-    .with_context(|| format!("loading {}", cli.config.display()))?;
+    // A missing file is tolerated only when no `--config` was given, where it
+    // means "configured through the environment" — the shape of the container
+    // deployment, which ships no settings.toml. A path that was typed is a
+    // path someone means, default-valued or not, and a typo has to fail
+    // rather than index with whatever the environment happens to hold.
+    let settings = match &cli.config {
+        Some(path) => Settings::load(path).with_context(|| format!("loading {}", path.display())),
+        None => {
+            let path = Path::new(DEFAULT_CONFIG_PATH);
+            Settings::load_optional(path).with_context(|| format!("loading {}", path.display()))
+        }
+    }?;
 
     let pool = crate::db::connect_and_migrate(&settings.database.url)
         .await

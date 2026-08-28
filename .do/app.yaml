@@ -104,30 +104,19 @@ workers:
         type: SECRET
         value: "nsec1...REPLACE_ME"
 
-# App Platform has no scheduler: `jobs` run around a deploy and nowhere else,
-# so a POST_DEPLOY job publishes once per deploy rather than on a cadence.
-# That is a deployment trigger, not a publication schedule; docs/DEPLOY.md
-# covers what publishing on a real interval would take. Uncomment to publish
-# whatever the indexer has collected by the end of a deploy.
+# App Platform has no scheduler, and no publication job is defined here on
+# purpose.
 #
-# jobs:
-#   - name: publish
-#     kind: POST_DEPLOY
-#     dockerfile_path: Dockerfile
-#     source_dir: /
-#     github:
-#       repo: MostroP2P/bestiario
-#       branch: main
-#     instance_size_slug: apps-s-1vcpu-1gb
-#     run_command: bestiario publish
-#     envs:
-#       - key: BESTIARIO__PUBLISH__NSEC
-#         scope: RUN_TIME
-#         value: "env:BESTIARIO_PUBLISH_NSEC"
-#       - key: BESTIARIO_PUBLISH_NSEC
-#         scope: RUN_TIME
-#         type: SECRET
-#         value: "nsec1...REPLACE_ME"
+# `jobs` run around a deploy and nowhere else, so the only shape available
+# would be a POST_DEPLOY job — and a job is a component of its own, with its
+# own container and its own ephemeral `/data`. It cannot read the SQLite
+# database the `indexer` worker has been filling: `bestiario publish` would
+# run against an empty archive and replace the addressable documents with
+# statistics computed from nothing.
+#
+# Publication therefore has to run where the archive is — inside the indexer
+# process, or against a database both components share. docs/DEPLOY.md
+# covers the options.
 
 alerts:
   - rule: DEPLOYMENT_FAILED
