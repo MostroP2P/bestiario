@@ -443,3 +443,46 @@ fn without_the_flag_the_bounds_are_not_a_republication() {
 
     assert_eq!(none, Republish::No);
 }
+
+// ---- the run's clock against the last publication's (§7, §11)
+
+fn last_run(generated_at: i64) -> published::Run {
+    published::Run {
+        snapshot_id: snapshot_id(generated_at),
+        generated_at,
+        schema_version: SCHEMA_VERSION,
+        first_event_at: Some(generated_at - 86_400),
+        last_event_at: Some(generated_at),
+        events: 1,
+    }
+}
+
+#[test]
+fn a_first_run_has_no_clock_to_be_behind() {
+    refuse_stalled_clock(None, NOW).expect("nothing published yet");
+}
+
+#[test]
+fn a_run_whose_clock_has_advanced_is_allowed() {
+    refuse_stalled_clock(Some(&last_run(NOW - 1)), NOW).expect("the clock moved");
+}
+
+#[test]
+fn a_second_run_in_the_same_second_is_refused_rather_than_signed() {
+    // Every document carries the run's timestamp as its `created_at`, and
+    // a relay keeps the copy with the later one — so the replacements
+    // would be dropped by the relay while the run reported success.
+    let stalled = refuse_stalled_clock(Some(&last_run(NOW)), NOW).expect_err("same second");
+
+    assert!(
+        stalled.to_string().contains("replace nothing"),
+        "the refusal has to say what would have happened: {stalled}"
+    );
+}
+
+#[test]
+fn a_clock_that_went_backwards_is_refused_too() {
+    // An NTP correction can put a run behind the one before it for as
+    // long as the step lasted; the fault is the ordering, not equality.
+    refuse_stalled_clock(Some(&last_run(NOW)), NOW - 60).expect_err("the clock went backwards");
+}

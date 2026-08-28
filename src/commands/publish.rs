@@ -117,6 +117,13 @@ pub async fn run(
          --out <dir> to write it as files"
     );
 
+    // Only a run that is going to sign has a clock to answer for: a
+    // review or a write to disk replaces nothing on a relay. Asked before
+    // the archive is read, for the same reason the key is.
+    if keys.is_some() {
+        refuse_stalled_clock(published::latest_run(context.pool).await?.as_ref(), now)?;
+    }
+
     let publication = compute(
         context.pool,
         &context.settings.assumptions,
@@ -184,6 +191,37 @@ fn requested(from: Option<i64>, until: Option<i64>, republish: bool) -> Result<R
             Ok(Republish::Range(window))
         }
     }
+}
+
+/// Refuses a run whose clock has not passed the last publication's (§7).
+///
+/// A published document is replaceable, and every one of them carries the
+/// run's `generated_at` as its `created_at` (§11). A relay keeps the copy
+/// with the highest `created_at` and breaks a tie on event id, so a second
+/// run inside the same second would sign replacements the relay has no
+/// reason to prefer over what it already holds — and it would say so to
+/// nobody: the send succeeds, the archive records a publication, and the
+/// figures on the relay are the old ones. The same second also repeats
+/// `snapshot_id`, which §7 wants unique per run.
+///
+/// The clock going backwards is the same fault with a longer reach — an
+/// NTP correction can put a run behind the one before it for as long as
+/// the step lasted — so the check is on the ordering, not on equality.
+fn refuse_stalled_clock(last: Option<&published::Run>, now: i64) -> Result<()> {
+    let Some(last) = last else {
+        return Ok(());
+    };
+    anyhow::ensure!(
+        now > last.generated_at,
+        "the clock has not advanced past the last publication: this run is timestamped {} \
+         and snapshot {} was published at {}. Every document carries that timestamp, and a \
+         relay keeps the copy with the later one, so this run would replace nothing while \
+         reporting success. Wait until the clock passes it and run again",
+        crate::stats::publish::document::rfc3339(now),
+        last.snapshot_id,
+        crate::stats::publish::document::rfc3339(last.generated_at)
+    );
+    Ok(())
 }
 
 /// Records what this run published, so the next one can say what changed.

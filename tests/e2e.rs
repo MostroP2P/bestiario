@@ -134,9 +134,18 @@ fn fixtures() -> Vec<Event> {
 /// hold a key at all.
 const PUBLISHER_NSEC: &str = "nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5";
 
-/// A clock one second past [`NOW`], for the one publication that has
-/// changed figures to store: see `invoke_at`.
-const LATER: &str = "1787800001";
+/// The clocks the publications after the first run on, one second apart.
+///
+/// A signing run refuses to repeat or precede the last publication's
+/// timestamp, because every document carries it as `created_at` and a
+/// relay keeps the copy with the later one: two runs in one second would
+/// replace nothing while reporting success. Real invocations are minutes
+/// or hours apart; a suite that freezes the clock has to say so itself.
+const SECOND_RUN: &str = "1787800001";
+const THIRD_RUN: &str = "1787800002";
+
+/// The one publication that has changed figures to store: see `invoke_at`.
+const LATER: &str = "1787800003";
 
 /// The variable `[publish].nsec` points at, here as anywhere.
 const PUBLISHER_NSEC_VAR: &str = "BESTIARIO_PUBLISH_NSEC";
@@ -188,9 +197,9 @@ fn invoke(settings: &Path, args: &[&str], key_exported: bool) -> std::process::O
 ///
 /// Kind 30666 is addressable, so a relay keeps one event per
 /// `(pubkey, kind, d)` and refuses a replacement whose `created_at` is not
-/// later than the one it holds. Two publications of *changed* figures in
-/// the same second are therefore not both storable — which the rest of
-/// this suite never notices, because it publishes the same bytes twice.
+/// later than the one it holds. Two publications in the same second are
+/// therefore not both storable, and a signing run refuses rather than
+/// pretend otherwise — so every publication here names its own clock.
 fn invoke_at(
     settings: &Path,
     args: &[&str],
@@ -216,6 +225,20 @@ fn invoke_at(
 /// stdout.
 fn bestiario(settings: &Path, args: &[&str]) -> String {
     let output = invoke(settings, args, true);
+
+    assert!(
+        output.status.success(),
+        "`bestiario {}` failed:\n{}",
+        args.join(" "),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    String::from_utf8(output.stdout).expect("utf-8 stdout")
+}
+
+/// The same as [`bestiario`], with the run's clock given explicitly.
+fn bestiario_at(settings: &Path, args: &[&str], now: &str) -> String {
+    let output = invoke_at(settings, args, true, now);
 
     assert!(
         output.status.success(),
@@ -441,27 +464,38 @@ async fn backfill_then_every_report_against_the_local_relay() {
     // And the snapshot the run computed is the snapshot the relay holds:
     // every `s` tag names this run, which is what lets a client ask for a
     // whole publication in one filter (§7).
-    // Act / Assert: a second run over an unchanged archive re-sends no
-    // document (§8). Every figure is the one already published, and a
-    // relay does not need a second copy of an answer that did not
+    // Act / Assert: a second run over an unchanged archive re-sends
+    // almost nothing (§8). Every figure is the one already published,
+    // and a relay does not need a second copy of an answer that did not
     // change. The index goes out anyway — nothing hashes it and naming
     // the current snapshot is its whole job (§5).
-    let again = bestiario(&settings, &["publish"]);
+    //
+    // This run's clock is a second past the one before it, which is the
+    // point: a window document covers a span anchored to the archive's
+    // ceiling, not to the clock, so a second that passed without an
+    // event in it moves nothing. Anchored to the clock, all twenty
+    // window documents would restate here.
+    //
+    // The five that do restate are the disputes family, and they are not
+    // this rule's exception but its other half: an open dispute
+    // publishes its age, which is `now - opened_at` and is about the
+    // clock on purpose (§6.7). Those figures really did move.
+    let again = bestiario_at(&settings, &["publish"], SECOND_RUN);
     assert!(
-        again.contains("0 document(s) sent"),
-        "a second run over an unchanged archive re-signed figures: {again}"
+        again.contains("5 document(s) sent, 27 unchanged"),
+        "a second run over an unchanged archive re-signed figures that did not move: {again}"
     );
     assert_eq!(
         relay_documents(&relay).await.len(),
         published.len(),
-        "the second run added events for figures that did not move"
+        "the second run added events for addresses the first one did not publish"
     );
 
     // But `--republish` is the recovery path for a relay that lost them,
     // so it distrusts exactly that assumption (§9.3). The documents come
     // back with the same revisions: re-signing an unchanged payload is
     // not a restatement.
-    let recovered = bestiario(&settings, &["publish", "--republish"]);
+    let recovered = bestiario_at(&settings, &["publish", "--republish"], THIRD_RUN);
     assert!(
         recovered.contains("index last"),
         "--republish has to send the whole snapshot: {recovered}"
@@ -472,8 +506,19 @@ async fn backfill_then_every_report_against_the_local_relay() {
         published.len(),
         "an addressable kind keeps one event per `d`, so a republication replaces rather than adds"
     );
+    // Read off every document whose payload the clock does not move —
+    // which is every one of them but the disputes family, whose open
+    // disputes publish their age (§6.7). Those restate a second at a
+    // time no matter what `--republish` does, and asserting over them
+    // would be asserting about the clock rather than about §9.3.
     let revisions: BTreeSet<&str> = after
         .iter()
+        .filter(|event| {
+            !event
+                .tags
+                .identifier()
+                .is_some_and(|address| address.contains("disputes"))
+        })
         .filter_map(|event| {
             event
                 .tags
@@ -512,7 +557,7 @@ async fn backfill_then_every_report_against_the_local_relay() {
         relay.add_event(extra).await.expect("seed one more order");
 
         bestiario(&settings, &["backfill"]);
-        // A second later than every publication above: see `invoke_at`.
+        // Later than every publication above: see `invoke_at`.
         let output = invoke_at(&settings, &["publish"], true, LATER);
         assert!(
             output.status.success(),
