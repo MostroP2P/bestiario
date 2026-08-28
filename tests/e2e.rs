@@ -134,6 +134,10 @@ fn fixtures() -> Vec<Event> {
 /// hold a key at all.
 const PUBLISHER_NSEC: &str = "nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5";
 
+/// A clock one second past [`NOW`], for the one publication that has
+/// changed figures to store: see `invoke_at`.
+const LATER: &str = "1787800001";
+
 /// The variable `[publish].nsec` points at, here as anywhere.
 const PUBLISHER_NSEC_VAR: &str = "BESTIARIO_PUBLISH_NSEC";
 
@@ -177,9 +181,25 @@ nsec = "env:{PUBLISHER_NSEC_VAR}"
 /// The environment is the child's alone: a test that exported the key into
 /// its own process would export it into every test running beside it.
 fn invoke(settings: &Path, args: &[&str], key_exported: bool) -> std::process::Output {
+    invoke_at(settings, args, key_exported, NOW)
+}
+
+/// The same, with the run's clock given explicitly.
+///
+/// Kind 30666 is addressable, so a relay keeps one event per
+/// `(pubkey, kind, d)` and refuses a replacement whose `created_at` is not
+/// later than the one it holds. Two publications of *changed* figures in
+/// the same second are therefore not both storable — which the rest of
+/// this suite never notices, because it publishes the same bytes twice.
+fn invoke_at(
+    settings: &Path,
+    args: &[&str],
+    key_exported: bool,
+    now: &str,
+) -> std::process::Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_bestiario"));
     command
-        .env("BESTIARIO_NOW", NOW)
+        .env("BESTIARIO_NOW", now)
         .env_remove(PUBLISHER_NSEC_VAR);
     if key_exported {
         command.env(PUBLISHER_NSEC_VAR, PUBLISHER_NSEC);
@@ -421,6 +441,119 @@ async fn backfill_then_every_report_against_the_local_relay() {
     // And the snapshot the run computed is the snapshot the relay holds:
     // every `s` tag names this run, which is what lets a client ask for a
     // whole publication in one filter (§7).
+    // Act / Assert: a second run over an unchanged archive sends nothing
+    // (§8). Every figure is the one already published, and a relay does
+    // not need a second copy of an answer that did not change.
+    let again = bestiario(&settings, &["publish"]);
+    assert!(
+        again.contains("nothing changed"),
+        "a second run over an unchanged archive re-signed everything: {again}"
+    );
+    assert_eq!(
+        relay_documents(&relay).await.len(),
+        published.len(),
+        "the second run added events for figures that did not move"
+    );
+
+    // But `--republish` is the recovery path for a relay that lost them,
+    // so it distrusts exactly that assumption (§9.3). The documents come
+    // back with the same revisions: re-signing an unchanged payload is
+    // not a restatement.
+    let recovered = bestiario(&settings, &["publish", "--republish"]);
+    assert!(
+        recovered.contains("index last"),
+        "--republish has to send the whole snapshot: {recovered}"
+    );
+    let after = relay_documents(&relay).await;
+    assert_eq!(
+        after.len(),
+        published.len(),
+        "an addressable kind keeps one event per `d`, so a republication replaces rather than adds"
+    );
+    let revisions: BTreeSet<&str> = after
+        .iter()
+        .filter_map(|event| {
+            event
+                .tags
+                .iter()
+                .find(|tag| tag.kind() == "revision")
+                .and_then(Tag::content)
+        })
+        .collect();
+    assert_eq!(
+        revisions,
+        BTreeSet::from(["1"]),
+        "re-signing an unchanged payload is not a restatement (§9.3)"
+    );
+
+    // Act: a figure moves. An order the archive did not hold reaches the
+    // relay, a backfill stores it, and the next publication has something
+    // to restate.
+    let restated = {
+        let seed = events
+            .iter()
+            .find(|event| event.kind.as_u16() == 38383 && event.pubkey == mostro)
+            .expect("an order from the profiled instance");
+        let keys = test_keys(&PublicKey::from_hex(MOSTRO).expect("hex"));
+        let tags = seed.tags.iter().map(|tag| {
+            if tag.kind() == "d" {
+                Tag::identifier("00000000-0000-4000-8000-00000000e2e1")
+            } else {
+                tag.clone()
+            }
+        });
+        let extra = EventBuilder::new(seed.kind, seed.content.clone())
+            .tags(tags)
+            .custom_created_at(seed.created_at)
+            .finalize(&keys)
+            .expect("sign");
+        relay.add_event(extra).await.expect("seed one more order");
+
+        bestiario(&settings, &["backfill"]);
+        // A second later than every publication above: see `invoke_at`.
+        let output = invoke_at(&settings, &["publish"], true, LATER);
+        assert!(
+            output.status.success(),
+            "`bestiario publish` failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).expect("utf-8 stdout")
+    };
+
+    // Assert: the documents whose figures moved are at revision 2, and say
+    // why (§8). The reason is read off the archive — the run was never
+    // told a backfill had happened — and a backfill is what reaching an
+    // order the archive did not hold is.
+    assert!(
+        restated.contains("index last"),
+        "figures moved, so the snapshot is published: {restated}"
+    );
+    let moved: Vec<Event> = relay_documents(&relay)
+        .await
+        .into_iter()
+        .filter(|event| {
+            event
+                .tags
+                .iter()
+                .find(|tag| tag.kind() == "revision")
+                .and_then(Tag::content)
+                == Some("2")
+        })
+        .collect();
+    assert!(
+        !moved.is_empty(),
+        "an order nobody had counted moved no figure at all"
+    );
+    for event in &moved {
+        let envelope: serde_json::Value =
+            serde_json::from_str(&event.content).expect("an envelope");
+        assert_eq!(
+            envelope["restated_because"], "backfill",
+            "a revision above the first says why (§8): {envelope}"
+        );
+        assert!(envelope["restated_at"].is_string(), "and when: {envelope}");
+    }
+
     // And the two ways of having no key are told apart. Configuring none
     // at all is one run that would otherwise read the whole archive and
     // send nothing.

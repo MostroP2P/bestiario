@@ -312,6 +312,12 @@ pub struct Document {
     pub envelope: Envelope,
     /// The hash of §5, over the payload the envelope carries.
     pub hash: String,
+    /// Unix seconds: when these figures last changed, which is what the
+    /// index reports (§8) and is not the same as when they were last
+    /// published. A snapshot on its own has no history, so
+    /// [`Snapshot::compute`] sets it to the run's clock and
+    /// `restated` gives an unchanged document back the one it had.
+    pub updated_at: i64,
     /// The span a series partition covers; `None` for a window document.
     pub period: Option<Window>,
 }
@@ -364,6 +370,7 @@ impl Snapshot {
                         scope: None,
                     },
                     hash: hash_of(&payload),
+                    updated_at: now,
                     envelope: Envelope::first(
                         &run,
                         serde_json::to_value(&payload).expect("plain data"),
@@ -379,6 +386,7 @@ impl Snapshot {
                         documents.push(Document {
                             address: partition.address,
                             hash: partition.hash,
+                            updated_at: now,
                             envelope: Envelope::first(
                                 &run,
                                 serde_json::to_value(&partition.payload).expect("plain data"),

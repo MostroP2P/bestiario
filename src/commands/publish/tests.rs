@@ -5,13 +5,40 @@ use nostr_sdk::prelude::{Filter, Keys, Kind, MockRelay};
 
 use super::*;
 use crate::stats::series::Data;
+use bestiario_stats::publish::restatement::Previous;
 
 /// 2026-08-27T03:06:40Z, the clock the E2E suite freezes.
 const NOW: i64 = 1_787_800_000;
 
 fn publication(coverage: Coverage, ceiling: Ceiling) -> Publication {
-    let snapshot = Snapshot::compute(&Data::default(), coverage, &snapshot_id(NOW), NOW);
+    published_after(coverage, ceiling, &BTreeMap::new())
+}
+
+/// A publication computed against `history`, the way `compute` builds one
+/// — without the database it would otherwise read the history from.
+fn published_after(
+    coverage: Coverage,
+    ceiling: Ceiling,
+    history: &BTreeMap<String, Previous>,
+) -> Publication {
+    let Restated {
+        snapshot,
+        mut not_sent,
+        mut state,
+    } = Snapshot::compute(&Data::default(), coverage, &snapshot_id(NOW), NOW).restated(
+        history,
+        Because::Backfill,
+        Republish::No,
+    );
     let index = snapshot.index(&publisher());
+    let address = index.address.to_string();
+    if history
+        .get(&address)
+        .is_some_and(|previous| previous.hash() == index.hash)
+    {
+        not_sent.insert(address.clone());
+    }
+    state.insert(address, restatement::recorded(&index));
     let measured = size::measure(
         &snapshot
             .documents
@@ -27,6 +54,9 @@ fn publication(coverage: Coverage, ceiling: Ceiling) -> Publication {
         ceiling,
         relays_asked: 1,
         measured,
+        not_sent,
+        state,
+        events: 0,
     }
 }
 
@@ -244,5 +274,105 @@ async fn a_document_no_relay_took_stops_the_index_that_would_name_it() {
     assert!(
         message.contains("the index naming them was not published"),
         "the operator has to be told the index was withheld: {message}"
+    );
+}
+
+// ---- what a second run over an unchanged archive sends (§8)
+
+/// The history a run against `publication` would leave behind.
+fn history_of(publication: &Publication) -> BTreeMap<String, Previous> {
+    publication.state.clone()
+}
+
+#[tokio::test]
+async fn a_run_over_an_unchanged_archive_sends_nothing_at_all() {
+    // Not an optimisation: a relay does not need a second copy of an
+    // answer that did not change, and every re-signature is a new event
+    // every client has to decide it already had.
+    let relay = MockRelay::run().await.expect("start the local relay");
+    let url = relay.url().await.to_string();
+    let first = publication(Coverage::since(NOW - 86_400), Ceiling::configured(65_536));
+    send(&first, &keys(), std::slice::from_ref(&url))
+        .await
+        .expect("publish");
+
+    let again = published_after(
+        Coverage::since(NOW - 86_400),
+        Ceiling::configured(65_536),
+        &history_of(&first),
+    );
+    let report = send(&again, &keys(), std::slice::from_ref(&url))
+        .await
+        .expect("publish again");
+
+    assert!(
+        report.contains("nothing changed"),
+        "the run has to say it sent nothing: {report}"
+    );
+    let client = RelayClient::connect(&[url]).await.expect("connect");
+    let stored = client
+        .fetch_window(
+            &client.relays()[0],
+            Filter::new().kind(Kind::Custom(crate::stats::publish::document::KIND)),
+        )
+        .await
+        .expect("read them back");
+    assert_eq!(
+        stored.len(),
+        first.measured.len(),
+        "the second run added events for figures that did not move"
+    );
+}
+
+#[test]
+fn an_unchanged_run_still_lists_every_document_and_records_every_one() {
+    // "Unchanged" is one of the things the index exists to say, and a
+    // document dropped from the record would restart at revision 1.
+    let first = publication(Coverage::since(NOW - 86_400), Ceiling::configured(65_536));
+
+    let again = published_after(
+        Coverage::since(NOW - 86_400),
+        Ceiling::configured(65_536),
+        &history_of(&first),
+    );
+
+    assert_eq!(again.measured.len(), first.measured.len());
+    assert_eq!(again.state, first.state, "and records the same revisions");
+    assert_eq!(
+        again.not_sent.len(),
+        again.measured.len(),
+        "every document, the index included, is already published"
+    );
+}
+
+#[test]
+fn the_index_is_withheld_only_when_nothing_it_names_moved() {
+    // The index's payload carries every document's hash, so an index that
+    // did not move implies nothing it names did. The converse is what
+    // §7 rests on: an index is never withheld while something it names
+    // is being sent.
+    let first = publication(Coverage::since(NOW - 86_400), Ceiling::configured(65_536));
+    let mut history = history_of(&first);
+    history.insert(
+        "orders:24h".to_string(),
+        Previous::First {
+            hash: "a hash from another archive".to_string(),
+            updated_at: NOW - 604_800,
+        },
+    );
+
+    let again = published_after(
+        Coverage::since(NOW - 86_400),
+        Ceiling::configured(65_536),
+        &history,
+    );
+
+    assert!(
+        !again.not_sent.contains("orders:24h"),
+        "the document moved and was withheld"
+    );
+    assert!(
+        !again.not_sent.contains("index"),
+        "the index names a hash nobody published yet and was withheld anyway"
     );
 }

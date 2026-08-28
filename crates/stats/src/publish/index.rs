@@ -116,6 +116,7 @@ impl Snapshot {
         Document {
             address: Address::Index { year: None },
             hash: super::snapshot::hash_of(&payload),
+            updated_at: self.run.generated_at,
             envelope: Envelope::first(
                 &self.run,
                 serde_json::to_value(&payload).expect("plain data"),
@@ -125,17 +126,23 @@ impl Snapshot {
     }
 }
 
-/// One document's entry. `updated_at` is the run's clock because a
-/// snapshot on its own knows nothing of the one before it; §8 is what
-/// gives an unchanged payload back the clock it already had.
+/// One document's entry, read entirely off the document: the revision it
+/// is published under, when its figures last moved, and — above the first
+/// revision — when and why they moved (§8).
+///
+/// Nothing is recomputed here. A snapshot on its own has no history, and
+/// `Snapshot::restated` is what folds the last publication into these
+/// fields; an index built from a snapshot that never met its history
+/// reports every document as a first revision, which is exactly what a
+/// first publication is.
 fn entry(document: &Document) -> Entry {
     Entry {
         d: document.address.to_string(),
         hash: document.hash.clone(),
         revision: document.envelope.revision(),
-        updated_at: document.envelope.generated_at().to_string(),
-        restated_at: None,
-        restated_because: None,
+        updated_at: rfc3339(document.updated_at),
+        restated_at: document.envelope.restated_at().map(str::to_string),
+        restated_because: document.envelope.restated_because().map(str::to_string),
     }
 }
 

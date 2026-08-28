@@ -1237,6 +1237,59 @@ what the next one would send. A run with no key, no `--dry-run` and no
 `--out` is refused rather than quietly doing nothing: it is the invocation
 of somebody who believes they have configured a publisher and has not.
 
+### What changed, and why
+
+A document whose figures did not move is not re-signed and not sent. Every
+document carries a `revision` that starts at 1 and increments only when its
+**payload** changes; a new run is not a new revision, which is what makes
+the hash worth caching against. A run over an archive that has not moved
+sends nothing at all — not even the index, whose own payload carries every
+document's hash and therefore moves exactly when one of them does.
+
+Unchanged documents stay in the index, with the hash, revision and
+`updated_at` they already had. "Unchanged" is one of the things the index
+exists to say: dropping one would read as "no longer published".
+
+A revision above the first says when it was restated and why, in one of
+four words — `backfill`, `rebuild`, `schema`, `correction` — so a client
+that had cached the figure can say *the number changed* rather than
+silently swapping it. The reason is read off the archive rather than off a
+flag: `publish` is not told whether a backfill or a rebuild ran before it,
+but the archive records what it published under and what it held, so a
+schema bump, an archive that reaches further back or holds more events, and
+a run over the same events are three states it can tell apart. `correction`
+is never inferred — nothing in the archive distinguishes it from a rebuild.
+
+That history lives in the archive, in `published_documents` and
+`publication_runs`, for the same reason everything else does: reading the
+last index back off a relay would work until the day a relay pruned it, and
+then every revision would silently reset to 1.
+
+### Recovering a relay
+
+```sh
+bestiario publish --republish
+bestiario publish --republish --from 2026-01-01 --until 2026-06-30
+```
+
+`--republish` regenerates and sends every document from the archive alone,
+whatever any relay holds. It is the recovery path for a pruned relay, a new
+relay or a schema migration, and it is what makes "the relay is not the
+archive" true rather than aspirational.
+
+It overrides the skip above, which would otherwise defeat it: the documents
+a pruned relay is missing are overwhelmingly the ones whose figures have
+not changed in months, so a run honouring the skip would send it nothing.
+With `--from` / `--until` it recovers the series partitions that range
+touches — plus whatever an ordinary run would have sent anyway, because an
+index naming a changed document that was withheld would point every reader
+at something no relay holds.
+
+Everything is signed afresh rather than replayed from stored events. A
+cache of signed events would be state that can disagree with the archive it
+came from, and re-signing an unchanged payload is not a restatement: no
+revision moves, and no client is told a figure changed when it did not.
+
 ## Development
 
 ```sh

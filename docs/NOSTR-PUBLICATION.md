@@ -378,6 +378,22 @@ That is allowed, and it MUST NOT be silent:
   `schema` / `correction`) accompany any revision above 1.
 - The index carries the same fields, so a client detects a restatement
   without fetching the partition.
+- The reason is read off the archive, not off a flag. `publish` is not
+  told whether a `backfill` or a `rebuild` ran before it, but
+  `publication_runs` records the schema each run published under and the
+  extent and size of the archive it read, which tells the three inferable
+  reasons apart: a changed `schema_version` is `schema`; an archive that
+  reaches further back, or holds more events than the last run saw, is
+  `backfill`; the same events underneath moved figures is `rebuild`.
+  `correction` is never inferred — nothing in the archive distinguishes
+  it from a rebuild.
+- Publication history lives in the archive (`published_documents`,
+  `publication_runs`), not on a relay. It is not derivable from the Mostro
+  events, and reading the last index back off a relay would work until the
+  day a relay pruned it — after which every revision would silently reset
+  to 1, which is exactly the claim this section exists to make
+  trustworthy. What §9.3 refuses to keep is a cache of *signed events*;
+  these tables hold none.
 - A client that has cached a partition and sees a higher revision SHOULD
   surface that the figure changed, not just swap it.
 
@@ -386,6 +402,10 @@ is already published is not re-signed and not sent: nothing about the answer
 changed, and a relay does not need a second copy of it. The index still lists
 it, with its existing hash, revision and `updated_at`, because "unchanged" is
 one of the things the index exists to say.
+
+The index is a document under this rule like any other. Its payload carries
+every document's hash, so it moves exactly when one of them does — and a run
+over an archive that has not moved therefore publishes nothing at all.
 
 The exception is §9.3. `--republish` puts documents on a relay that does not
 have them, so "the relay already has this" is precisely the assumption it
@@ -434,6 +454,13 @@ the documents a pruned relay is missing are overwhelmingly the ones whose
 figures have not changed in months, and a run that skipped them would send
 the recovering relay nothing. Every document in the range is regenerated,
 signed and sent, whatever its hash.
+
+`--from` / `--until` select **partitions**, which is the only reading of "a
+range" a partitioned format allows; a window document is relative to the
+publishing moment and covers no fixed span, so no range names one. Whatever
+an ordinary run would have sent is still sent alongside: withholding a
+*changed* document because it fell outside the range would publish an index
+naming a hash no relay holds, which is the one thing §7 forbids.
 
 Signed afresh rather than replayed from a store of past events: §1.1 puts the
 whole truth in the archive and keeps no state beside it, and a cache of
