@@ -121,23 +121,74 @@ impl Resolution {
     }
 }
 
+/// A year the grammar can spell: four digits, so `0000`..`9999` (§3).
+/// Built through [`Year::new`] alone, and rendered padded, which is what
+/// makes rendering the inverse of parsing for the whole range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Year(i32);
+
+impl Year {
+    /// `year` if four digits can write it, `None` otherwise.
+    pub fn new(year: i32) -> Option<Self> {
+        (0..=9999).contains(&year).then_some(Self(year))
+    }
+
+    pub fn get(self) -> i32 {
+        self.0
+    }
+}
+
+impl fmt::Display for Year {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:04}", self.0)
+    }
+}
+
+/// A month of the year: `01`..`12` (§3). Built through [`Month::new`]
+/// alone, and rendered with its leading zero.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Month(u32);
+
+impl Month {
+    /// `month` if it is one of the twelve, `None` otherwise.
+    pub fn new(month: u32) -> Option<Self> {
+        (1..=12).contains(&month).then_some(Self(month))
+    }
+
+    pub fn get(self) -> u32 {
+        self.0
+    }
+}
+
+impl fmt::Display for Month {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:02}", self.0)
+    }
+}
+
 /// The span one series partition covers: a month of days or weeks, or a
 /// year of months. The shape follows the resolution — a year of days is
 /// too large for one document, a year of months is not.
+///
+/// Both spans are made of [`Year`] and [`Month`], so a bucket holds no
+/// number the grammar cannot spell and `Display` cannot emit a string
+/// `parse` would refuse. Shape is checked separately, by [`Partition`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Bucket {
-    Month { year: i32, month: u32 },
-    Year(i32),
+    Month { year: Year, month: Month },
+    Year(Year),
 }
 
 impl Bucket {
     /// The partition a week belongs to: the month its first day falls in,
     /// so a week spanning a month boundary lives in one partition only.
-    pub fn for_week_starting(monday: NaiveDate) -> Self {
-        Self::Month {
-            year: monday.year(),
-            month: monday.month(),
-        }
+    /// `None` when the date falls outside the years an address can name.
+    pub fn for_week_starting(monday: NaiveDate) -> Option<Self> {
+        Some(Self::Month {
+            year: Year::new(monday.year())?,
+            // A `NaiveDate` has a month, and it is one of the twelve.
+            month: Month::new(monday.month())?,
+        })
     }
 
     /// The span this partition covers: the whole month or year, UTC,
@@ -149,10 +200,18 @@ impl Bucket {
                 .single()
                 .map_or(i64::MAX, |at| at.timestamp())
         };
+        // December's next month is January of the year after, which is a
+        // year the grammar need not be able to spell: it is the exclusive
+        // end of the span, not a bucket anyone addresses.
         let (from, until) = match self {
-            Self::Month { year, month: 12 } => (first(year, 12), first(year + 1, 1)),
-            Self::Month { year, month } => (first(year, month), first(year, month + 1)),
-            Self::Year(year) => (first(year, 1), first(year + 1, 1)),
+            Self::Month { year, month } if month.get() == 12 => {
+                (first(year.get(), 12), first(year.get() + 1, 1))
+            }
+            Self::Month { year, month } => (
+                first(year.get(), month.get()),
+                first(year.get(), month.get() + 1),
+            ),
+            Self::Year(year) => (first(year.get(), 1), first(year.get() + 1, 1)),
         };
         crate::window::Window::new(from, until)
     }
@@ -166,28 +225,13 @@ impl Bucket {
         )
     }
 
-    /// Whether the numbers are ones the grammar can spell: a four-digit
-    /// year, and a month of `01`..`12` (§3). Shape is not enough — a
-    /// `Bucket` is built from its fields, and `2026-00` has the shape of a
-    /// month and is not one.
-    fn is_canonical(self) -> bool {
-        let four_digits = |year| (0..=9999).contains(&year);
-        match self {
-            Self::Month { year, month } => four_digits(year) && (1..=12).contains(&month),
-            Self::Year(year) => four_digits(year),
-        }
-    }
-
     fn parse(text: &str) -> Option<Self> {
         match text.split_once('-') {
             None => Some(Self::Year(year(text)?)),
-            Some((year_text, month_text)) => {
-                let month = fixed_digits(month_text, 2)?;
-                (1..=12).contains(&month).then_some(Self::Month {
-                    year: year(year_text)?,
-                    month,
-                })
-            }
+            Some((year_text, month_text)) => Some(Self::Month {
+                year: year(year_text)?,
+                month: Month::new(fixed_digits(month_text, 2)?)?,
+            }),
         }
     }
 }
@@ -195,8 +239,8 @@ impl Bucket {
 impl fmt::Display for Bucket {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Month { year, month } => write!(f, "{year:04}-{month:02}"),
-            Self::Year(year) => write!(f, "{year:04}"),
+            Self::Month { year, month } => write!(f, "{year}-{month}"),
+            Self::Year(year) => write!(f, "{year}"),
         }
     }
 }
@@ -211,12 +255,14 @@ pub struct Partition {
 }
 
 impl Partition {
-    /// `bucket` at `resolution`, or `None` when the shapes disagree — a
+    /// `bucket` at `resolution`, or `None` when the shapes disagree: a
     /// month of monthly buckets is one bucket, and a year of daily ones is
-    /// too large for one document (§3, §9.2) — or when the bucket names a
-    /// month or a year the grammar cannot spell.
+    /// too large for one document (§3, §9.2). The numbers need no check
+    /// here — a [`Bucket`] holds none the grammar cannot spell.
     pub fn new(resolution: Resolution, bucket: Bucket) -> Option<Self> {
-        (bucket.fits(resolution) && bucket.is_canonical()).then_some(Self { resolution, bucket })
+        bucket
+            .fits(resolution)
+            .then_some(Self { resolution, bucket })
     }
 
     pub fn resolution(self) -> Resolution {
@@ -277,7 +323,7 @@ impl fmt::Display for Scope {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Address {
     /// `index`, or `index:<year>` once the index is sharded (§5.1).
-    Index { year: Option<i32> },
+    Index { year: Option<Year> },
     /// `<report>:<window>[<scope>]`.
     Window {
         report: Report,
@@ -420,7 +466,7 @@ impl fmt::Display for Address {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Index { year: None } => write!(f, "index"),
-            Self::Index { year: Some(year) } => write!(f, "index:{year:04}"),
+            Self::Index { year: Some(year) } => write!(f, "index:{year}"),
             // One `write!` per shape, the scope folded in as text: a
             // second write behind a `?` would be an error arm that no
             // formatter of a string can reach, and so no test could.
@@ -464,9 +510,9 @@ fn fixed_digits(text: &str, digits: usize) -> Option<u32> {
         .flatten()
 }
 
-/// A four-digit year.
-fn year(text: &str) -> Option<i32> {
-    fixed_digits(text, 4).map(|year| year as i32)
+/// The [`Year`] four digits spell, if they are four digits.
+fn year(text: &str) -> Option<Year> {
+    Year::new(fixed_digits(text, 4)? as i32)
 }
 
 #[cfg(test)]
