@@ -1,0 +1,26 @@
+# `cargo release <level>` — the whole procedure is in docs/RELEASE.md.
+#
+# One version and one tag for the workspace: `crates/stats` inherits the root
+# version (`version.workspace = true`) and is not published on its own, so a
+# release is a single number and a single `vX.Y.Z` tag. The tag is what the
+# GitHub Actions workflow `.github/workflows/release.yml` reacts to: it builds
+# the Linux x86_64 binary and opens the GitHub release with the notes of this
+# version. Nothing here talks to GitHub itself.
+allow-branch = ["main"]
+shared-version = true
+# bestiario ships as a binary, not as a crate anyone depends on.
+publish = false
+push = true
+tag = true
+tag-name = "v{{version}}"
+tag-message = "bestiario {{version}}"
+pre-release-commit-message = "chore(release): {{version}}"
+# Writes the version's section into CHANGELOG.md before the release commit, so
+# the tag already contains its own entry and the workflow has something to read.
+# Resolved through `git rev-parse` because cargo-release runs hooks from each
+# crate's directory, and idempotent because it therefore runs once per crate.
+pre-release-hook = [
+	"bash",
+	"-c",
+	"\"$(git rev-parse --show-toplevel)/scripts/changelog.sh\" update {{version}}",
+]

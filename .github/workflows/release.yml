@@ -1,0 +1,102 @@
+name: Release
+
+# `cargo release <level>` (release.toml) bumps the version, writes the
+# CHANGELOG.md section and pushes a `vX.Y.Z` tag. That push is this workflow:
+# it builds the Linux x86_64 binary and opens the GitHub release carrying the
+# notes for that version. Nothing here is run by hand.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  TARGET: x86_64-unknown-linux-gnu
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Linux x86_64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The notes are derived from the commits since the previous tag, so
+          # the whole history and every tag have to be here.
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Tag matches Cargo.toml
+        # A tag that names a version the manifest does not carry would ship a
+        # binary reporting a different number than the release it sits in.
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          manifest=$(cargo metadata --no-deps --format-version 1 |
+            jq -r '.packages[] | select(.name == "bestiario") | .version')
+          if [ "$version" != "$manifest" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match Cargo.toml ${manifest}" >&2
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_ENV"
+
+      - name: cargo test
+        # CI already ran on main; this is the tagged commit itself, and a
+        # release binary is the one artefact nobody re-checks afterwards.
+        run: cargo test --workspace --all-features --locked
+
+      - name: cargo build
+        run: cargo build --release --locked --target "$TARGET" --bin bestiario
+
+      - name: Package
+        run: |
+          name="bestiario-${GITHUB_REF_NAME}-${TARGET}"
+          mkdir -p "dist/${name}"
+          cp "target/${TARGET}/release/bestiario" "dist/${name}/"
+          cp README.md settings.toml.example "dist/${name}/"
+          tar -C dist -czf "dist/${name}.tar.gz" "${name}"
+          (cd dist && sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256")
+          ls -l dist
+
+      - name: Release notes
+        # The section CHANGELOG.md gained when the version was cut. If the tag
+        # was made without the cargo-release hook, derive it from the log
+        # instead rather than publishing a release with an empty body.
+        run: |
+          awk -v heading="## [${version}]" '
+            index($0, heading) == 1 { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md | sed '/./,$!d' > notes.md
+          if [ ! -s notes.md ]; then
+            echo "no CHANGELOG.md section for ${version}, deriving from the log" >&2
+            ./scripts/changelog.sh notes "${version}" > notes.md
+          fi
+          cat notes.md
+
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A version with a pre-release suffix (0.2.0-rc.1) is not a stable one.
+          prerelease=""
+          case "$version" in *-*) prerelease="--prerelease" ;; esac
+          # --verify-tag: without it, a `gh release create` for a tag that is
+          # no longer on the remote — deleted while recovering a failed release
+          # — creates one at the tip of the default branch, and the release
+          # would then point somewhere other than the binary attached to it.
+          gh release create "$GITHUB_REF_NAME" \
+            --verify-tag \
+            --title "bestiario ${version}" \
+            --notes-file notes.md \
+            $prerelease \
+            dist/*.tar.gz dist/*.sha256

@@ -29,3 +29,9 @@ serde_json.workspace = true
 # crate produces, so the digest has to be computed here or the answer and
 # its fingerprint would come from two places. A hash function opens nothing.
 sha2.workspace = true
+
+# The workspace releases as one version under one `vX.Y.Z` tag, created by the
+# root package (release.toml). This crate follows the version and creates no
+# tag of its own.
+[package.metadata.release]
+tag = false
