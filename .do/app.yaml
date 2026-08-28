@@ -182,15 +182,23 @@ workers:
       # is ever round-tripped back out.
       # ---------------------------------------------------------------------
       # How often the worker signs and broadcasts the documents of
-      # docs/NOSTR-PUBLICATION.md. A `sleep` duration, so `6h`, `90m` and
+      # docs/NOSTR-PUBLICATION.md. A `sleep` duration, so `5m`, `90m` and
       # `21600` are all accepted; unset means never publish.
       #
       # The first publication waits out a whole interval, so this wants to be
       # comfortably shorter than the gap between deploys — a value longer than
       # the worker's uptime publishes nothing, ever, without complaining.
+      #
+      # Five minutes is a deliberate choice and not a free one. What bounds
+      # the cost is §8: a run sends only the documents whose payload hash
+      # moved, so a quiet interval broadcasts the index and nothing else, and
+      # a busy one broadcasts the handful of windows that actually changed.
+      # What it buys is a published snapshot that trails the relays by
+      # minutes rather than by hours, which is what a client reading these
+      # documents as "the network right now" needs.
       - key: BESTIARIO_PUBLISH_EVERY
         scope: RUN_TIME
-        value: "6h"
+        value: "5m"
 
       - key: BESTIARIO__PUBLISH__NSEC
         scope: RUN_TIME
