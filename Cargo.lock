@@ -197,7 +197,7 @@ checksum = "efbd3e1070bbdf4cd88a75264e18e8a26f7cb5c6949eadf0ceb85fb159cf08f8"
 
 [[package]]
 name = "bestiario"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "bestiario-stats",
@@ -223,7 +223,7 @@ dependencies = [
 
 [[package]]
 name = "bestiario-stats"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "serde",
