@@ -445,7 +445,13 @@ fn window_of(span: Span, coverage: Coverage, now: i64) -> Window {
         Span::Days7 => until - 7 * DAY,
         Span::Days30 => until - 30 * DAY,
         Span::Days90 => until - 90 * DAY,
-        Span::All => coverage.earliest().unwrap_or(until),
+        // Clamped to the ceiling for the same reason the ceiling is
+        // clamped to the clock: an archive holding nothing but
+        // future-dated events has a floor above `now`, and a window
+        // opening after it closes is not a narrower answer but a
+        // nonsensical one — an inverted `range` published, containing
+        // nothing and saying so backwards.
+        Span::All => coverage.earliest().unwrap_or(until).min(until),
     };
     Window::new(from, until)
 }

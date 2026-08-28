@@ -477,6 +477,32 @@ fn a_ceiling_beyond_the_clock_does_not_reach_past_it() {
 }
 
 #[test]
+fn an_archive_dated_entirely_in_the_future_does_not_open_a_window_after_it_closes() {
+    // Arrange: a relay served events dated ahead of the clock, so the
+    // archive's floor and ceiling are both past `now`. The ceiling is
+    // clamped to the clock; the floor `all` reaches back to must be
+    // clamped with it, or the window opens after it closes.
+    let snapshot = Snapshot::compute(
+        &data(),
+        Coverage::between(SEPTEMBER + 86_400, SEPTEMBER + 2 * 86_400),
+        "a",
+        SEPTEMBER,
+    );
+
+    // Act
+    let payload = snapshot
+        .documents
+        .iter()
+        .find(|document| document.address.to_string() == "orders:all")
+        .map(|document| document.envelope.payload().clone())
+        .expect("an `all` window document");
+
+    // Assert: empty, and not inverted.
+    assert_eq!(payload["range"]["from"], rfc3339(SEPTEMBER));
+    assert_eq!(payload["range"]["until"], rfc3339(SEPTEMBER));
+}
+
+#[test]
 fn the_documents_of_a_snapshot_are_in_a_stable_order() {
     let once = Snapshot::compute(&data(), Coverage::since(JULY), "a", SEPTEMBER);
     let again = Snapshot::compute(&data(), Coverage::since(JULY), "b", SEPTEMBER);
