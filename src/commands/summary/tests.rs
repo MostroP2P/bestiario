@@ -112,7 +112,8 @@ async fn an_empty_database_still_produces_the_whole_view() {
 /// run through the pipeline. The expected values are hand-counted from the
 /// corpus: eight Mostro orders in the window (seven mainnet, one regtest
 /// `success` of 1361 sats), one canceled, four instances creating, ARS/BRL/
-/// EUR twice each, and two disputes not in a terminal status.
+/// EUR twice each, and one dispute still `initiated` — the `in-progress`
+/// one is already with a solver, so it is not waiting.
 #[tokio::test]
 async fn the_summary_over_the_real_corpus_matches_the_hand_count() {
     // Arrange
@@ -150,7 +151,7 @@ async fn the_summary_over_the_real_corpus_matches_the_hand_count() {
         value(&report, "summary.top_methods"),
         &Value::Text("CBU (2), CVU (2), BBVA Efectivo Móvil (1)".into())
     );
-    assert_eq!(value(&report, "summary.open_disputes"), &Value::Count(2));
+    assert_eq!(value(&report, "summary.open_disputes"), &Value::Count(1));
 }
 
 #[tokio::test]

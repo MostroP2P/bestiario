@@ -13,7 +13,8 @@
 //! because a dispute resolved in August is August's resolution whenever it
 //! was opened. `open_now` and the age of the oldest are about the clock, as
 //! in [`crate::activity`], and are left out of monthly blocks for the same
-//! reason.
+//! reason. `open_now` counts the disputes still `initiated`, not every
+//! non-terminal one: see [`summarise`].
 
 use std::collections::BTreeMap;
 
@@ -45,10 +46,6 @@ impl Status {
 
     /// The outcomes: the statuses a dispute does not leave.
     pub const TERMINAL: [Self; 3] = [Self::SellerRefunded, Self::Settled, Self::Released];
-
-    pub fn is_terminal(self) -> bool {
-        Self::TERMINAL.contains(&self)
-    }
 
     /// The metric-name segment: snake case, so a consumer splitting on the
     /// dot sees one token.
@@ -90,7 +87,7 @@ pub struct Dispute {
     pub outcome: Option<Status>,
 }
 
-/// One dispute still open, as the report lists them.
+/// One dispute still waiting for a solver, as the report lists them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenDispute {
     pub dispute_id: String,
@@ -152,8 +149,8 @@ pub struct Disputes {
     /// `resolved_at − opened_at` over disputes resolved in the window.
     pub resolution_p50: Option<i64>,
     pub resolution_p90: Option<i64>,
-    /// Not in a terminal status, opened at or before `now`, oldest first.
-    /// About *now*, not about the window.
+    /// Still `initiated` — waiting for a solver — opened at or before
+    /// `now`, oldest first. About *now*, not about the window.
     pub open: Vec<OpenDispute>,
 }
 
@@ -206,13 +203,17 @@ pub fn summarise(data: &DisputeData, window: Window, now: i64) -> Disputes {
         .filter_map(|d| d.resolved_at.map(|at| at - d.opened_at))
         .collect();
 
-    // A dispute whose opening is ahead of the clock — a publisher's clock
-    // running fast — has not opened yet as far as this report can tell, and
-    // would otherwise be listed with a negative age.
+    // Still `initiated`: nobody has taken it. `in-progress` is not open in
+    // this sense — a solver has it — and mostrod does not always republish
+    // the 38386 when the case ends, so counting it here made the panel a
+    // one-way ratchet that never came down. A dispute whose opening is
+    // ahead of the clock — a publisher's clock running fast — has not
+    // opened yet as far as this report can tell, and would otherwise be
+    // listed with a negative age.
     let mut open: Vec<&Dispute> = data
         .disputes
         .iter()
-        .filter(|dispute| !dispute.status.is_terminal() && dispute.opened_at <= now)
+        .filter(|dispute| dispute.status == Status::Initiated && dispute.opened_at <= now)
         .collect();
     open.sort_by(|a, b| {
         a.opened_at

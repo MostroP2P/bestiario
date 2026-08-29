@@ -87,7 +87,7 @@ Eight reports × five windows = forty documents, all of which exist.
 | `orders` | Order activity: created, completed, cancelled, completion and abandonment rates, the live book. |
 | `volume` | Sats traded, ticket sizes, size distribution, buy/sell split, per-currency fiat totals, and a converted total in the reference currency. |
 | `market` | Market structure: buy/sell pressure, premiums, market-price and range shares, currency and payment-method concentration. |
-| `disputes` | Disputes opened and resolved, by status, initiator and outcome, plus the disputes open right now. |
+| `disputes` | Disputes opened and resolved, by status, initiator and outcome, plus the disputes still waiting for a solver right now. |
 | `dev-fees` | Dev fees observed, their coverage and latency, and the volume they imply. |
 | `instances` | One block per instance: its self-published profile, when it was first and last seen, how long it has been silent, and what it created in the window. **The only place a client learns that an instance exists.** |
 | `compare` | One row per instance, side by side: completed, volume, completion rate, fee, dev fees, dispute rate, version. |
@@ -572,9 +572,9 @@ text cell. For a machine-readable currency breakdown, use the per-instance
 | `disputes.outcome.released` | observed | ratio | |
 | `disputes.resolution_p50` | observed | seconds | Median time to resolution |
 | `disputes.resolution_p90` | observed | seconds | 90th percentile |
-| `disputes.open_now` | observed | count | Open right now |
-| `disputes.open.<n>.id` | observed | text | The open book, listed |
-| `disputes.open.<n>.age` | observed | seconds | How long it has been open |
+| `disputes.open_now` | observed | count | Still `initiated` right now — waiting for a solver |
+| `disputes.open.<n>.id` | observed | text | The waiting book, listed |
+| `disputes.open.<n>.age` | observed | seconds | How long it has been waiting |
 
 `disputes.open.<n>.age` is `now − opened_at`, so it moves between two runs
 over an unchanged archive — which is why the five `disputes` documents are

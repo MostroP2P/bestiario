@@ -53,8 +53,9 @@ fn taken(id: &str, left_pending_at: i64) -> Taken {
 /// - resolved in the window: d3 (500s), d4 (600s), d5 (opened before the
 ///   window, seller-refunded at 1200, 700s) → **3**; outcome refunded 1/3,
 ///   settled 1/3, released 1/3; resolution p50 **600**, p90 **700**
-/// - open now: d1, d2, d6 (opened after the window, still initiated) →
-///   oldest first → **3**, d1 first with age **1400**
+/// - open now: d1 and d6 (opened after the window, still initiated) →
+///   oldest first → **2**, d1 first with age **1400**. d2 is `in-progress`:
+///   a solver has it, so it is not waiting.
 fn dataset() -> DisputeData {
     DisputeData {
         disputes: vec![
@@ -116,7 +117,7 @@ fn outcome_and_resolution_time_are_dated_by_the_terminal_version() {
 }
 
 #[test]
-fn open_lists_every_non_terminal_dispute_oldest_first_whenever_it_was_opened() {
+fn open_lists_every_dispute_still_initiated_oldest_first_whenever_it_was_opened() {
     let disputes = summarise(&dataset(), WINDOW, NOW);
 
     let open: Vec<(&str, i64)> = disputes
@@ -124,14 +125,31 @@ fn open_lists_every_non_terminal_dispute_oldest_first_whenever_it_was_opened() {
         .iter()
         .map(|open| (open.dispute_id.as_str(), open.age))
         .collect();
-    assert_eq!(
-        open,
-        vec![
-            ("d1", NOW - 1_100),
-            ("d2", NOW - 1_200),
-            ("d6", NOW - 2_100)
-        ]
-    );
+    assert_eq!(open, vec![("d1", NOW - 1_100), ("d6", NOW - 2_100)]);
+}
+
+#[test]
+fn a_dispute_a_solver_took_is_not_waiting_to_be_taken() {
+    // mostrod publishes `in-progress` when a solver takes the case and does
+    // not always republish the 38386 when it ends, so a book that counted
+    // non-terminal disputes only ever grew: on the current archive it read
+    // 45 where 3 were actually waiting. Open means `initiated`.
+    let data = DisputeData {
+        disputes: vec![
+            dispute("waiting", 1_100, Status::Initiated, None),
+            dispute("taken", 1_200, Status::InProgress, None),
+        ],
+        taken: Vec::new(),
+    };
+
+    let disputes = summarise(&data, WINDOW, NOW);
+
+    let open: Vec<&str> = disputes
+        .open
+        .iter()
+        .map(|open| open.dispute_id.as_str())
+        .collect();
+    assert_eq!(open, vec!["waiting"]);
 }
 
 #[test]
@@ -170,7 +188,7 @@ fn an_empty_window_reports_missing_rates_not_zero_ones() {
     assert_eq!(disputes.outcome, None);
     assert_eq!(disputes.resolution_p50, None);
     // The "now" figures do not depend on the window.
-    assert_eq!(disputes.open.len(), 3);
+    assert_eq!(disputes.open.len(), 2);
 }
 
 #[test]
@@ -224,8 +242,6 @@ fn the_global_report_names_every_figure_of_the_spec() {
             "disputes.open.1.age",
             "disputes.open.2.id",
             "disputes.open.2.age",
-            "disputes.open.3.id",
-            "disputes.open.3.age",
         ]
     );
 }
@@ -276,7 +292,7 @@ fn a_monthly_report_leaves_the_now_figures_out() {
 fn an_instance_slice_keeps_the_now_figures() {
     let metrics = report(&dataset(), WINDOW, NOW, Some(Dimension::Instance), ALL);
 
-    assert_eq!(metrics.len(), 16 + 6);
+    assert_eq!(metrics.len(), 16 + 4);
     assert_eq!(metrics[0].name, "disputes.Alpha (aaaaaaaa).opened");
     assert_eq!(metrics[16].name, "disputes.Alpha (aaaaaaaa).open.1.id");
     assert_eq!(metrics[16].value, Value::Text("d1".into()));
