@@ -1422,3 +1422,9 @@ consumes it. The
 aggregation layer is a separate crate, `crates/stats`, with no I/O
 dependencies — a compile error, not a convention — so that the same figures
 can be signed onto a relay without touching them.
+
+## Licence
+
+[MIT](LICENSE), the same licence
+[bestiario-fe](https://github.com/MostroP2P/bestiario-fe) declares for the
+front end.
