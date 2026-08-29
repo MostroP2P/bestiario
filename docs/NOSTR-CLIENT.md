@@ -85,7 +85,7 @@ Eight reports × five windows = forty documents, all of which exist.
 | --- | --- |
 | `summary` | The headline: created, completed, volume, active instances, open disputes. |
 | `orders` | Order activity: created, completed, cancelled, completion and abandonment rates, the live book. |
-| `volume` | Sats traded, ticket sizes, size distribution, buy/sell split, per-currency fiat totals, and a converted total in the reference currency. |
+| `volume` | Sats traded, ticket sizes, size distribution, buy/sell split, per-currency totals in both sats and the currency itself, and a converted total in the reference currency. |
 | `market` | Market structure: buy/sell pressure, premiums, market-price and range shares, currency and payment-method concentration. |
 | `disputes` | Disputes opened and resolved, by status, initiator and outcome, plus the disputes still waiting for a solver right now. |
 | `dev-fees` | Dev fees observed, their coverage and latency, and the volume they imply. |
@@ -441,12 +441,21 @@ behind which currency. The two agree by construction; §7's summing rule is
 what makes that true, and the publisher asserts it in its own tests.
 
 **Volume by currency, network-wide,** is a different document again:
-`volume:<window>` carries `volume.fiat.<CODE>.total` and friends (§8.3).
-Careful — that block counts only completed orders with a **fixed** fiat
-amount, so range orders are missing from it, and its totals are in fiat, not
-sats. For "how many successful orders in ARS", use
-`orders.ARS.completed`, which counts them all. Volume in **sats** per
-currency is not published at any scope.
+`volume:<window>` carries `volume.fiat.<CODE>.*` (§8.3). Two populations
+live in that block, and each carries its own count — read the one your
+question is about:
+
+- `total`, `ticket_avg`, `ticket_p50`, `ticket_p90` and `orders` are the
+  completed orders with a **fixed** fiat amount. A range order names no
+  single amount, so it is in none of them. These are in the currency.
+- `sats` and `completed` are **every** completed order in the currency, the
+  range ones included. So `∑ volume.fiat.<CODE>.sats == volume.sats`, and
+  the currencies partition the window's sats exactly.
+
+For "how many sats did ARS move", that is `volume.fiat.ARS.sats`. For "how
+many successful orders in ARS", either `volume.fiat.ARS.completed` or
+`orders.ARS.completed` — they count the same orders from two documents, and
+§7's summing rule is what keeps them equal.
 
 ---
 
@@ -509,7 +518,9 @@ other is already a change.
 | `volume.buy_sats` | observed | sats | Volume of completed buy orders |
 | `volume.sell_sats` | observed | sats | Volume of completed sell orders |
 | `volume.fiat.<CODE>.total` | observed | fiat | Fiat traded in that currency |
-| `volume.fiat.<CODE>.orders` | observed | count | Orders behind it |
+| `volume.fiat.<CODE>.orders` | observed | count | Fixed-amount orders behind it, and the denominator of the tickets |
+| `volume.fiat.<CODE>.sats` | observed | sats | Sats that currency moved. Over **every** completed order in it, range orders included, so these add up to `volume.sats` |
+| `volume.fiat.<CODE>.completed` | observed | count | Completed orders behind the sats — never below `orders`, and above it when a range order completed |
 | `volume.fiat.<CODE>.ticket_avg` | observed | fiat | Mean ticket in that currency |
 | `volume.fiat.<CODE>.ticket_p50` | observed | fiat | Median ticket |
 | `volume.fiat.<CODE>.ticket_p90` | observed | fiat | 90th percentile ticket |
@@ -518,7 +529,10 @@ other is already a change.
 | `volume.in.<CODE>.unpriced_sats` | **inferred** | sats | Sats it could not price, for want of a rate |
 | `volume.in.<CODE>.rate_age_max` | **inferred** | seconds | Age of the oldest rate used |
 
-`volume.fiat.*` is observed — instances published those amounts.
+`volume.fiat.*` is observed — instances published those amounts. Two
+populations live in the block and each carries its own count: `total` and the
+tickets are the fixed-amount orders, since a range order names no single fiat
+amount; `sats` and `completed` are every completed order in the currency.
 `volume.in.*` is inferred: it converts sats at a rate snapshot, and
 `unpriced_sats` is how much of the window it could not speak for. Render the
 two differently.
@@ -735,9 +749,6 @@ So you do not go looking:
 - **Individual orders, disputes or events.** bestiario publishes statistics,
   not a mirror of the Mostro events — those are on the relays already, under
   kinds 38383, 38386, 8383 and 38385.
-- **Volume in sats per currency**, at any scope. `volume.fiat.<CODE>.total`
-  is in fiat and covers fixed-amount orders only; the per-currency blocks of
-  `orders` are counts.
 - **Anything about counterparties.** No pubkeys of takers or makers, no
   identities. Only instances are named.
 
