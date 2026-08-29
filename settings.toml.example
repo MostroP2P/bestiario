@@ -3,7 +3,7 @@
 
 [nostr]
 # Relays to read from. `ws://` is accepted for a local relay.
-relays = ["wss://relay.mostro.network", "wss://nos.lol", "wss://mostro-p2p.tech"]
+relays = ["wss://relay.mostro.network", "wss://nos.lol", "wss://mostro-p2p.tech", "wss://relay.shadowbip.com"]
 
 # Discover additional relays from each instance's NIP-65 list (kind 10002).
 discover_relays = false
