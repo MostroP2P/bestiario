@@ -47,10 +47,6 @@ impl Status {
     /// The outcomes: the statuses a dispute does not leave.
     pub const TERMINAL: [Self; 3] = [Self::SellerRefunded, Self::Settled, Self::Released];
 
-    pub fn is_terminal(self) -> bool {
-        Self::TERMINAL.contains(&self)
-    }
-
     /// The metric-name segment: snake case, so a consumer splitting on the
     /// dot sees one token.
     pub fn as_key(self) -> &'static str {
