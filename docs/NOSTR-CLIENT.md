@@ -509,7 +509,9 @@ other is already a change.
 | `volume.buy_sats` | observed | sats | Volume of completed buy orders |
 | `volume.sell_sats` | observed | sats | Volume of completed sell orders |
 | `volume.fiat.<CODE>.total` | observed | fiat | Fiat traded in that currency |
-| `volume.fiat.<CODE>.orders` | observed | count | Orders behind it |
+| `volume.fiat.<CODE>.orders` | observed | count | Fixed-amount orders behind it, and the denominator of the tickets |
+| `volume.fiat.<CODE>.sats` | observed | sats | Sats that currency moved. Over **every** completed order in it, range orders included, so these add up to `volume.sats` |
+| `volume.fiat.<CODE>.completed` | observed | count | Completed orders behind the sats — never below `orders`, and above it when a range order completed |
 | `volume.fiat.<CODE>.ticket_avg` | observed | fiat | Mean ticket in that currency |
 | `volume.fiat.<CODE>.ticket_p50` | observed | fiat | Median ticket |
 | `volume.fiat.<CODE>.ticket_p90` | observed | fiat | 90th percentile ticket |
@@ -518,7 +520,10 @@ other is already a change.
 | `volume.in.<CODE>.unpriced_sats` | **inferred** | sats | Sats it could not price, for want of a rate |
 | `volume.in.<CODE>.rate_age_max` | **inferred** | seconds | Age of the oldest rate used |
 
-`volume.fiat.*` is observed — instances published those amounts.
+`volume.fiat.*` is observed — instances published those amounts. Two
+populations live in the block and each carries its own count: `total` and the
+tickets are the fixed-amount orders, since a range order names no single fiat
+amount; `sats` and `completed` are every completed order in the currency.
 `volume.in.*` is inferred: it converts sats at a rate snapshot, and
 `unpriced_sats` is how much of the window it could not speak for. Render the
 two differently.
@@ -735,9 +740,6 @@ So you do not go looking:
 - **Individual orders, disputes or events.** bestiario publishes statistics,
   not a mirror of the Mostro events — those are on the relays already, under
   kinds 38383, 38386, 8383 and 38385.
-- **Volume in sats per currency**, at any scope. `volume.fiat.<CODE>.total`
-  is in fiat and covers fixed-amount orders only; the per-currency blocks of
-  `orders` are counts.
 - **Anything about counterparties.** No pubkeys of takers or makers, no
   identities. Only instances are named.
 

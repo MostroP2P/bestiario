@@ -367,7 +367,9 @@ async fn a_daily_report_names_each_day_and_keeps_the_quiet_ones() {
         report
             .metrics
             .iter()
-            .filter(|metric| metric.name.ends_with(".sats"))
+            // One block per day; a currency's own sats row ends the same
+            // way and belongs to its block, not to the count of days.
+            .filter(|metric| metric.name.ends_with(".sats") && !metric.name.contains(".fiat."))
             .count(),
         8
     );

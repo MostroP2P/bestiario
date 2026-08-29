@@ -9,6 +9,9 @@
 //!
 //! Fiat figures are per currency and skip range orders: a range order
 //! names no single fiat amount, so it has sats to add and no fiat to add.
+//! The sats of a currency are summed over every completed order in it, the
+//! range ones included, so the currencies partition the window's sats
+//! exactly. The two populations differ, so each carries its own count.
 
 use std::collections::BTreeMap;
 
@@ -83,13 +86,21 @@ impl Dimension {
     }
 }
 
-/// The fiat side of one currency.
+/// One currency's side of the window.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FiatVolume {
-    /// Completed fixed-amount orders in this currency.
+    /// Completed fixed-amount orders in this currency — the population the
+    /// fiat figures are computed over, and their denominator.
     pub orders: u64,
-    /// Their figures; `None` when the amounts, each finite, add up to
-    /// something that is not — then no figure of the block is trusted,
+    /// Every completed order in this currency, the range ones included.
+    /// Never below `orders`, and equal to it when no range order completed.
+    pub completed: u64,
+    /// `∑ amount_sats` over those; `None` as for [`sum_sats`], and
+    /// withheld on its own — the fiat figures are summed from other
+    /// numbers and are not touched by a sats overflow.
+    pub sats: Option<i64>,
+    /// The fiat figures; `None` when the amounts, each finite, add up to
+    /// something that is not — then no figure of the fiat side is trusted,
     /// not the tickets either, since they come from the same amounts.
     pub figures: Option<FiatFigures>,
 }
@@ -161,18 +172,20 @@ pub fn summarise(orders: &[Order], window: Window) -> Volume {
         )
     };
 
-    let mut by_fiat: BTreeMap<String, Vec<f64>> = BTreeMap::new();
+    // Keyed on the currency and not on the presence of a fiat amount: a
+    // range order belongs to its currency's sats even though it belongs to
+    // no fiat total.
+    let mut by_fiat: BTreeMap<String, (Vec<f64>, Vec<i64>)> = BTreeMap::new();
     for order in &done {
+        let (amounts, sats) = by_fiat.entry(order.fiat_code.clone()).or_default();
         if let Some(amount) = order.fiat_amount {
-            by_fiat
-                .entry(order.fiat_code.clone())
-                .or_default()
-                .push(amount);
+            amounts.push(amount);
         }
+        sats.push(order.amount_sats);
     }
     let fiat = by_fiat
         .into_iter()
-        .map(|(code, amounts)| (code, fiat_volume(&amounts)))
+        .map(|(code, (amounts, sats))| (code, fiat_volume(&amounts, &sats)))
         .collect();
 
     Volume {
@@ -200,9 +213,13 @@ fn mean_sats(sizes: &[i64]) -> Option<i64> {
     (2 * sum + n).div_euclid(2 * n).try_into().ok()
 }
 
-/// One currency's figures over its `amounts`, each finite; the whole
-/// block is withheld when their sum is not.
-fn fiat_volume(amounts: &[f64]) -> FiatVolume {
+/// One currency's figures: the fiat side over its `amounts`, each finite
+/// and each from a fixed-amount order, and the sats side over `sats`, one
+/// per completed order in the currency. The fiat side is withheld whole
+/// when the amounts add up to something that is not finite; the sats side
+/// is withheld on its own when its sum leaves `i64`. Neither withholds the
+/// other: they are sums over different numbers.
+fn fiat_volume(amounts: &[f64], sats: &[i64]) -> FiatVolume {
     let total: f64 = amounts.iter().sum();
     let figures = (total.is_finite() && !amounts.is_empty()).then(|| FiatFigures {
         total,
@@ -212,6 +229,8 @@ fn fiat_volume(amounts: &[f64]) -> FiatVolume {
     });
     FiatVolume {
         orders: amounts.len() as u64,
+        completed: sats.len() as u64,
+        sats: sum_sats(sats.iter().copied()),
         figures,
     }
 }
@@ -301,6 +320,14 @@ pub fn metrics(prefix: &str, volume: &Volume) -> Vec<Metric> {
         metrics.push(observed(
             &format!("fiat.{code}.orders"),
             Value::Count(fiat.orders as i64),
+        ));
+        metrics.push(observed(
+            &format!("fiat.{code}.sats"),
+            fiat.sats.map_or(Value::Missing, Value::Sats),
+        ));
+        metrics.push(observed(
+            &format!("fiat.{code}.completed"),
+            Value::Count(fiat.completed as i64),
         ));
         metrics.push(observed(
             &format!("fiat.{code}.ticket_avg"),

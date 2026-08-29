@@ -179,6 +179,93 @@ fn fiat_volume_is_per_currency_and_skips_range_orders() {
 }
 
 #[test]
+fn fiat_sats_count_every_completed_order_including_range_ones() {
+    // A range order names no fiat amount and so adds nothing to the fiat
+    // side, but it moved sats in that currency like any other order.
+    let volume = summarise(&dataset(), WINDOW);
+
+    let ars = &volume.fiat["ARS"];
+    assert_eq!(ars.sats, Some(2_035_000), "5k + 30k + the 2M range order");
+    assert_eq!(ars.completed, 3);
+    assert_eq!(ars.orders, 2, "the fiat figures still skip the range order");
+
+    let usd = &volume.fiat["USD"];
+    assert_eq!(usd.sats, Some(150_000));
+    assert_eq!(usd.completed, 1);
+}
+
+#[test]
+fn the_fiat_sats_columns_add_up_to_the_window_sats() {
+    // The invariant that makes the column worth publishing: every
+    // completed order has a currency, so the parts are the whole.
+    let volume = summarise(&dataset(), WINDOW);
+
+    let sats: i64 = volume
+        .fiat
+        .values()
+        .map(|fiat| fiat.sats.expect("finite"))
+        .sum();
+    let completed: u64 = volume.fiat.values().map(|fiat| fiat.completed).sum();
+
+    assert_eq!(Some(sats), volume.sats);
+    assert_eq!(completed, volume.completed);
+}
+
+#[test]
+fn a_currency_of_range_orders_only_has_sats_and_no_fiat_figures() {
+    // Nothing published a fiat amount in it, so there is no total and no
+    // ticket — and 40k sats, which is not nothing and was never reported.
+    let orders = vec![Order {
+        fiat_code: "BRL".into(),
+        fiat_amount: None,
+        ..order("r", Status::Success, Some(1_100), 40_000)
+    }];
+
+    let volume = summarise(&orders, WINDOW);
+
+    let brl = &volume.fiat["BRL"];
+    assert_eq!(brl.sats, Some(40_000));
+    assert_eq!(brl.completed, 1);
+    assert_eq!(brl.orders, 0);
+    assert_eq!(brl.figures, None);
+}
+
+#[test]
+fn a_fiat_sats_sum_beyond_every_satoshi_is_missing_not_wrapped() {
+    // The sats sum leaves i64 while the fiat amounts are perfectly finite:
+    // the sats row is withheld and the fiat figures are not, because they
+    // are summed from different numbers.
+    let orders = vec![
+        Order {
+            fiat_amount: Some(1.0),
+            ..order("a", Status::Success, Some(1_100), i64::MAX)
+        },
+        Order {
+            fiat_amount: Some(1.0),
+            ..order("b", Status::Success, Some(1_100), i64::MAX)
+        },
+    ];
+
+    let volume = summarise(&orders, WINDOW);
+
+    let ars = &volume.fiat["ARS"];
+    assert_eq!(ars.sats, None);
+    assert_eq!(ars.completed, 2);
+    assert_eq!(
+        ars.figures.as_ref().expect("finite").total,
+        2.0,
+        "the fiat side is unaffected by a sats overflow"
+    );
+
+    let metrics = metrics("volume", &volume);
+    let sats = metrics
+        .iter()
+        .find(|metric| metric.name == "volume.fiat.ARS.sats")
+        .expect("present");
+    assert_eq!(sats.value, Value::Missing);
+}
+
+#[test]
 fn an_empty_window_is_zero_volume_with_no_tickets() {
     let volume = summarise(&dataset(), Window::new(5_000, 6_000));
 
@@ -229,8 +316,19 @@ fn the_global_report_names_the_figures_in_order() {
             "volume.sell_sats",
         ]
     );
-    assert_eq!(names[13], "volume.fiat.ARS.total");
-    assert_eq!(names.len(), 13 + 2 * 5);
+    assert_eq!(
+        &names[13..20],
+        &[
+            "volume.fiat.ARS.total",
+            "volume.fiat.ARS.orders",
+            "volume.fiat.ARS.sats",
+            "volume.fiat.ARS.completed",
+            "volume.fiat.ARS.ticket_avg",
+            "volume.fiat.ARS.ticket_p50",
+            "volume.fiat.ARS.ticket_p90",
+        ]
+    );
+    assert_eq!(names.len(), 13 + 2 * 7);
 }
 
 #[test]
@@ -312,6 +410,12 @@ fn a_fiat_sum_that_overflows_withholds_the_whole_currency_block() {
             .value
     };
     assert_eq!(value("orders"), &Value::Count(2));
+    assert_eq!(
+        value("sats"),
+        &Value::Sats(2_000),
+        "the sats are finite and are reported"
+    );
+    assert_eq!(value("completed"), &Value::Count(2));
     for name in ["total", "ticket_avg", "ticket_p50", "ticket_p90"] {
         assert_eq!(value(name), &Value::Missing, "{name}");
     }
