@@ -294,6 +294,58 @@ fn a_figure_that_is_not_a_number_is_absent_rather_than_published() {
     assert_eq!(cell(&nonsense), serde_json::Value::Null);
 }
 
+// ---- the currency blocks of two documents (§7)
+
+#[test]
+fn the_currency_blocks_of_orders_and_volume_count_the_same_orders() {
+    // NOSTR-CLIENT §7 tells a client the two documents agree, and that a
+    // range order — in none of the fiat figures, since it names no single
+    // amount — is in the sats and the count all the same.
+    let mut data = data();
+    data.orders.push(Order {
+        fiat_code: "BRL".into(),
+        fiat_amount: None,
+        ..order("range", AUGUST + 2 * DAY, 7_000)
+    });
+    let window = Window::new(JULY, SEPTEMBER);
+
+    let orders = window_metrics(Report::Orders, &data, window, SEPTEMBER);
+    let volume = window_metrics(Report::Volume, &data, window, SEPTEMBER);
+    let value = |metrics: &[Metric], name: &str| {
+        metrics
+            .iter()
+            .find(|metric| metric.name == name)
+            .unwrap_or_else(|| panic!("{name} is published"))
+            .value
+            .clone()
+    };
+
+    for code in ["ARS", "BRL"] {
+        assert_eq!(
+            value(&volume, &format!("volume.fiat.{code}.completed")),
+            value(&orders, &format!("orders.{code}.completed")),
+            "{code}"
+        );
+    }
+    assert_eq!(value(&volume, "volume.fiat.BRL.sats"), Value::Sats(7_000));
+    assert_eq!(
+        value(&volume, "volume.fiat.BRL.total"),
+        Value::Missing,
+        "a range order names no fiat amount to total"
+    );
+
+    // And the currencies partition the window's sats.
+    let sats: i64 = volume
+        .iter()
+        .filter(|metric| metric.name.starts_with("volume.fiat.") && metric.name.ends_with(".sats"))
+        .map(|metric| match metric.value {
+            Value::Sats(sats) => sats,
+            ref other => panic!("{other:?} is not sats"),
+        })
+        .sum();
+    assert_eq!(value(&volume, "volume.sats"), Value::Sats(sats));
+}
+
 // ---- absence (§6.3)
 
 #[test]
