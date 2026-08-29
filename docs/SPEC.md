@@ -536,7 +536,7 @@ indistinguishable from a quiet day.
 | Dispute rate | # disputes opened / # orders that left `pending`, per instance |
 | Outcome | % `seller-refunded` vs `settled` vs `released` over resolved |
 | Resolution time | `terminal.created_at − opened_at`, p50/p90 |
-| Open now and age | non-terminal, sorted by `opened_at` |
+| Open now and age | still `initiated` — waiting for a solver — sorted by `opened_at` |
 
 ### 6.8 Exchange rates
 

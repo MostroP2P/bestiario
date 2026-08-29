@@ -47,7 +47,7 @@
       "kind": "observed",
       "name": "summary.open_disputes",
       "unit": "count",
-      "value": 2
+      "value": 1
     }
   ],
   "range": {
