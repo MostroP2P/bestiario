@@ -1425,6 +1425,4 @@ can be signed onto a relay without touching them.
 
 ## Licence
 
-[MIT](LICENSE), the same licence
-[bestiario-fe](https://github.com/MostroP2P/bestiario-fe) declares for the
-front end.
+[MIT](LICENSE).
