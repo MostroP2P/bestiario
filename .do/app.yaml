@@ -82,7 +82,7 @@ workers:
       # ---------------------------------------------------------------------
       - key: BESTIARIO__NOSTR__RELAYS
         scope: RUN_TIME
-        value: "wss://relay.mostro.network,wss://nos.lol,wss://mostro-p2p.tech"
+        value: "wss://relay.mostro.network,wss://nos.lol,wss://mostro-p2p.tech,wss://relay.shadowbip.com"
 
       # On, so that an instance's kind 10002 is followed to the relays it
       # actually publishes to. The relays above are where the network is

@@ -664,7 +664,7 @@ that reaches for them does not compile.
 
 ```toml
 [nostr]
-relays = ["wss://relay.mostro.network", "wss://nos.lol", "wss://mostro-p2p.tech"]
+relays = ["wss://relay.mostro.network", "wss://nos.lol", "wss://mostro-p2p.tech", "wss://relay.shadowbip.com"]
 # Discover extra relays via kind 10002 of each instance
 discover_relays = true
 # Overlap when resuming (seconds)

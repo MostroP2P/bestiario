@@ -23,7 +23,7 @@ underscores separate the section from the key, so `[database].url` is
 values:
 
 ```
-BESTIARIO__NOSTR__RELAYS="wss://relay.mostro.network,wss://nos.lol,wss://mostro-p2p.tech"
+BESTIARIO__NOSTR__RELAYS="wss://relay.mostro.network,wss://nos.lol,wss://mostro-p2p.tech,wss://relay.shadowbip.com"
 BESTIARIO__INDEXER__INSTANCES="82fa8cb9…,0f2a5b1c…"
 BESTIARIO__INDEXER__NETWORKS="mainnet,testnet"
 ```
