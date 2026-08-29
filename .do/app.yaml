@@ -82,10 +82,10 @@ workers:
       # ---------------------------------------------------------------------
       - key: BESTIARIO__NOSTR__RELAYS
         scope: RUN_TIME
-        value: "wss://relay.mostro.network,wss://nos.lol"
+        value: "wss://relay.mostro.network,wss://nos.lol,wss://mostro-p2p.tech"
 
       # On, so that an instance's kind 10002 is followed to the relays it
-      # actually publishes to. The two relays above are where the network is
+      # actually publishes to. The relays above are where the network is
       # expected to be; discovery is what finds where it also is, and the
       # walk already dials what a relay list names mid-run rather than
       # leaving it until somebody re-runs `backfill`.
