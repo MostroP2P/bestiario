@@ -577,6 +577,7 @@ text cell. For a machine-readable currency breakdown, use the per-instance
 | `disputes.status.seller_refunded` | observed | count | |
 | `disputes.status.settled` | observed | count | |
 | `disputes.status.released` | observed | count | |
+| `disputes.status.cooperatively_canceled` | observed | count | |
 | `disputes.initiator.buyer` | observed | ratio | Share opened by the buyer |
 | `disputes.initiator.seller` | observed | ratio | Share opened by the seller |
 | `disputes.rate` | observed | ratio | Disputes per order |
@@ -584,6 +585,7 @@ text cell. For a machine-readable currency breakdown, use the per-instance
 | `disputes.outcome.seller_refunded` | observed | ratio | Share of resolutions |
 | `disputes.outcome.settled` | observed | ratio | |
 | `disputes.outcome.released` | observed | ratio | |
+| `disputes.outcome.cooperatively_canceled` | observed | ratio | |
 | `disputes.resolution_p50` | observed | seconds | Median time to resolution |
 | `disputes.resolution_p90` | observed | seconds | 90th percentile |
 | `disputes.open_now` | observed | count | Still `initiated` right now — waiting for a solver |

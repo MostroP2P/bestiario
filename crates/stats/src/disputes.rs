@@ -23,7 +23,7 @@ use crate::metric::{Metric, Value};
 use crate::percentile::percentile;
 use crate::window::{Period, Window};
 
-/// The five statuses mostrod publishes (`docs/SPEC.md` §2.3). Defined here
+/// The six statuses mostrod publishes (`docs/SPEC.md` §2.3). Defined here
 /// again because this crate cannot see the parser.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
@@ -32,20 +32,30 @@ pub enum Status {
     SellerRefunded,
     Settled,
     Released,
+    /// Both parties cancelled while the dispute was open: the seller is
+    /// refunded without a solver. Published from mostro-core 0.15.1; older
+    /// nodes published this case as `seller-refunded`.
+    CooperativelyCanceled,
 }
 
 impl Status {
     /// Every status, in the order the reports list them.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Initiated,
         Self::InProgress,
         Self::SellerRefunded,
         Self::Settled,
         Self::Released,
+        Self::CooperativelyCanceled,
     ];
 
     /// The outcomes: the statuses a dispute does not leave.
-    pub const TERMINAL: [Self; 3] = [Self::SellerRefunded, Self::Settled, Self::Released];
+    pub const TERMINAL: [Self; 4] = [
+        Self::SellerRefunded,
+        Self::Settled,
+        Self::Released,
+        Self::CooperativelyCanceled,
+    ];
 
     /// The metric-name segment: snake case, so a consumer splitting on the
     /// dot sees one token.
@@ -56,6 +66,7 @@ impl Status {
             Self::SellerRefunded => "seller_refunded",
             Self::Settled => "settled",
             Self::Released => "released",
+            Self::CooperativelyCanceled => "cooperatively_canceled",
         }
     }
 }
@@ -134,7 +145,7 @@ pub struct Disputes {
     /// Opened in the window.
     pub opened: u64,
     /// Of those, how many now stand in each status, in [`Status::ALL`] order.
-    pub by_status: [u64; 5],
+    pub by_status: [u64; Status::ALL.len()],
     /// Of those with a known initiator, the buyer's share; `None` when none
     /// is known. The seller's is the complement.
     pub buyer_share: Option<f64>,
@@ -145,7 +156,7 @@ pub struct Disputes {
     pub resolved: u64,
     /// Of those, the share per outcome, in [`Status::TERMINAL`] order;
     /// `None` when nothing was resolved.
-    pub outcome: Option<[f64; 3]>,
+    pub outcome: Option<[f64; Status::TERMINAL.len()]>,
     /// `resolved_at − opened_at` over disputes resolved in the window.
     pub resolution_p50: Option<i64>,
     pub resolution_p90: Option<i64>,
@@ -163,7 +174,7 @@ pub fn summarise(data: &DisputeData, window: Window, now: i64) -> Disputes {
         .filter(|dispute| window.contains(dispute.opened_at))
         .collect();
 
-    let mut by_status = [0; 5];
+    let mut by_status = [0; Status::ALL.len()];
     for dispute in &opened {
         let index = Status::ALL
             .iter()

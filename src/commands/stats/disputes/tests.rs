@@ -208,7 +208,11 @@ async fn the_json_rendering_is_the_envelope_of_the_spec() {
     let json: serde_json::Value = serde_json::from_str(&rendered).expect("valid JSON");
 
     assert_eq!(json["metrics"][0]["name"], "disputes.status.initiated");
-    assert_eq!(json["metrics"].as_array().map(Vec::len), Some(5));
+    assert_eq!(json["metrics"].as_array().map(Vec::len), Some(6));
+    assert_eq!(
+        json["metrics"][5]["name"],
+        "disputes.status.cooperatively_canceled"
+    );
 }
 
 /// `--by day` (issue #53).

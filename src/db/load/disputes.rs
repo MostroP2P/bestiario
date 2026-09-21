@@ -44,10 +44,10 @@ where
                 d.final_status AS status, d.initiator,
                 (SELECT MIN(v.created_at) FROM dispute_versions v
                   WHERE v.dispute_id = d.dispute_id
-                    AND v.status IN ('seller-refunded', 'settled', 'released')) AS resolved_at,
+                    AND v.status IN ('seller-refunded', 'settled', 'released', 'cooperatively-canceled')) AS resolved_at,
                 (SELECT v.status FROM dispute_versions v
                   WHERE v.dispute_id = d.dispute_id
-                    AND v.status IN ('seller-refunded', 'settled', 'released')
+                    AND v.status IN ('seller-refunded', 'settled', 'released', 'cooperatively-canceled')
                   ORDER BY v.created_at, v.event_id LIMIT 1) AS outcome
          FROM disputes d
          LEFT JOIN instances i ON i.pubkey = d.pubkey
@@ -154,6 +154,7 @@ fn status(status: Status) -> disputes::Status {
         Status::SellerRefunded => disputes::Status::SellerRefunded,
         Status::Settled => disputes::Status::Settled,
         Status::Released => disputes::Status::Released,
+        Status::CooperativelyCanceled => disputes::Status::CooperativelyCanceled,
     }
 }
 
