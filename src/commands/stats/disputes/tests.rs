@@ -72,6 +72,7 @@ async fn settled(pool: &SqlitePool, id: &str, success_at: i64) {
         premium: 0.0,
         network: Some(Network::Mainnet),
         expires_at: success_at + 86_400,
+        order_created_at: None,
     };
     event(pool, &version.event_id, 38383, success_at).await;
     orders::insert_version(pool, &version)

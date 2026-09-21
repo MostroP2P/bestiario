@@ -43,6 +43,7 @@ fn version(created_at: i64, status: Status) -> OrderVersion {
         premium: 5.0,
         network: Some(Network::Mainnet),
         expires_at: created_at + 900,
+        order_created_at: None,
     }
 }
 
@@ -275,6 +276,36 @@ async fn refreshing_an_order_with_no_versions_is_a_no_op() {
     refresh_projection(&pool, ORDER).await.expect("refresh");
 
     assert_eq!(find(&pool, ORDER).await.expect("find"), None);
+}
+
+#[tokio::test]
+async fn the_projection_keeps_the_created_at_tag_a_version_carried() {
+    // Arrange: the first version caught is already `in-progress`, and only
+    // it carries the tag.
+    let pool = migrated().await;
+    let mut taken = version(T2, Status::InProgress);
+    taken.order_created_at = Some(T0);
+
+    // Act
+    ingest(&pool, &taken).await;
+    ingest(&pool, &version(T3, Status::Success)).await;
+
+    // Assert
+    let order = projection(&pool).await;
+    assert_eq!(order.first_seen_at, T2);
+    assert_eq!(order.order_created_at, Some(T0));
+    let stored = versions(&pool, ORDER).await.expect("versions");
+    assert_eq!(stored[0].order_created_at, Some(T0));
+}
+
+#[tokio::test]
+async fn an_order_whose_versions_carry_no_created_at_tag_projects_none() {
+    let pool = migrated().await;
+
+    ingest(&pool, &version(T0, Status::Pending)).await;
+    ingest(&pool, &version(T1, Status::InProgress)).await;
+
+    assert_eq!(projection(&pool).await.order_created_at, None);
 }
 
 #[tokio::test]

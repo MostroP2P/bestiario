@@ -88,7 +88,10 @@ pub struct Order {
     /// when it publishes a name, the bare pubkey otherwise (`docs/SPEC.md`
     /// §3). Chosen by the loader; unique per instance either way.
     pub instance: String,
-    /// `created_at` of the first version seen.
+    /// When the order was created: the NIP-69 `created_at` tag when the
+    /// node publishes it, else `created_at` of the first version seen —
+    /// which, for an order first caught mid-flight, is later than its
+    /// creation. Never later than the first version seen.
     pub created_at: i64,
     pub status: Status,
     pub direction: Direction,

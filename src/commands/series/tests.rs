@@ -32,6 +32,7 @@ async fn version(pool: &SqlitePool, id: &str, at: i64, status: Status, fiat: &st
         premium: 0.0,
         network: Some(Net::Mainnet),
         expires_at: at + DAY,
+        order_created_at: None,
     };
     events::insert_if_new(
         pool,

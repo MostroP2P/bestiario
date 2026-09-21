@@ -35,6 +35,7 @@ fn version(order_id: &str, pubkey: &str, created_at: i64, status: Status) -> Ord
         premium: 5.0,
         network: Some(Network::Mainnet),
         expires_at: created_at + 900,
+        order_created_at: None,
     }
 }
 
@@ -282,6 +283,7 @@ async fn lifecycle_in_reads_what_moved_in_the_window_and_the_live_book() {
         &pool,
         &OrderVersion {
             expires_at: T0 + 10_000,
+            order_created_at: None,
             ..version("live", ALPHA, T0 - 100, Status::Pending)
         },
     )
@@ -290,6 +292,7 @@ async fn lifecycle_in_reads_what_moved_in_the_window_and_the_live_book() {
         &pool,
         &OrderVersion {
             expires_at: T0 - 10,
+            order_created_at: None,
             ..version("stale", ALPHA, T0 - 100, Status::Pending)
         },
     )
@@ -336,4 +339,59 @@ async fn the_payment_methods_of_the_book_come_from_the_first_version() {
         orders[0].payment_methods,
         vec!["cash".to_string(), "pix".to_string()]
     );
+}
+
+#[tokio::test]
+async fn an_order_first_seen_mid_flight_is_dated_by_its_created_at_tag() {
+    // Arrange: a backfill caught the order already taken, an hour after it
+    // was created.
+    let pool = migrated().await;
+    let mut taken = version("o1", ALPHA, T0 + 3_600, Status::InProgress);
+    taken.order_created_at = Some(T0);
+    ingest(&pool, &taken).await;
+
+    // Act
+    let loaded = orders(&pool, &mainnet()).await.expect("load");
+
+    // Assert
+    assert_eq!(loaded[0].created_at, T0);
+}
+
+#[tokio::test]
+async fn an_order_without_the_tag_is_dated_by_its_first_version_seen() {
+    let pool = migrated().await;
+    ingest(&pool, &version("o1", ALPHA, T0 + 3_600, Status::InProgress)).await;
+
+    let loaded = orders(&pool, &mainnet()).await.expect("load");
+
+    assert_eq!(loaded[0].created_at, T0 + 3_600);
+}
+
+#[tokio::test]
+async fn a_created_at_tag_after_the_first_version_seen_does_not_date_the_order() {
+    let pool = migrated().await;
+    let mut pending = version("o1", ALPHA, T0, Status::Pending);
+    pending.order_created_at = Some(T0 + 86_400);
+    ingest(&pool, &pending).await;
+
+    let loaded = orders(&pool, &mainnet()).await.expect("load");
+
+    assert_eq!(loaded[0].created_at, T0);
+}
+
+#[tokio::test]
+async fn orders_are_listed_by_their_created_at_tag() {
+    // Arrange: o1 was created first but caught last.
+    let pool = migrated().await;
+    let mut late = version("o1", ALPHA, T0 + 7_200, Status::InProgress);
+    late.order_created_at = Some(T0);
+    ingest(&pool, &late).await;
+    ingest(&pool, &version("o2", ALPHA, T0 + 3_600, Status::Pending)).await;
+
+    // Act
+    let loaded = orders(&pool, &mainnet()).await.expect("load");
+
+    // Assert
+    let ids: Vec<&str> = loaded.iter().map(|o| o.order_id.as_str()).collect();
+    assert_eq!(ids, ["o1", "o2"]);
 }

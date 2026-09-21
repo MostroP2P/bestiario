@@ -43,6 +43,7 @@ fn version(order_id: &str, pubkey: &str, created_at: i64, status: Status) -> Ord
         premium: 0.0,
         network: Some(Network::Mainnet),
         expires_at: created_at + 86_400,
+        order_created_at: None,
     }
 }
 
@@ -86,6 +87,7 @@ async fn seeded() -> SqlitePool {
         &pool,
         &OrderVersion {
             expires_at: NOW + 3_600,
+            order_created_at: None,
             ..version("open", BETA, FROM + 600, Status::Pending)
         },
     )
