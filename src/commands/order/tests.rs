@@ -46,6 +46,7 @@ async fn version(pool: &SqlitePool, at: i64, status: Status) {
         premium: 5.0,
         network: Some(Network::Mainnet),
         expires_at: at + 900,
+        order_created_at: None,
     };
     event(pool, &version.event_id, 38383, at).await;
     orders::insert_version(pool, &version)

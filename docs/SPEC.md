@@ -39,6 +39,7 @@ about enters the system through a 38383.
 | `premium` | premium % | premium distribution |
 | `network` | `mainnet`, `testnet`, … | filter out test networks |
 | `expires_at` | unix ts | order TTL |
+| `created_at` | unix ts when the order was created (optional; distinct from the event `created_at`) | the order's age |
 | `y` | `[platform, instance_name?]` | **platform filter** + instance name |
 | `z` | `order` | discriminator |
 | `rating` | maker reputation JSON | ignored (out of scope) |
@@ -62,8 +63,15 @@ Notes:
 - `expires_at` is published by **every** Mostro order in that sample
   (172/172; 172 of the 200 orders overall); the 28 that omitted it all came
   from other platforms. Treat it as mandatory for `y[0] == "mostro"`.
+- The `created_at` **tag** ([NIP-69](https://nips.nostr.com/69),
+  nostr-protocol/nips#2476; published by Mostro since MostroP2P/mostro#971)
+  is when the order was created and stays the same on every revision, while
+  the event `created_at` is when *that revision* was published. Nodes that
+  predate it do not publish it, so it is optional; one that is present must
+  be a unix timestamp. It dates an order first seen mid-flight — the norm in
+  a backfill — which the first version seen cannot (§6.1).
 - Real events carry tags this table does not list — `layer`, `expiration`
-  (NIP-40), `source`, `name`, `bond`, `reserved_at`, `created_at`, `paid_at`,
+  (NIP-40), `source`, `name`, `bond`, `reserved_at`, `paid_at`,
   `category`, `taker_fees`. They are not parsed; `events.raw_json` keeps them
   so a later phase can use them without re-capturing.
 - Addressable: the relay keeps only the latest version per
@@ -242,7 +250,8 @@ CREATE TABLE order_versions (
   payment_methods TEXT NOT NULL,         -- csv
   premium      REAL NOT NULL,
   network      TEXT,
-  expires_at   INTEGER
+  expires_at   INTEGER,
+  order_created_at INTEGER               -- created_at tag, NULL if absent
 );
 CREATE INDEX order_versions_order ON order_versions(order_id, created_at);
 
@@ -261,7 +270,8 @@ CREATE TABLE orders (
   premium         REAL NOT NULL,
   network         TEXT,
   success_at      INTEGER,               -- created_at of the success version
-  canceled_at     INTEGER
+  canceled_at     INTEGER,
+  order_created_at INTEGER               -- created_at tag of any version
 );
 CREATE INDEX orders_pubkey_status ON orders(pubkey, final_status);
 CREATE INDEX orders_success_at ON orders(success_at);
@@ -392,9 +402,10 @@ Convention: `∑` = aggregate; `%` = proportion; `p50/p90` = percentiles;
 window into UTC calendar buckets, half-open like the window itself and
 clipped to it, so consecutive buckets tile and none is counted twice. The
 timestamp that dates a row is the one that already dates that figure in its
-family — an order counts in the bucket its first `pending` version was seen
-in, a completion in the bucket it reached `success`, a fee in the bucket of
-its own event: a bucket changes the grouping, never the dating.
+family — an order counts in the bucket it was created in (its `created_at`
+tag, else the first version seen, whichever is earlier), a completion in
+the bucket it reached `success`, a fee in the bucket of its own event: a
+bucket changes the grouping, never the dating.
 
 Every bucket of the window is reported, including the ones nothing happened
 in, so a consumer plotting the result cannot draw a line across a gap that
@@ -463,7 +474,7 @@ indistinguishable from a quiet day.
 
 | Metric | Definition |
 |---|---|
-| Orders created | ∑ orders whose 1st version falls in the period |
+| Orders created | ∑ orders created in the period: the `created_at` tag, else the 1st version seen, whichever is earlier |
 | Orders completed | ∑ `final_status = success` with `success_at` in the period |
 | Orders canceled | ∑ `final_status = canceled` (includes expired) |
 | Completion rate | completed / (completed + canceled) |

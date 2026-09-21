@@ -42,6 +42,9 @@ pub struct Order {
     pub success_at: Option<i64>,
     /// `created_at` of the *first* version to reach `canceled`.
     pub canceled_at: Option<i64>,
+    /// The NIP-69 `created_at` tag: when the order was created. `None` when no
+    /// stored version carried it.
+    pub order_created_at: Option<i64>,
 }
 
 /// Stores one published version, ignoring a version already known.
@@ -61,8 +64,9 @@ where
     sqlx::query(
         "INSERT OR IGNORE INTO order_versions (
              event_id, order_id, pubkey, created_at, kind, status, fiat_code, amount_sats,
-             fiat_amount, fiat_min, fiat_max, payment_methods, premium, network, expires_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             fiat_amount, fiat_min, fiat_max, payment_methods, premium, network, expires_at,
+             order_created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&version.event_id)
     .bind(&version.order_id)
@@ -79,6 +83,7 @@ where
     .bind(version.premium)
     .bind(version.network.map(Network::as_str))
     .bind(version.expires_at)
+    .bind(version.order_created_at)
     .execute(executor)
     .await?;
 
@@ -108,12 +113,13 @@ where
     sqlx::query(
         "INSERT INTO orders (
              order_id, pubkey, first_seen_at, last_updated_at, final_status, kind, fiat_code,
-             amount_sats, fiat_amount, payment_methods, premium, network, success_at, canceled_at
+             amount_sats, fiat_amount, payment_methods, premium, network, success_at, canceled_at,
+             order_created_at
          )
          SELECT latest.order_id, latest.pubkey, span.first_seen_at, span.last_updated_at,
                 latest.status, latest.kind, latest.fiat_code, latest.amount_sats,
                 latest.fiat_amount, latest.payment_methods, latest.premium, latest.network,
-                span.success_at, span.canceled_at
+                span.success_at, span.canceled_at, span.order_created_at
          FROM (
              SELECT * FROM order_versions WHERE order_id = ?1
              ORDER BY created_at DESC, event_id ASC LIMIT 1
@@ -122,7 +128,10 @@ where
              SELECT MIN(created_at) AS first_seen_at,
                     MAX(created_at) AS last_updated_at,
                     MIN(CASE WHEN status = 'success' THEN created_at END) AS success_at,
-                    MIN(CASE WHEN status = 'canceled' THEN created_at END) AS canceled_at
+                    MIN(CASE WHEN status = 'canceled' THEN created_at END) AS canceled_at,
+                    -- The tag is the same on every revision; MIN just picks
+                    -- it out of the versions that carry it.
+                    MIN(order_created_at) AS order_created_at
              FROM order_versions WHERE order_id = ?1
          ) AS span
          -- `WHERE true` is required, not decoration: without it SQLite reads
@@ -142,7 +151,8 @@ where
              premium = excluded.premium,
              network = excluded.network,
              success_at = excluded.success_at,
-             canceled_at = excluded.canceled_at",
+             canceled_at = excluded.canceled_at,
+             order_created_at = excluded.order_created_at",
     )
     .bind(order_id)
     .execute(executor)
@@ -158,7 +168,8 @@ where
 {
     let row = sqlx::query_as::<_, OrderRow>(
         "SELECT order_id, pubkey, first_seen_at, last_updated_at, final_status, kind, fiat_code,
-                amount_sats, fiat_amount, payment_methods, premium, network, success_at, canceled_at
+                amount_sats, fiat_amount, payment_methods, premium, network, success_at, canceled_at,
+                order_created_at
          FROM orders WHERE order_id = ?",
     )
     .bind(order_id)
@@ -175,7 +186,8 @@ where
 {
     sqlx::query_as::<_, VersionRow>(
         "SELECT event_id, order_id, pubkey, created_at, kind, status, fiat_code, amount_sats,
-                fiat_amount, fiat_min, fiat_max, payment_methods, premium, network, expires_at
+                fiat_amount, fiat_min, fiat_max, payment_methods, premium, network, expires_at,
+                order_created_at
          FROM order_versions WHERE order_id = ? ORDER BY created_at, event_id",
     )
     .bind(order_id)
@@ -203,6 +215,7 @@ struct OrderRow {
     network: Option<String>,
     success_at: Option<i64>,
     canceled_at: Option<i64>,
+    order_created_at: Option<i64>,
 }
 
 impl OrderRow {
@@ -222,6 +235,7 @@ impl OrderRow {
             network: decode("network", optional_network(self.network.as_deref()))?,
             success_at: self.success_at,
             canceled_at: self.canceled_at,
+            order_created_at: self.order_created_at,
         })
     }
 }
@@ -244,6 +258,7 @@ struct VersionRow {
     premium: f64,
     network: Option<String>,
     expires_at: i64,
+    order_created_at: Option<i64>,
 }
 
 impl VersionRow {
@@ -272,6 +287,7 @@ impl VersionRow {
             premium: self.premium,
             network: decode("network", optional_network(self.network.as_deref()))?,
             expires_at: self.expires_at,
+            order_created_at: self.order_created_at,
         })
     }
 }

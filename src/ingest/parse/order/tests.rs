@@ -457,3 +457,43 @@ fn a_fixed_amount_names_no_bounds() {
         Some((10.0, 100.0))
     );
 }
+
+#[test]
+fn the_created_at_tag_is_the_orders_creation_time_not_the_events() {
+    // Arrange
+    let mut tags = valid_tags();
+    tags.push(("created_at", vec!["1787700000"]));
+
+    // Act
+    let order = parse(&order_with(&tags)).expect("created_at is a timestamp");
+
+    // Assert
+    assert_eq!(order.order_created_at, Some(1_787_700_000));
+    assert_ne!(order.created_at, 1_787_700_000);
+}
+
+#[test]
+fn an_order_from_a_node_that_predates_the_created_at_tag_still_parses() {
+    let order = parse(&order_with(&valid_tags())).expect("created_at is optional");
+
+    assert_eq!(order.order_created_at, None);
+}
+
+#[test]
+fn a_created_at_tag_that_is_not_a_timestamp_is_an_error() {
+    let mut tags = valid_tags();
+    tags.push(("created_at", vec!["yesterday"]));
+
+    let error = parse(&order_with(&tags)).expect_err("non-numeric created_at");
+
+    assert!(
+        matches!(
+            error,
+            ParseError::NotANumber {
+                tag: "created_at",
+                ..
+            }
+        ),
+        "{error}"
+    );
+}

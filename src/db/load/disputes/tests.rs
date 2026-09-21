@@ -75,6 +75,7 @@ async fn order(pool: &SqlitePool, id: &str, pubkey: &str, created_at: i64, statu
         premium: 0.0,
         network: Some(Network::Mainnet),
         expires_at: created_at + 900,
+        order_created_at: None,
     };
     event(pool, &version.event_id, pubkey, 38383, created_at).await;
     orders::insert_version(pool, &version)

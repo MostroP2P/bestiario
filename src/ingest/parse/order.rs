@@ -10,13 +10,18 @@
 //! - `expires_at` is required. Across the capture behind `tests/fixtures` it
 //!   was published by every one of the 172 Mostro orders and by none of the
 //!   28 orders from other platforms, and only Mostro orders reach a parser
-//!   (`docs/SPEC.md` §8.1 step 4 rejects the rest).
+//!   (`docs/SPEC.md` §8.1 step 4 rejects the rest);
+//! - the `created_at` **tag** (NIP-69) is optional, since nodes that predate
+//!   it do not publish it, but one that is there must be a unix timestamp. As
+//!   with disputes, it is not the event's own `created_at`: the tag is when
+//!   the order was created, the same on every revision, and the event's is
+//!   when *this revision* was published.
 
 use nostr_sdk::prelude::Event;
 
 use super::{
     ParseError, expect_discriminator, expect_kind, finite, non_blank, non_negative, number,
-    optional_network, required, tag_values, uuid,
+    optional, optional_network, required, tag_values, uuid,
 };
 use crate::network::Network;
 
@@ -79,6 +84,10 @@ pub struct OrderVersion {
     pub premium: f64,
     pub network: Option<Network>,
     pub expires_at: i64,
+    /// When the order was created — the NIP-69 `created_at` *tag*, the same on
+    /// every revision. Distinct from `created_at`, which is this revision's
+    /// event time. `None` from nodes that predate the tag.
+    pub order_created_at: Option<i64>,
 }
 
 impl Direction {
@@ -179,6 +188,9 @@ pub fn parse(event: &Event) -> Result<OrderVersion, ParseError> {
             )?,
             "a unix timestamp",
         )?,
+        order_created_at: optional(event, "created_at")?
+            .map(|value| number("created_at", &value, "a unix timestamp"))
+            .transpose()?,
     })
 }
 

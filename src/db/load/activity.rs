@@ -17,6 +17,14 @@
 //! (`created_at`, then `event_id`), which `MIN(created_at)` with bare
 //! columns would not.
 //!
+//! An order's `created_at` is the NIP-69 `created_at` tag when a version
+//! carried it, and the first version seen otherwise. The tag is what makes
+//! an order first caught mid-flight — the norm in a backfill, kind 38383
+//! being replaceable — count in the period it was created in rather than the
+//! one bestiario caught it in. It never dates an order *after* its first
+//! version seen: a tag in the future of what was already published is a
+//! wrong clock, and the event time is the bound bestiario can check.
+//!
 //! An order with no version row at all — a projection row without its
 //! source, which the ingest pipeline does not produce — joins to nulls
 //! and is read as a fixed-price, non-range order carrying the
@@ -88,7 +96,9 @@ where
 {
     let mut query = QueryBuilder::<Sqlite>::new(
         "SELECT o.order_id, o.pubkey, i.name AS instance_name,
-                o.first_seen_at AS created_at, o.final_status AS status, o.kind,
+                MIN(o.first_seen_at, COALESCE(o.order_created_at, o.first_seen_at))
+                    AS created_at,
+                o.final_status AS status, o.kind,
                 o.fiat_code, o.payment_methods, o.amount_sats, o.fiat_amount, o.premium,
                 o.success_at, o.canceled_at,
                 first.amount_sats AS first_amount_sats,
@@ -140,7 +150,10 @@ where
                 .push("))");
         }
     }
-    query.push(" ORDER BY o.first_seen_at, o.order_id");
+    query.push(
+        " ORDER BY MIN(o.first_seen_at, COALESCE(o.order_created_at, o.first_seen_at)),
+                   o.order_id",
+    );
 
     query
         .build_query_as::<Row>()
