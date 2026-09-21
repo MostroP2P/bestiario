@@ -154,6 +154,7 @@ fn status(status: Status) -> disputes::Status {
         Status::SellerRefunded => disputes::Status::SellerRefunded,
         Status::Settled => disputes::Status::Settled,
         Status::Released => disputes::Status::Released,
+        Status::CooperativelyCanceled => disputes::Status::CooperativelyCanceled,
     }
 }
 

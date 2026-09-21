@@ -809,28 +809,30 @@ so.
 ```console
 $ bestiario stats disputes --from 2026-08-23 --until 2026-08-27
 2026-08-23T00:00:00+00:00 — 2026-08-27T00:00:00+00:00
-┌──────────────────────────────────┬──────────────────────────────────────┐
-│ metric                           ┆ value                                │
-╞══════════════════════════════════╪══════════════════════════════════════╡
-│ disputes.opened                  ┆ 5                                    │
-│ disputes.status.initiated        ┆ 1                                    │
-│ disputes.status.in_progress      ┆ 1                                    │
-│ disputes.status.seller_refunded  ┆ 2                                    │
-│ disputes.status.settled          ┆ 1                                    │
-│ disputes.status.released         ┆ 0                                    │
-│ disputes.initiator.buyer         ┆ 60.0%                                │
-│ disputes.initiator.seller        ┆ 40.0%                                │
-│ disputes.rate                    ┆ 250.0%                               │
-│ disputes.resolved                ┆ 3                                    │
-│ disputes.outcome.seller_refunded ┆ 66.7%                                │
-│ disputes.outcome.settled         ┆ 33.3%                                │
-│ disputes.outcome.released        ┆ 0.0%                                 │
-│ disputes.resolution_p50          ┆ 1.4h                                 │
-│ disputes.resolution_p90          ┆ 2.0h                                 │
-│ disputes.open_now                ┆ 1                                    │
-│ disputes.open.1.id               ┆ c6ebce7e-e521-4df3-a8c5-24301145eb66 │
-│ disputes.open.1.age              ┆ 3.1d                                 │
-└──────────────────────────────────┴──────────────────────────────────────┘
+┌─────────────────────────────────────────┬──────────────────────────────────────┐
+│ metric                                  ┆ value                                │
+╞═════════════════════════════════════════╪══════════════════════════════════════╡
+│ disputes.opened                         ┆ 5                                    │
+│ disputes.status.initiated               ┆ 1                                    │
+│ disputes.status.in_progress             ┆ 1                                    │
+│ disputes.status.seller_refunded         ┆ 2                                    │
+│ disputes.status.settled                 ┆ 1                                    │
+│ disputes.status.released                ┆ 0                                    │
+│ disputes.status.cooperatively_canceled  ┆ 0                                    │
+│ disputes.initiator.buyer                ┆ 60.0%                                │
+│ disputes.initiator.seller               ┆ 40.0%                                │
+│ disputes.rate                           ┆ 250.0%                               │
+│ disputes.resolved                       ┆ 3                                    │
+│ disputes.outcome.seller_refunded        ┆ 66.7%                                │
+│ disputes.outcome.settled                ┆ 33.3%                                │
+│ disputes.outcome.released               ┆ 0.0%                                 │
+│ disputes.outcome.cooperatively_canceled ┆ 0.0%                                 │
+│ disputes.resolution_p50                 ┆ 1.4h                                 │
+│ disputes.resolution_p90                 ┆ 2.0h                                 │
+│ disputes.open_now                       ┆ 1                                    │
+│ disputes.open.1.id                      ┆ c6ebce7e-e521-4df3-a8c5-24301145eb66 │
+│ disputes.open.1.age                     ┆ 3.1d                                 │
+└─────────────────────────────────────────┴──────────────────────────────────────┘
 ```
 
 `--by status` and `--by initiator` print the histograms alone; `--by
@@ -871,59 +873,61 @@ One instance, with its own figures and its share of the network:
 ```console
 $ bestiario instance Mostro --from 2026-08-23 --until 2026-08-27
 2026-08-23T00:00:00+00:00 — 2026-08-27T00:00:00+00:00
-┌──────────────────────────────────┬──────────────────────────────────────────────────────────────────┐
-│ metric                           ┆ value                                                            │
-╞══════════════════════════════════╪══════════════════════════════════════════════════════════════════╡
-│ instance.pubkey                  ┆ 6320ee5edbaeb9a00d7c4768e472e277539aa993007c43d75ce00a38dff4d425 │
-│ instance.name                    ┆ Mostro                                                           │
-│ instance.mostro_version          ┆ —                                                                │
-│ instance.protocol_version        ┆ —                                                                │
-│ instance.fee                     ┆ —                                                                │
-│ instance.min_order               ┆ —                                                                │
-│ instance.max_order               ┆ —                                                                │
-│ instance.fiat                    ┆ —                                                                │
-│ instance.ln_networks             ┆ —                                                                │
-│ instance.bond                    ┆ —                                                                │
-│ instance.first_seen              ┆ 2026-08-25T01:24:38+00:00                                        │
-│ instance.last_seen               ┆ 2026-08-26T10:39:33+00:00                                        │
-│ instance.silent_for              ┆ 16.5h                                                            │
-│ instance.silent                  ┆ no                                                               │
-│ orders.created                   ┆ 4                                                                │
-│ orders.completed                 ┆ 0                                                                │
-│ orders.canceled                  ┆ 0                                                                │
-│ orders.completion_rate           ┆ —                                                                │
-│ orders.abandonment_rate          ┆ 0.0%                                                             │
-│ orders.created_delta             ┆ —                                                                │
-│ orders.completed_delta           ┆ —                                                                │
-│ orders.open_now                  ┆ 2                                                                │
-│ orders.in_progress_now           ┆ 1                                                                │
-│ volume.sats                      ┆ 0 sats                                                           │
-│ dev_fees.total_sats              ┆ 116 sats                                                         │
-│ dev_fees.paid                    ┆ 1                                                                │
-│ dev_fees.coverage                ┆ —                                                                │
-│ dev_fees.latency_p50             ┆ —                                                                │
-│ dev_fees.latency_p90             ┆ —                                                                │
-│ dev_fees.duplicates              ┆ 0                                                                │
-│ dev_fees.orphans                 ┆ 1                                                                │
-│ disputes.opened                  ┆ 1                                                                │
-│ disputes.status.initiated        ┆ 0                                                                │
-│ disputes.status.in_progress      ┆ 1                                                                │
-│ disputes.status.seller_refunded  ┆ 0                                                                │
-│ disputes.status.settled          ┆ 0                                                                │
-│ disputes.status.released         ┆ 0                                                                │
-│ disputes.initiator.buyer         ┆ 100.0%                                                           │
-│ disputes.initiator.seller        ┆ 0.0%                                                             │
-│ disputes.rate                    ┆ 100.0%                                                           │
-│ disputes.resolved                ┆ 0                                                                │
-│ disputes.outcome.seller_refunded ┆ —                                                                │
-│ disputes.outcome.settled         ┆ —                                                                │
-│ disputes.outcome.released        ┆ —                                                                │
-│ disputes.resolution_p50          ┆ —                                                                │
-│ disputes.resolution_p90          ┆ —                                                                │
-│ disputes.open_now                ┆ 0                                                                │
-│ share.orders                     ┆ 50.0%                                                            │
-│ share.volume                     ┆ 0.0%                                                             │
-└──────────────────────────────────┴──────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────┬──────────────────────────────────────────────────────────────────┐
+│ metric                                  ┆ value                                                            │
+╞═════════════════════════════════════════╪══════════════════════════════════════════════════════════════════╡
+│ instance.pubkey                         ┆ 6320ee5edbaeb9a00d7c4768e472e277539aa993007c43d75ce00a38dff4d425 │
+│ instance.name                           ┆ Mostro                                                           │
+│ instance.mostro_version                 ┆ —                                                                │
+│ instance.protocol_version               ┆ —                                                                │
+│ instance.fee                            ┆ —                                                                │
+│ instance.min_order                      ┆ —                                                                │
+│ instance.max_order                      ┆ —                                                                │
+│ instance.fiat                           ┆ —                                                                │
+│ instance.ln_networks                    ┆ —                                                                │
+│ instance.bond                           ┆ —                                                                │
+│ instance.first_seen                     ┆ 2026-08-25T01:24:38+00:00                                        │
+│ instance.last_seen                      ┆ 2026-08-26T10:39:33+00:00                                        │
+│ instance.silent_for                     ┆ 16.5h                                                            │
+│ instance.silent                         ┆ no                                                               │
+│ orders.created                          ┆ 4                                                                │
+│ orders.completed                        ┆ 0                                                                │
+│ orders.canceled                         ┆ 0                                                                │
+│ orders.completion_rate                  ┆ —                                                                │
+│ orders.abandonment_rate                 ┆ 0.0%                                                             │
+│ orders.created_delta                    ┆ —                                                                │
+│ orders.completed_delta                  ┆ —                                                                │
+│ orders.open_now                         ┆ 2                                                                │
+│ orders.in_progress_now                  ┆ 1                                                                │
+│ volume.sats                             ┆ 0 sats                                                           │
+│ dev_fees.total_sats                     ┆ 116 sats                                                         │
+│ dev_fees.paid                           ┆ 1                                                                │
+│ dev_fees.coverage                       ┆ —                                                                │
+│ dev_fees.latency_p50                    ┆ —                                                                │
+│ dev_fees.latency_p90                    ┆ —                                                                │
+│ dev_fees.duplicates                     ┆ 0                                                                │
+│ dev_fees.orphans                        ┆ 1                                                                │
+│ disputes.opened                         ┆ 1                                                                │
+│ disputes.status.initiated               ┆ 0                                                                │
+│ disputes.status.in_progress             ┆ 1                                                                │
+│ disputes.status.seller_refunded         ┆ 0                                                                │
+│ disputes.status.settled                 ┆ 0                                                                │
+│ disputes.status.released                ┆ 0                                                                │
+│ disputes.status.cooperatively_canceled  ┆ 0                                                                │
+│ disputes.initiator.buyer                ┆ 100.0%                                                           │
+│ disputes.initiator.seller               ┆ 0.0%                                                             │
+│ disputes.rate                           ┆ 100.0%                                                           │
+│ disputes.resolved                       ┆ 0                                                                │
+│ disputes.outcome.seller_refunded        ┆ —                                                                │
+│ disputes.outcome.settled                ┆ —                                                                │
+│ disputes.outcome.released               ┆ —                                                                │
+│ disputes.outcome.cooperatively_canceled ┆ —                                                                │
+│ disputes.resolution_p50                 ┆ —                                                                │
+│ disputes.resolution_p90                 ┆ —                                                                │
+│ disputes.open_now                       ┆ 0                                                                │
+│ share.orders                            ┆ 50.0%                                                            │
+│ share.volume                            ┆ 0.0%                                                             │
+└─────────────────────────────────────────┴──────────────────────────────────────────────────────────────────┘
 ```
 
 ### One currency's market
@@ -1188,14 +1192,14 @@ market:7d                                                                       
 market:30d                                                                        2096  b820d8dba13bf434…
 market:90d                                                                        2096  9617eb9cb4e6efd1…
 market:all                                                                        2096  523d89ee5498d5db…
-disputes:24h                                                                      1673  d83b68d4ba570f6c…
-disputes:7d                                                                       1704  8961cfd0cadc6651…
-disputes:30d                                                                      1704  6cb6214598de9e64…
-disputes:90d                                                                      1704  9f338f3440a0411b…
-disputes:all                                                                      1689  3935916c462f36b5…
-series:disputes:daily:2026-08                                                     3931  8e2ac67f7510c252…
-series:disputes:weekly:2026-08                                                    1585  31c7d7503e32f99d…
-series:disputes:monthly:2026                                                      2219  dd293ccd7dbab070…
+disputes:24h                                                                      1862  72783941379ee595…
+disputes:7d                                                                       1893  125ecf7a8d6476fb…
+disputes:30d                                                                      1893  66ee8ef140b193b1…
+disputes:90d                                                                      1893  2bd127d29fc824e0…
+disputes:all                                                                      1881  564bf43cc1502948…
+series:disputes:daily:2026-08                                                     4386  d5e50de14205386b…
+series:disputes:weekly:2026-08                                                    1780  0c37f4429b6dca87…
+series:disputes:monthly:2026                                                      2484  4d9c46f1302bf3b0…
 dev-fees:24h                                                                      1088  f80e0c51ec30a0a4…
 dev-fees:7d                                                                       1088  707f2487088cda84…
 dev-fees:30d                                                                      1088  4fd471b4034b0410…
@@ -1276,7 +1280,7 @@ orders:90d:i:765b0beaaeaa6e3fdb983c4c518ec5a2e35dcefad01d41326b82fd1b96c9abe6   
 orders:all:i:765b0beaaeaa6e3fdb983c4c518ec5a2e35dcefad01d41326b82fd1b96c9abe6      898  7e8c8943a236dde7…
 index                                                                            21136  —
 
-113 documents, 343215 bytes
+113 documents, 345078 bytes
 ```
 
 The first three lines are what a review is for. `snapshot` is the run's

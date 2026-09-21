@@ -89,7 +89,7 @@ fn opened_is_dated_by_the_opening_tag_and_split_by_current_status() {
 
     // Assert
     assert_eq!(disputes.opened, 4);
-    assert_eq!(disputes.by_status, [1, 1, 0, 1, 1]);
+    assert_eq!(disputes.by_status, [1, 1, 0, 1, 1, 0]);
 }
 
 #[test]
@@ -111,7 +111,10 @@ fn outcome_and_resolution_time_are_dated_by_the_terminal_version() {
     let disputes = summarise(&dataset(), WINDOW, NOW);
 
     assert_eq!(disputes.resolved, 3);
-    assert_eq!(disputes.outcome, Some([1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0]));
+    assert_eq!(
+        disputes.outcome,
+        Some([1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0, 0.0])
+    );
     assert_eq!(disputes.resolution_p50, Some(600));
     assert_eq!(disputes.resolution_p90, Some(700));
 }
@@ -175,7 +178,34 @@ fn the_outcome_is_the_first_terminal_version_not_the_latest_status() {
         taken: Vec::new(),
     };
 
-    assert_eq!(summarise(&data, WINDOW, NOW).outcome, Some([0.0, 1.0, 0.0]));
+    assert_eq!(
+        summarise(&data, WINDOW, NOW).outcome,
+        Some([0.0, 1.0, 0.0, 0.0])
+    );
+}
+
+/// A cooperative cancel during the dispute is an outcome of its own, next to
+/// the solver's refund — not folded into `seller_refunded`, and not left open.
+#[test]
+fn a_cooperative_cancel_is_its_own_outcome() {
+    let data = DisputeData {
+        disputes: vec![
+            resolved("refunded", 1_000, Status::SellerRefunded, 1_500),
+            resolved("cancelled", 1_100, Status::CooperativelyCanceled, 1_600),
+        ],
+        taken: Vec::new(),
+    };
+
+    let disputes = summarise(&data, WINDOW, NOW);
+
+    assert_eq!(disputes.outcome, Some([0.5, 0.0, 0.0, 0.5]));
+    assert_eq!(disputes.by_status, [0, 0, 1, 0, 0, 1]);
+    assert!(disputes.open.is_empty());
+    assert!(Status::TERMINAL.contains(&Status::CooperativelyCanceled));
+    assert_eq!(
+        Status::CooperativelyCanceled.as_key(),
+        "cooperatively_canceled"
+    );
 }
 
 #[test]
@@ -228,6 +258,7 @@ fn the_global_report_names_every_figure_of_the_spec() {
             "disputes.status.seller_refunded",
             "disputes.status.settled",
             "disputes.status.released",
+            "disputes.status.cooperatively_canceled",
             "disputes.initiator.buyer",
             "disputes.initiator.seller",
             "disputes.rate",
@@ -235,6 +266,7 @@ fn the_global_report_names_every_figure_of_the_spec() {
             "disputes.outcome.seller_refunded",
             "disputes.outcome.settled",
             "disputes.outcome.released",
+            "disputes.outcome.cooperatively_canceled",
             "disputes.resolution_p50",
             "disputes.resolution_p90",
             "disputes.open_now",
@@ -257,17 +289,17 @@ fn the_seller_share_is_the_complement_of_the_buyer_share() {
 }
 
 #[test]
-fn the_status_histogram_is_five_counts() {
+fn the_status_histogram_is_six_counts() {
     let metrics = report(&dataset(), WINDOW, NOW, Some(Dimension::Status), ALL);
 
-    assert_eq!(metrics.len(), 5);
+    assert_eq!(metrics.len(), 6);
     assert_eq!(metrics[0].name, "disputes.status.initiated");
     assert_eq!(metrics[0].value, Value::Count(1));
 }
 
 #[test]
 fn a_monthly_report_leaves_the_now_figures_out() {
-    // 2026-07-01 to 2026-09-01: two months, fifteen dated figures each.
+    // 2026-07-01 to 2026-09-01: two months, seventeen dated figures each.
     let names: Vec<String> = report(
         &dataset(),
         Window::new(1_782_864_000, 1_788_220_800),
@@ -279,9 +311,9 @@ fn a_monthly_report_leaves_the_now_figures_out() {
     .map(|metric| metric.name)
     .collect();
 
-    assert_eq!(names.len(), 30);
+    assert_eq!(names.len(), 34);
     assert_eq!(names[0], "disputes.2026-07.opened");
-    assert_eq!(names[15], "disputes.2026-08.opened");
+    assert_eq!(names[17], "disputes.2026-08.opened");
     assert!(
         names.iter().all(|name| !name.contains("open_")),
         "{names:?}"
@@ -292,10 +324,10 @@ fn a_monthly_report_leaves_the_now_figures_out() {
 fn an_instance_slice_keeps_the_now_figures() {
     let metrics = report(&dataset(), WINDOW, NOW, Some(Dimension::Instance), ALL);
 
-    assert_eq!(metrics.len(), 16 + 4);
+    assert_eq!(metrics.len(), 18 + 4);
     assert_eq!(metrics[0].name, "disputes.Alpha (aaaaaaaa).opened");
-    assert_eq!(metrics[16].name, "disputes.Alpha (aaaaaaaa).open.1.id");
-    assert_eq!(metrics[16].value, Value::Text("d1".into()));
+    assert_eq!(metrics[18].name, "disputes.Alpha (aaaaaaaa).open.1.id");
+    assert_eq!(metrics[18].value, Value::Text("d1".into()));
 }
 
 #[test]

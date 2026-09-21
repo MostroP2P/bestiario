@@ -93,8 +93,22 @@ fn a_dispute_from_a_nameless_instance_parses_like_any_other() {
     assert_eq!(dispute.status, Status::SellerRefunded);
 }
 
+/// No node has published one yet to capture as a fixture: mostro-core 0.15.1
+/// introduced it (mostro #968).
 #[test]
-fn an_unknown_status_is_an_error_and_not_a_sixth_bucket() {
+fn a_cooperative_cancel_parses_to_its_own_variant() {
+    let dispute =
+        parse(&dispute_but("s", Some("cooperatively-canceled"))).expect("cooperatively-canceled");
+
+    assert_eq!(dispute.status, Status::CooperativelyCanceled);
+    assert_eq!(
+        Status::CooperativelyCanceled.as_str(),
+        "cooperatively-canceled"
+    );
+}
+
+#[test]
+fn an_unknown_status_is_an_error_and_not_a_seventh_bucket() {
     let error = parse(&dispute_but("s", Some("mediated"))).expect_err("unknown status");
 
     assert!(

@@ -111,10 +111,17 @@ Notes:
 | Tag | Content |
 |---|---|
 | `d` | dispute UUID |
-| `s` | `initiated` \| `in-progress` \| `seller-refunded` \| `settled` \| `released` |
+| `s` | `initiated` \| `in-progress` \| `seller-refunded` \| `settled` \| `released` \| `cooperatively-canceled` |
 | `initiator` | `buyer` \| `seller` |
 | `created_at` | unix ts when the dispute was opened (distinct from the event `created_at`) |
 | `y`, `z` | instance name, `dispute` |
+
+`settled` and `seller-refunded` mean a solver decided; `released` and
+`cooperatively-canceled` mean the parties resolved the dispute themselves
+(a release, or a cooperative cancel, while it was open). Nodes on
+mostro-core before 0.15.1 published those two user-resolved cases as
+`settled` and `seller-refunded`, so on older history the split is not
+reliable.
 
 The event does **not** include the `order-id`. The dispute→order relation is
 not observable; disputes are only counted by status, instance and initiator.
@@ -532,10 +539,10 @@ indistinguishable from a quiet day.
 
 | Metric | Definition |
 |---|---|
-| By status | # in `initiated`, `in-progress`, `seller-refunded`, `settled`, `released` |
+| By status | # in `initiated`, `in-progress`, `seller-refunded`, `settled`, `released`, `cooperatively-canceled` |
 | By initiator | % opened by buyer vs seller |
 | Dispute rate | # disputes opened / # orders that left `pending`, per instance |
-| Outcome | % `seller-refunded` vs `settled` vs `released` over resolved |
+| Outcome | % `seller-refunded` vs `settled` vs `released` vs `cooperatively-canceled` over resolved |
 | Resolution time | `terminal.created_at − opened_at`, p50/p90 |
 | Open now and age | still `initiated` — waiting for a solver — sorted by `opened_at` |
 

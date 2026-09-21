@@ -34,6 +34,9 @@ pub enum Status {
     SellerRefunded,
     Settled,
     Released,
+    /// A cooperative cancel during the dispute; published from mostro-core
+    /// 0.15.1, where older nodes said `seller-refunded`.
+    CooperativelyCanceled,
 }
 
 /// One published version of a dispute — one 38386 event, parsed.
@@ -83,6 +86,7 @@ impl Status {
             Self::SellerRefunded => "seller-refunded",
             Self::Settled => "settled",
             Self::Released => "released",
+            Self::CooperativelyCanceled => "cooperatively-canceled",
         }
     }
 
@@ -93,10 +97,12 @@ impl Status {
             "seller-refunded" => Ok(Self::SellerRefunded),
             "settled" => Ok(Self::Settled),
             "released" => Ok(Self::Released),
+            "cooperatively-canceled" => Ok(Self::CooperativelyCanceled),
             _ => Err(ParseError::UnknownValue {
                 tag: "s",
                 value: value.to_string(),
-                expected: "`initiated`, `in-progress`, `seller-refunded`, `settled` or `released`",
+                expected: "`initiated`, `in-progress`, `seller-refunded`, `settled`, `released` \
+                           or `cooperatively-canceled`",
             }),
         }
     }
