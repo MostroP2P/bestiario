@@ -185,6 +185,30 @@ async fn the_outcome_is_the_first_terminal_version_even_when_a_later_one_differs
 }
 
 #[tokio::test]
+async fn a_cooperative_cancel_is_an_outcome() {
+    let pool = migrated().await;
+    dispute(&pool, "d1", ALPHA, T0, Status::Initiated, None, None).await;
+    dispute(
+        &pool,
+        "d1",
+        ALPHA,
+        T0 + 100,
+        Status::CooperativelyCanceled,
+        None,
+        None,
+    )
+    .await;
+
+    let data = load(&pool, &mainnet()).await.expect("load");
+
+    assert_eq!(
+        data.disputes[0].outcome,
+        Some(disputes::Status::CooperativelyCanceled)
+    );
+    assert_eq!(data.disputes[0].resolved_at, Some(T0 + 100));
+}
+
+#[tokio::test]
 async fn the_network_scope_reaches_neither_read() {
     // Disputes carry no network; filtering only the orders would divide
     // every network's disputes by one network's takers.
