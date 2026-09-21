@@ -402,9 +402,10 @@ Convention: `∑` = aggregate; `%` = proportion; `p50/p90` = percentiles;
 window into UTC calendar buckets, half-open like the window itself and
 clipped to it, so consecutive buckets tile and none is counted twice. The
 timestamp that dates a row is the one that already dates that figure in its
-family — an order counts in the bucket its first `pending` version was seen
-in, a completion in the bucket it reached `success`, a fee in the bucket of
-its own event: a bucket changes the grouping, never the dating.
+family — an order counts in the bucket it was created in (its `created_at`
+tag, else the first version seen, whichever is earlier), a completion in
+the bucket it reached `success`, a fee in the bucket of its own event: a
+bucket changes the grouping, never the dating.
 
 Every bucket of the window is reported, including the ones nothing happened
 in, so a consumer plotting the result cannot draw a line across a gap that
