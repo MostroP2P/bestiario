@@ -1429,4 +1429,4 @@ can be signed onto a relay without touching them.
 
 ## Licence
 
-[MIT](LICENSE).
+[GNU General Public License v3.0](LICENSE).

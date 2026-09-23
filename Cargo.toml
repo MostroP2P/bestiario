@@ -4,7 +4,7 @@ members = ["crates/stats"]
 [workspace.package]
 version = "0.2.0"
 edition = "2024"
-license = "MIT"
+license = "GPL-3.0-only"
 repository = "https://github.com/MostroP2P/bestiario"
 
 # Shared so that the workspace pins one version of anything both crates use.
