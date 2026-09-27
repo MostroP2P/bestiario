@@ -8,13 +8,13 @@
 //! counts and never needs to pair a dispute with its order.
 //!
 //! Note the two timestamps. The event's own `created_at` is when *this
-//! version* was published; the `created_at` **tag** is when the dispute was
-//! opened. Reading one for the other would date every dispute to the moment
+//! version* was published; the `published_at` **tag** (`created_at` on nodes
+//! that predate the rename) is when the dispute was opened. Reading one for the other would date every dispute to the moment
 //! of its last state change.
 
 use nostr_sdk::prelude::Event;
 
-use super::{ParseError, expect_kind, number, optional, required};
+use super::{ParseError, expect_kind, optional, published_at, required};
 
 /// The kind this parser accepts.
 pub const KIND: u16 = 38386;
@@ -51,7 +51,8 @@ pub struct DisputeVersion {
     pub created_at: i64,
     pub status: Status,
     pub initiator: Option<Initiator>,
-    /// When the dispute was opened — the `created_at` *tag*.
+    /// When the dispute was opened — the `published_at` *tag*, or the legacy
+    /// `created_at` one.
     pub opened_at: Option<i64>,
 }
 
@@ -115,9 +116,7 @@ pub fn parse(event: &Event) -> Result<DisputeVersion, ParseError> {
     let initiator = optional(event, "initiator")?
         .map(|value| Initiator::parse(&value))
         .transpose()?;
-    let opened_at = optional(event, "created_at")?
-        .map(|value| number("created_at", &value, "a unix timestamp"))
-        .transpose()?;
+    let opened_at = published_at(event)?;
 
     Ok(DisputeVersion {
         event_id: event.id.to_hex(),

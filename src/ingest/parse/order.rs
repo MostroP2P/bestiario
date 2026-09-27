@@ -11,7 +11,8 @@
 //!   was published by every one of the 172 Mostro orders and by none of the
 //!   28 orders from other platforms, and only Mostro orders reach a parser
 //!   (`docs/SPEC.md` §8.1 step 4 rejects the rest);
-//! - the `created_at` **tag** (NIP-69) is optional, since nodes that predate
+//! - the `published_at` **tag** (NIP-69; `created_at` before
+//!   MostroP2P/mostro#1000, still read) is optional, since nodes that predate
 //!   it do not publish it, but one that is there must be a unix timestamp. As
 //!   with disputes, it is not the event's own `created_at`: the tag is when
 //!   the order was created, the same on every revision, and the event's is
@@ -21,7 +22,7 @@ use nostr_sdk::prelude::Event;
 
 use super::{
     ParseError, expect_discriminator, expect_kind, finite, non_blank, non_negative, number,
-    optional, optional_network, required, tag_values, uuid,
+    optional_network, published_at, required, tag_values, uuid,
 };
 use crate::network::Network;
 
@@ -84,7 +85,7 @@ pub struct OrderVersion {
     pub premium: f64,
     pub network: Option<Network>,
     pub expires_at: i64,
-    /// When the order was created — the NIP-69 `created_at` *tag*, the same on
+    /// When the order was created — the NIP-69 `published_at` *tag*, the same on
     /// every revision. Distinct from `created_at`, which is this revision's
     /// event time. `None` from nodes that predate the tag.
     pub order_created_at: Option<i64>,
@@ -188,9 +189,7 @@ pub fn parse(event: &Event) -> Result<OrderVersion, ParseError> {
             )?,
             "a unix timestamp",
         )?,
-        order_created_at: optional(event, "created_at")?
-            .map(|value| number("created_at", &value, "a unix timestamp"))
-            .transpose()?,
+        order_created_at: published_at(event)?,
     })
 }
 

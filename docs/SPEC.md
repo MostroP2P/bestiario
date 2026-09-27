@@ -39,7 +39,7 @@ about enters the system through a 38383.
 | `premium` | premium % | premium distribution |
 | `network` | `mainnet`, `testnet`, … | filter out test networks |
 | `expires_at` | unix ts | order TTL |
-| `created_at` | unix ts when the order was created (optional; distinct from the event `created_at`) | the order's age |
+| `published_at` | unix ts when the order was created (optional; distinct from the event `created_at`; `created_at` before MostroP2P/mostro#1000, still read) | the order's age |
 | `y` | `[platform, instance_name?]` | **platform filter** + instance name |
 | `z` | `order` | discriminator |
 | `rating` | maker reputation JSON | ignored (out of scope) |
@@ -63,8 +63,9 @@ Notes:
 - `expires_at` is published by **every** Mostro order in that sample
   (172/172; 172 of the 200 orders overall); the 28 that omitted it all came
   from other platforms. Treat it as mandatory for `y[0] == "mostro"`.
-- The `created_at` **tag** ([NIP-69](https://nips.nostr.com/69),
-  nostr-protocol/nips#2476; published by Mostro since MostroP2P/mostro#971)
+- The `published_at` **tag** ([NIP-69](https://nips.nostr.com/69),
+  nostr-protocol/nips#2476; published by Mostro since MostroP2P/mostro#1000,
+  as `created_at` since MostroP2P/mostro#971, which is still read)
   is when the order was created and stays the same on every revision, while
   the event `created_at` is when *that revision* was published. Nodes that
   predate it do not publish it, so it is optional; one that is present must
@@ -121,7 +122,7 @@ Notes:
 | `d` | dispute UUID |
 | `s` | `initiated` \| `in-progress` \| `seller-refunded` \| `settled` \| `released` \| `cooperatively-canceled` |
 | `initiator` | `buyer` \| `seller` |
-| `created_at` | unix ts when the dispute was opened (distinct from the event `created_at`) |
+| `published_at` | unix ts when the dispute was opened (distinct from the event `created_at`; `created_at` on nodes that predate the rename, still read) |
 | `y`, `z` | instance name, `dispute` |
 
 `settled` and `seller-refunded` mean a solver decided; `released` and
@@ -251,7 +252,7 @@ CREATE TABLE order_versions (
   premium      REAL NOT NULL,
   network      TEXT,
   expires_at   INTEGER,
-  order_created_at INTEGER               -- created_at tag, NULL if absent
+  order_created_at INTEGER               -- published_at tag, NULL if absent
 );
 CREATE INDEX order_versions_order ON order_versions(order_id, created_at);
 
@@ -271,7 +272,7 @@ CREATE TABLE orders (
   network         TEXT,
   success_at      INTEGER,               -- created_at of the success version
   canceled_at     INTEGER,
-  order_created_at INTEGER               -- created_at tag of any version
+  order_created_at INTEGER               -- published_at tag of any version
 );
 CREATE INDEX orders_pubkey_status ON orders(pubkey, final_status);
 CREATE INDEX orders_success_at ON orders(success_at);
@@ -296,7 +297,7 @@ CREATE TABLE dispute_versions (
   created_at   INTEGER NOT NULL,         -- event created_at
   status       TEXT NOT NULL,
   initiator    TEXT,
-  opened_at    INTEGER                   -- created_at tag
+  opened_at    INTEGER                   -- published_at tag
 );
 CREATE INDEX dispute_versions_dispute ON dispute_versions(dispute_id, created_at);
 
@@ -474,7 +475,7 @@ indistinguishable from a quiet day.
 
 | Metric | Definition |
 |---|---|
-| Orders created | ∑ orders created in the period: the `created_at` tag, else the 1st version seen, whichever is earlier |
+| Orders created | ∑ orders created in the period: the `published_at` tag, else the 1st version seen, whichever is earlier |
 | Orders completed | ∑ `final_status = success` with `success_at` in the period |
 | Orders canceled | ∑ `final_status = canceled` (includes expired) |
 | Completion rate | completed / (completed + canceled) |

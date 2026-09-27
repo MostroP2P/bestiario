@@ -299,6 +299,18 @@ pub(crate) fn number<T: std::str::FromStr>(
     })
 }
 
+/// The creation time Mostro puts on orders (38383) and disputes (38386):
+/// `published_at`, or the legacy `created_at` tag of nodes that predate the
+/// rename. A malformed value is an error naming the tag it was read from.
+pub(crate) fn published_at(event: &Event) -> Result<Option<i64>, ParseError> {
+    for tag in ["published_at", "created_at"] {
+        if let Some(value) = optional(event, tag)? {
+            return number(tag, &value, "a unix timestamp").map(Some);
+        }
+    }
+    Ok(None)
+}
+
 /// The `network` tag, shared by orders (38383) and dev fees (8383).
 ///
 /// An unrecognised value is an error rather than a `None`: the network filter

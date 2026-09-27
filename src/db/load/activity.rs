@@ -17,7 +17,7 @@
 //! (`created_at`, then `event_id`), which `MIN(created_at)` with bare
 //! columns would not.
 //!
-//! An order's `created_at` is the NIP-69 `created_at` tag when a version
+//! An order's `created_at` is the NIP-69 `published_at` tag when a version
 //! carried it, and the first version seen otherwise. The tag is what makes
 //! an order first caught mid-flight — the norm in a backfill, kind 38383
 //! being replaceable — count in the period it was created in rather than the
