@@ -211,3 +211,20 @@ fn a_published_at_tag_that_is_not_a_timestamp_is_an_error() {
         "{error}"
     );
 }
+
+#[test]
+fn a_negative_published_at_is_out_of_range() {
+    // One before the epoch would give an open dispute an enormous age.
+    let error = parse(&dispute_but("published_at", Some("-1"))).expect_err("negative published_at");
+
+    assert!(
+        matches!(
+            error,
+            ParseError::OutOfRange {
+                tag: "published_at",
+                ..
+            }
+        ),
+        "{error}"
+    );
+}
