@@ -168,3 +168,46 @@ fn an_event_of_another_kind_is_rejected_before_any_tag_is_read() {
         }
     );
 }
+
+#[test]
+fn the_published_at_tag_is_the_open_time() {
+    // mostro renamed the tag from `created_at`; a new node sends only this one.
+    let event = EventBuilder::new(Kind::from_u16(KIND), "")
+        .tags([
+            Tag::parse(["d", "c6ebce7e-e521-4df3-a8c5-24301145eb66"]).expect("tag"),
+            Tag::parse(["s", "initiated"]).expect("tag"),
+            Tag::parse(["published_at", "1787533600"]).expect("tag"),
+        ])
+        .finalize(&Keys::generate())
+        .expect("signing");
+
+    let dispute = parse(&event).expect("published_at is a timestamp");
+
+    assert_eq!(dispute.opened_at, Some(1_787_533_600));
+}
+
+#[test]
+fn published_at_wins_over_the_legacy_created_at_tag() {
+    // `dispute_but` keeps the valid `created_at` (1787533512) alongside.
+    let dispute =
+        parse(&dispute_but("published_at", Some("1787533600"))).expect("both tags are timestamps");
+
+    assert_eq!(dispute.opened_at, Some(1_787_533_600));
+}
+
+#[test]
+fn a_published_at_tag_that_is_not_a_timestamp_is_an_error() {
+    let error = parse(&dispute_but("published_at", Some("yesterday")))
+        .expect_err("non-numeric published_at");
+
+    assert!(
+        matches!(
+            error,
+            ParseError::NotANumber {
+                tag: "published_at",
+                ..
+            }
+        ),
+        "{error}"
+    );
+}
