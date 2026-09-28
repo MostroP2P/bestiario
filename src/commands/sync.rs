@@ -76,6 +76,9 @@ const BACKOFF_INITIAL: Duration = Duration::from_secs(1);
 /// noticed within one.
 const BACKOFF_MAX: Duration = Duration::from_secs(60);
 
+/// How often a running `sync` logs what it has stored so far.
+const HEARTBEAT: Duration = Duration::from_secs(300);
+
 /// How long [`Sync::prime`] waits for the relays to finish replaying the
 /// tagged kinds.
 ///
@@ -193,6 +196,12 @@ impl<'a> Sync<'a> {
 
         let mut shutdown = std::pin::pin!(shutdown);
 
+        // A daemon that only logs when something goes wrong is
+        // indistinguishable from one that has hung; a line every few minutes
+        // says it is alive and what it has been doing.
+        let mut heartbeat =
+            tokio::time::interval_at(tokio::time::Instant::now() + HEARTBEAT, HEARTBEAT);
+
         loop {
             // Before reattaching, because a relay list ingested by the last
             // subscription may have named a relay nothing has dialled yet.
@@ -224,6 +233,7 @@ impl<'a> Sync<'a> {
                     let stopped = loop {
                         tokio::select! {
                             () = &mut shutdown => break Interrupted::Shutdown,
+                            _ = heartbeat.tick() => tracing::info!(%counts, "sync running"),
                             next = subscription.next_event() => match next {
                                 Some((relay, event)) => {
                                     let now = chrono::Utc::now().timestamp();

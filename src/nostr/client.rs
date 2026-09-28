@@ -62,6 +62,9 @@ pub enum ClientError {
         source: Box<nostr_sdk::error::Error>,
     },
 
+    #[error("relay `{relay}` sent nothing within {seconds}s")]
+    TimedOut { relay: RelayUrl, seconds: u64 },
+
     #[error("could not subscribe to any relay")]
     Subscribe {
         #[source]
@@ -273,6 +276,7 @@ impl RelayClient {
         relay: &RelayUrl,
         filter: Filter,
     ) -> Result<Vec<Event>, ClientError> {
+        let started = std::time::Instant::now();
         let events = self
             .client
             .fetch_events(vec![(relay.clone(), vec![filter])])
@@ -282,6 +286,17 @@ impl RelayClient {
                 relay: relay.clone(),
                 source: Box::new(source),
             })?;
+
+        // nostr-sdk answers a request that timed out with whatever arrived,
+        // which from a relay that never answered is nothing — the same
+        // empty vector an exhausted window returns. Read as the end of
+        // history, that let a dead relay cost a minute per kind, silently.
+        if events.is_empty() && started.elapsed() >= FETCH_TIMEOUT {
+            return Err(ClientError::TimedOut {
+                relay: relay.clone(),
+                seconds: FETCH_TIMEOUT.as_secs(),
+            });
+        }
 
         // `Events` is already ordered newest first; collecting into a `Vec`
         // fixes that ordering into the type rather than leaving it as a

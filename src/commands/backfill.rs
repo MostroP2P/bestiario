@@ -121,6 +121,7 @@ impl<'a> Backfill<'a> {
         tracing::info!(
             stored = counts.stored,
             duplicate = counts.duplicate,
+            unchanged = counts.redundant,
             rejected = counts.rejected,
             "backfill finished"
         );
@@ -144,9 +145,26 @@ impl<'a> Backfill<'a> {
         let mut counts = Counts::default();
 
         for relay in relays {
+            let started = std::time::Instant::now();
+            let mut walked = Counts::default();
+            tracing::info!(%relay, kinds = kinds.len(), "walking relay");
+
+            // A failed kind does not end the relay: a busy order query can
+            // time out on a relay that answers the smaller kinds after it.
             for &kind in kinds {
-                counts += self.walk(relay, kind, range, now).await?;
+                walked += self.walk(relay, kind, range, now).await?;
             }
+
+            tracing::info!(
+                %relay,
+                stored = walked.stored,
+                duplicate = walked.duplicate,
+                unchanged = walked.redundant,
+                rejected = walked.rejected,
+                seconds = started.elapsed().as_secs(),
+                "relay walked"
+            );
+            counts += walked;
         }
 
         Ok(counts)
