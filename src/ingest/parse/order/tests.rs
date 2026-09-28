@@ -497,3 +497,67 @@ fn a_created_at_tag_that_is_not_a_timestamp_is_an_error() {
         "{error}"
     );
 }
+
+#[test]
+fn the_published_at_tag_is_the_orders_creation_time() {
+    // Arrange: mostro#1000 renamed the tag from `created_at`.
+    let mut tags = valid_tags();
+    tags.push(("published_at", vec!["1787700000"]));
+
+    // Act
+    let order = parse(&order_with(&tags)).expect("published_at is a timestamp");
+
+    // Assert
+    assert_eq!(order.order_created_at, Some(1_787_700_000));
+}
+
+#[test]
+fn published_at_wins_over_the_legacy_created_at_tag() {
+    let mut tags = valid_tags();
+    tags.push(("published_at", vec!["1787700000"]));
+    tags.push(("created_at", vec!["1787600000"]));
+
+    let order = parse(&order_with(&tags)).expect("both tags are timestamps");
+
+    assert_eq!(order.order_created_at, Some(1_787_700_000));
+}
+
+#[test]
+fn a_published_at_tag_that_is_not_a_timestamp_is_an_error() {
+    let mut tags = valid_tags();
+    tags.push(("published_at", vec!["yesterday"]));
+
+    let error = parse(&order_with(&tags)).expect_err("non-numeric published_at");
+
+    assert!(
+        matches!(
+            error,
+            ParseError::NotANumber {
+                tag: "published_at",
+                ..
+            }
+        ),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_negative_published_at_is_out_of_range() {
+    // A signed event can carry any integer; one before the epoch would date
+    // the order to a period that never had one.
+    let mut tags = valid_tags();
+    tags.push(("published_at", vec!["-1"]));
+
+    let error = parse(&order_with(&tags)).expect_err("negative published_at");
+
+    assert!(
+        matches!(
+            error,
+            ParseError::OutOfRange {
+                tag: "published_at",
+                ..
+            }
+        ),
+        "{error}"
+    );
+}

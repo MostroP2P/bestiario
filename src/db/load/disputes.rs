@@ -2,7 +2,7 @@
 //! §6.7).
 //!
 //! The dispute read adds two facts to the projection: an opening time for
-//! a dispute whose versions never carried the `created_at` tag (the first
+//! a dispute whose versions never carried the `published_at` tag (the first
 //! version seen), and the first terminal version, which is when it was
 //! resolved. The second read is the population disputes arise from — orders
 //! that found a taker — dated by the first `in-progress` version, or by the

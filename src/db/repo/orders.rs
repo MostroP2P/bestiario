@@ -42,7 +42,7 @@ pub struct Order {
     pub success_at: Option<i64>,
     /// `created_at` of the *first* version to reach `canceled`.
     pub canceled_at: Option<i64>,
-    /// The NIP-69 `created_at` tag: when the order was created. `None` when no
+    /// The NIP-69 `published_at` tag: when the order was created. `None` when no
     /// stored version carried it.
     pub order_created_at: Option<i64>,
 }
