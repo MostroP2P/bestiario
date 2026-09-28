@@ -109,12 +109,19 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), DbError> {
 pub async fn connect_and_migrate(url: &str) -> Result<SqlitePool, DbError> {
     let pool = connect(url).await?;
     migrate(&pool).await?;
-    if let Some(reclaimed) = reclaim_space(&pool).await? {
-        tracing::info!(
+    // Housekeeping, not a precondition: a database that migrated is usable,
+    // and one that could not be vacuumed — VACUUM needs up to twice the
+    // file in free disk — is no reason to refuse to open it.
+    match reclaim_space(&pool).await {
+        Ok(Some(reclaimed)) => tracing::info!(
             before_mb = reclaimed.before / 1_048_576,
             after_mb = reclaimed.after / 1_048_576,
             "reclaimed free space"
-        );
+        ),
+        Ok(None) => {}
+        Err(error) => {
+            tracing::warn!(error = %format!("{error:#}"), "could not reclaim free space; continuing")
+        }
     }
     Ok(pool)
 }
@@ -149,6 +156,12 @@ pub async fn reclaim_space(pool: &SqlitePool) -> Result<Option<Reclaimed>, DbErr
         "most of the database is free pages; vacuuming"
     );
     sqlx::query("VACUUM")
+        .execute(pool)
+        .await
+        .map_err(DbError::Reclaim)?;
+    // In WAL mode the rewritten file lands in the WAL first, and an ordinary
+    // checkpoint leaves that file at its full size on disk.
+    sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
         .execute(pool)
         .await
         .map_err(DbError::Reclaim)?;

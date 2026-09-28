@@ -472,6 +472,10 @@ async fn reclaiming_space_vacuums_a_mostly_empty_file() {
         .await
         .expect("freelist");
     assert_eq!(free, 0);
+    // VACUUM in WAL mode writes the whole rewritten file into the WAL; the
+    // disk is only reclaimed once that is checkpointed and truncated.
+    let wal = std::fs::metadata(dir.path().join("reclaim.db-wal")).map_or(0, |meta| meta.len());
+    assert_eq!(wal, 0);
 }
 
 #[tokio::test]

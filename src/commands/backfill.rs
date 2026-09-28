@@ -54,16 +54,6 @@ use crate::nostr::filters;
 /// relay is not asked to assemble a reply it will refuse to send.
 const WINDOW_LIMIT: usize = 500;
 
-/// How the walk of one relay and one kind ended.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Reached {
-    /// The floor of the range, the end of the relay's history, or a kind
-    /// with nobody to ask about.
-    End,
-    /// A window failed; the relay is left there.
-    Failed,
-}
-
 /// The walk: a connected client, a pipeline to feed, and who to ask about.
 pub struct Backfill<'a> {
     client: &'a RelayClient,
@@ -159,15 +149,10 @@ impl<'a> Backfill<'a> {
             let mut walked = Counts::default();
             tracing::info!(%relay, kinds = kinds.len(), "walking relay");
 
+            // A failed kind does not end the relay: a busy order query can
+            // time out on a relay that answers the smaller kinds after it.
             for &kind in kinds {
-                let (kind_counts, reached) = self.walk(relay, kind, range, now).await?;
-                walked += kind_counts;
-                // A relay that failed one kind is not asked for the rest: it
-                // is down or refusing, and each further kind would wait out
-                // the same timeout to learn the same thing.
-                if reached == Reached::Failed {
-                    break;
-                }
+                walked += self.walk(relay, kind, range, now).await?;
             }
 
             tracing::info!(
@@ -216,13 +201,7 @@ impl<'a> Backfill<'a> {
     }
 
     /// One relay, one kind, from the top of `range` down to its floor.
-    async fn walk(
-        &self,
-        relay: &RelayUrl,
-        kind: u16,
-        range: Range,
-        now: i64,
-    ) -> Result<(Counts, Reached)> {
+    async fn walk(&self, relay: &RelayUrl, kind: u16, range: Range, now: i64) -> Result<Counts> {
         let mut counts = Counts::default();
         let mut until = range.until();
         let vouched = self.vouched().await?;
@@ -253,7 +232,7 @@ impl<'a> Backfill<'a> {
                 Ok(events) => events,
                 Err(error) => {
                     tracing::warn!(%relay, kind, %error, "window failed; leaving this relay here");
-                    return Ok((counts, Reached::Failed));
+                    break;
                 }
             };
 
@@ -302,7 +281,7 @@ impl<'a> Backfill<'a> {
             };
         }
 
-        Ok((counts, Reached::End))
+        Ok(counts)
     }
 
     /// Feeds one window to the pipeline, oldest first.

@@ -27,7 +27,10 @@ pull request. Work is delivered one PR per row.
   compatibility shims for older releases.
 - Keep the observed / inferred distinction explicit in models and outputs
   (see `docs/SPEC.md` §5).
-- Persist every event version; never overwrite history.
+- Persist every event version; never overwrite history. The one exception
+  is heartbeat retention (`docs/SPEC.md` §8.1 step 6a): an unchanged
+  republication of 10002/38385, or a second 30078 in the same hour, is not
+  archived.
 - Verify event signatures before persisting anything.
 - `stats/` must stay free of I/O so it can back the Nostr publication of
   `docs/NOSTR-PUBLICATION.md` later.
