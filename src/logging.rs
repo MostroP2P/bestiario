@@ -4,6 +4,8 @@
 //! the flag is the convenient path, the environment variable is the precise
 //! one.
 
+use std::io::IsTerminal;
+
 use tracing_subscriber::EnvFilter;
 
 /// Installs the global subscriber. Called once, from `main`.
@@ -22,6 +24,10 @@ pub fn init(verbose: u8) {
     tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_target(false)
+        // Colour codes only for a person at a terminal. A log collector —
+        // App Platform's among them — shows them as literal `[2m…[0m`
+        // noise around every field.
+        .with_ansi(std::io::stderr().is_terminal())
         .with_writer(std::io::stderr)
         .init();
 }

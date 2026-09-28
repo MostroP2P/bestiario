@@ -116,7 +116,7 @@ and a list is one comma-separated variable. See `docs/DEPLOY.md`.
 
 ```console
 $ bestiario backfill
-backfill: 21 stored, 5 already known, 3 rejected
+backfill: 21 stored, 5 already known, 0 unchanged, 3 rejected
 ```
 
 `backfill` walks each relay's history backwards, from now down to

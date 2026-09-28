@@ -655,3 +655,244 @@ async fn an_instance_row_from_a_rate_snapshot_does_not_vouch_for_the_next_one() 
     );
     assert_eq!(count(&pool, RATES).await, 1, "no second snapshot");
 }
+
+// ---------------------------------------------------------------------------
+// Heartbeat kinds (§8.1 step 6a)
+//
+// mostrod republishes its relay list about once a minute and its info and
+// rates about every five, most of the time unchanged. Archiving every copy
+// grew a month of production data past a gigabyte, so a republication that
+// says nothing new is not archived — but it still proves the instance alive.
+// ---------------------------------------------------------------------------
+
+const LAST_SEEN: &str = "SELECT last_seen_at FROM instances";
+
+/// `event`'s kind, content and tags, signed by `keys` at `created_at`: the
+/// same announcement, republished later. A 38385 names its publisher in
+/// `d`, so that tag follows the new key.
+fn republished(event: &Event, keys: &Keys, created_at: i64) -> Event {
+    let own_d = Tag::parse(["d", &keys.public_key().to_hex()]).expect("tag");
+    let tags = event.tags.iter().map(|tag| {
+        if event.kind.as_u16() == parse::info::KIND
+            && tag.as_slice().first().map(String::as_str) == Some("d")
+        {
+            own_d.clone()
+        } else {
+            tag.clone()
+        }
+    });
+    EventBuilder::new(event.kind, event.content.clone())
+        .tags(tags)
+        .custom_created_at(nostr_sdk::prelude::Timestamp::from_secs(created_at as u64))
+        .finalize(keys)
+        .expect("signing")
+}
+
+/// A rate snapshot signed by `keys` at `at`, quoting `usd`.
+fn rate_snapshot_at(keys: &Keys, at: i64, usd: f64) -> Event {
+    EventBuilder::new(
+        Kind::from_u16(parse::rates::KIND),
+        format!(r#"{{"BTC":{{"USD":{usd}}}}}"#),
+    )
+    .tags([
+        Tag::parse(["d", "mostro-rates"]).expect("tag"),
+        Tag::parse(["published_at", &at.to_string()]).expect("tag"),
+        Tag::parse(["source", "yadio"]).expect("tag"),
+    ])
+    .custom_created_at(nostr_sdk::prelude::Timestamp::from_secs(at as u64))
+    .finalize(keys)
+    .expect("signing")
+}
+
+#[tokio::test]
+async fn an_unchanged_instance_info_republished_is_redundant_but_moves_last_seen() {
+    // Arrange
+    let pool = migrated().await;
+    let keys = Keys::generate();
+    let fixture = load(38385, "typical");
+    let first = republished(&fixture, &keys, NOW - 600);
+    let again = republished(&fixture, &keys, NOW - 300);
+    let pipeline = pipeline(&pool, open_policy());
+    pipeline.ingest(&first, RELAY, NOW).await.expect("first");
+
+    // Act
+    let outcome = pipeline.ingest(&again, RELAY, NOW).await.expect("again");
+
+    // Assert
+    assert_eq!(outcome, IngestOutcome::Redundant);
+    assert_eq!(count(&pool, EVENTS).await, 1);
+    assert_eq!(count(&pool, INSTANCE_INFO).await, 1);
+    assert_eq!(count(&pool, LAST_SEEN).await, NOW - 300);
+    let cursor = repo::sync_state::get(&pool, RELAY, parse::info::KIND)
+        .await
+        .expect("read")
+        .expect("cursor advanced");
+    assert_eq!(cursor.last_created_at, NOW - 300);
+}
+
+#[tokio::test]
+async fn a_changed_instance_info_is_stored() {
+    // Arrange
+    let pool = migrated().await;
+    let keys = Keys::generate();
+    let first = republished(&load(38385, "typical"), &keys, NOW - 600);
+    let changed = republished(&load(38385, "zero_fee"), &keys, NOW - 300);
+    let pipeline = pipeline(&pool, open_policy());
+    pipeline.ingest(&first, RELAY, NOW).await.expect("first");
+
+    // Act
+    let outcome = pipeline
+        .ingest(&changed, RELAY, NOW)
+        .await
+        .expect("changed");
+
+    // Assert
+    assert_eq!(outcome, IngestOutcome::Stored);
+    assert_eq!(count(&pool, INSTANCE_INFO).await, 2);
+}
+
+#[tokio::test]
+async fn an_unchanged_relay_list_republished_is_redundant() {
+    // Arrange: the relay list is untagged, so its publisher is listed.
+    let pool = migrated().await;
+    let keys = Keys::generate();
+    let policy = Policy::new([keys.public_key().to_hex()], false, [Network::Mainnet]);
+    let fixture = load(10002, "typical");
+    let pipeline = pipeline(&pool, policy);
+    pipeline
+        .ingest(&republished(&fixture, &keys, NOW - 120), RELAY, NOW)
+        .await
+        .expect("first");
+
+    // Act
+    let outcome = pipeline
+        .ingest(&republished(&fixture, &keys, NOW - 60), RELAY, NOW)
+        .await
+        .expect("again");
+
+    // Assert
+    assert_eq!(outcome, IngestOutcome::Redundant);
+    assert_eq!(count(&pool, EVENTS).await, 1);
+}
+
+#[tokio::test]
+async fn an_announcement_arriving_before_the_one_it_repeats_is_still_stored() {
+    // Arrange: a backfill walks backwards, so the older copy can arrive
+    // second. It is compared with what came *before* it, and nothing did.
+    let pool = migrated().await;
+    let keys = Keys::generate();
+    let fixture = load(38385, "typical");
+    let pipeline = pipeline(&pool, open_policy());
+    pipeline
+        .ingest(&republished(&fixture, &keys, NOW - 300), RELAY, NOW)
+        .await
+        .expect("newer");
+
+    // Act
+    let outcome = pipeline
+        .ingest(&republished(&fixture, &keys, NOW - 600), RELAY, NOW)
+        .await
+        .expect("older");
+
+    // Assert
+    assert_eq!(outcome, IngestOutcome::Stored);
+    assert_eq!(count(&pool, INSTANCE_INFO).await, 2);
+}
+
+#[tokio::test]
+async fn a_second_rate_snapshot_in_the_same_hour_is_redundant() {
+    // Arrange
+    let pool = migrated().await;
+    let keys = Keys::generate();
+    let policy = Policy::new([keys.public_key().to_hex()], false, [Network::Mainnet]);
+    let hour = NOW - NOW % 3600;
+    let pipeline = pipeline(&pool, policy);
+    pipeline
+        .ingest(&rate_snapshot_at(&keys, hour + 60, 50_000.0), RELAY, NOW)
+        .await
+        .expect("first");
+
+    // Act
+    let outcome = pipeline
+        .ingest(&rate_snapshot_at(&keys, hour + 360, 50_100.0), RELAY, NOW)
+        .await
+        .expect("second");
+
+    // Assert
+    assert_eq!(outcome, IngestOutcome::Redundant);
+    assert_eq!(count(&pool, RATES).await, 1);
+    assert_eq!(count(&pool, EVENTS).await, 1);
+}
+
+#[tokio::test]
+async fn a_rate_snapshot_in_the_next_hour_is_stored() {
+    // Arrange
+    let pool = migrated().await;
+    let keys = Keys::generate();
+    let policy = Policy::new([keys.public_key().to_hex()], false, [Network::Mainnet]);
+    let hour = NOW - NOW % 3600;
+    let pipeline = pipeline(&pool, policy);
+    pipeline
+        .ingest(&rate_snapshot_at(&keys, hour + 3000, 50_000.0), RELAY, NOW)
+        .await
+        .expect("first");
+
+    // Act
+    let outcome = pipeline
+        .ingest(&rate_snapshot_at(&keys, hour + 3600, 50_100.0), RELAY, NOW)
+        .await
+        .expect("second");
+
+    // Assert
+    assert_eq!(outcome, IngestOutcome::Stored);
+    assert_eq!(count(&pool, RATES).await, 2);
+}
+
+#[test]
+fn redundant_outcomes_are_counted_apart_from_duplicates() {
+    let mut counts = Counts::default();
+
+    counts.record(&IngestOutcome::Redundant);
+
+    assert_eq!(counts.redundant, 1);
+    assert_eq!(counts.duplicate, 0);
+    assert_eq!(counts.total(), 1);
+}
+
+#[tokio::test]
+async fn a_relay_list_republished_with_its_relays_reordered_is_redundant() {
+    // Arrange: mostrod keeps its relays in a hash set, so every
+    // republication lists the same relays in a different order.
+    let pool = migrated().await;
+    let keys = Keys::generate();
+    let policy = Policy::new([keys.public_key().to_hex()], false, [Network::Mainnet]);
+    let list = |relays: [&str; 2], at: i64| {
+        EventBuilder::new(Kind::from_u16(parse::relay_list::KIND), "")
+            .tags(relays.map(|relay| Tag::parse(["r", relay]).expect("tag")))
+            .custom_created_at(nostr_sdk::prelude::Timestamp::from_secs(at as u64))
+            .finalize(&keys)
+            .expect("signing")
+    };
+    let pipeline = pipeline(&pool, policy);
+    pipeline
+        .ingest(
+            &list(["wss://a.example", "wss://b.example"], NOW - 120),
+            RELAY,
+            NOW,
+        )
+        .await
+        .expect("first");
+
+    // Act
+    let outcome = pipeline
+        .ingest(
+            &list(["wss://b.example", "wss://a.example"], NOW - 60),
+            RELAY,
+            NOW,
+        )
+        .await
+        .expect("reordered");
+
+    // Assert
+    assert_eq!(outcome, IngestOutcome::Redundant);
+}

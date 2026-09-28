@@ -316,3 +316,169 @@ async fn a_pinned_in_memory_database_outlives_an_idle_period() {
     assert_eq!(count, 1);
     assert_eq!(table_names(&pool).await, EXPECTED_TABLES);
 }
+
+// ---------------------------------------------------------------------------
+// Migration 0005: heartbeat retention (docs/SPEC.md §8.1 step 6a)
+// ---------------------------------------------------------------------------
+
+const HEARTBEAT_RETENTION: &str = include_str!("../../migrations/0005_heartbeat_retention.sql");
+
+/// Archives one event row, with just the fields the pruning reads.
+async fn archive(pool: &SqlitePool, id: &str, kind: i64, created_at: i64, content: &str) {
+    let raw = serde_json::json!({ "content": content, "tags": [["d", "pk"]] }).to_string();
+    sqlx::query(
+        "INSERT INTO events (id, pubkey, kind, created_at, d_tag, raw_json, relay_url, seen_at)
+         VALUES (?, 'pk', ?, ?, 'pk', ?, 'wss://r', 0)",
+    )
+    .bind(id)
+    .bind(kind)
+    .bind(created_at)
+    .bind(raw)
+    .execute(pool)
+    .await
+    .expect("event");
+}
+
+async fn ids(pool: &SqlitePool, sql: &'static str) -> Vec<String> {
+    sqlx::query_scalar::<_, String>(sql)
+        .fetch_all(pool)
+        .await
+        .expect("ids")
+}
+
+#[tokio::test]
+async fn heartbeat_retention_drops_announcements_that_repeat_the_previous_one() {
+    // Arrange: A A B A, where only the second A repeats its predecessor.
+    let pool = connect_and_migrate(MEMORY).await.expect("migrate");
+    archive(&pool, "a1", 38385, 100, "A").await;
+    archive(&pool, "a2", 38385, 200, "A").await;
+    archive(&pool, "b1", 38385, 300, "B").await;
+    archive(&pool, "a3", 38385, 400, "A").await;
+    for id in ["a1", "a2", "b1", "a3"] {
+        sqlx::query("INSERT INTO instance_info (event_id, pubkey, created_at) VALUES (?, 'pk', 0)")
+            .bind(id)
+            .execute(&pool)
+            .await
+            .expect("info");
+    }
+
+    // Act
+    sqlx::raw_sql(HEARTBEAT_RETENTION)
+        .execute(&pool)
+        .await
+        .expect("prune");
+
+    // Assert
+    assert_eq!(
+        ids(&pool, "SELECT id FROM events ORDER BY created_at").await,
+        ["a1", "b1", "a3"]
+    );
+    assert_eq!(
+        ids(
+            &pool,
+            "SELECT event_id FROM instance_info ORDER BY event_id"
+        )
+        .await,
+        ["a1", "a3", "b1"]
+    );
+}
+
+#[tokio::test]
+async fn heartbeat_retention_compares_tags_in_any_order() {
+    // Arrange
+    let pool = connect_and_migrate(MEMORY).await.expect("migrate");
+    for (id, at, tags) in [
+        ("l1", 100, r#"[["r","wss://a"],["r","wss://b"]]"#),
+        ("l2", 200, r#"[["r","wss://b"],["r","wss://a"]]"#),
+    ] {
+        let raw = format!(r#"{{"content":"","tags":{tags}}}"#);
+        sqlx::query(
+            "INSERT INTO events (id, pubkey, kind, created_at, raw_json, relay_url, seen_at)
+             VALUES (?, 'pk', 10002, ?, ?, 'wss://r', 0)",
+        )
+        .bind(id)
+        .bind(at)
+        .bind(raw)
+        .execute(&pool)
+        .await
+        .expect("event");
+    }
+
+    // Act
+    sqlx::raw_sql(HEARTBEAT_RETENTION)
+        .execute(&pool)
+        .await
+        .expect("prune");
+
+    // Assert
+    assert_eq!(ids(&pool, "SELECT id FROM events").await, ["l1"]);
+}
+
+#[tokio::test]
+async fn heartbeat_retention_keeps_the_first_rate_snapshot_of_each_hour() {
+    // Arrange
+    let pool = connect_and_migrate(MEMORY).await.expect("migrate");
+    for (id, at) in [("r1", 3600), ("r2", 3900), ("r3", 7199), ("r4", 7200)] {
+        archive(&pool, id, 30078, at, id).await;
+        sqlx::query(
+            "INSERT INTO rates (event_id, pubkey, published_at, rates_json) VALUES (?, 'pk', ?, '{}')",
+        )
+        .bind(id)
+        .bind(at)
+        .execute(&pool)
+        .await
+        .expect("rate");
+    }
+
+    // Act
+    sqlx::raw_sql(HEARTBEAT_RETENTION)
+        .execute(&pool)
+        .await
+        .expect("prune");
+
+    // Assert
+    assert_eq!(
+        ids(&pool, "SELECT event_id FROM rates ORDER BY published_at").await,
+        ["r1", "r4"]
+    );
+    assert_eq!(
+        ids(&pool, "SELECT id FROM events ORDER BY created_at").await,
+        ["r1", "r4"]
+    );
+}
+
+#[tokio::test]
+async fn reclaiming_space_vacuums_a_mostly_empty_file() {
+    // Arrange: a file database, filled and then emptied, so most of its
+    // pages sit on the freelist.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite://{}", dir.path().join("reclaim.db").display());
+    let pool = connect_and_migrate(&url).await.expect("migrate");
+    for i in 0..200 {
+        archive(&pool, &format!("e{i}"), 38385, i, &"x".repeat(4000)).await;
+    }
+    sqlx::query("DELETE FROM events")
+        .execute(&pool)
+        .await
+        .expect("empty");
+
+    // Act
+    let reclaimed = reclaim_space(&pool).await.expect("reclaim");
+
+    // Assert
+    assert!(reclaimed.is_some());
+    let free: i64 = sqlx::query_scalar("PRAGMA freelist_count")
+        .fetch_one(&pool)
+        .await
+        .expect("freelist");
+    assert_eq!(free, 0);
+}
+
+#[tokio::test]
+async fn reclaiming_space_leaves_a_dense_file_alone() {
+    let pool = connect_and_migrate(MEMORY).await.expect("migrate");
+
+    let reclaimed = reclaim_space(&pool).await.expect("reclaim");
+
+    assert_eq!(reclaimed, None);
+}

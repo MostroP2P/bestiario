@@ -83,8 +83,9 @@ publish_every() {
             break
         fi
 
+        started=$(date +%s)
         if bestiario publish; then
-            echo "bestiario-replicated: published" >&2
+            echo "bestiario-replicated: published in $(( $(date +%s) - started ))s" >&2
         else
             # A failed publication must not end the loop. Relays refuse
             # connections, keys expire, and the next interval is a better
@@ -171,14 +172,27 @@ done
 # -restore-if-db-not-exists`, so the backfill below sees the index that is
 # already in the bucket and walks the relays for what is missing from it
 # rather than for all of it.
+#
+# Announced, and timed, because it is silent and can be long: it downloads
+# the latest snapshot and every compacted file since. When it outgrew the
+# instance's memory the container was killed mid-restore, over and over,
+# with nothing in the log after the line above.
+echo "bestiario-replicated: restoring ${BESTIARIO_DB_PATH} from s3://${LITESTREAM_BUCKET}/${LITESTREAM_PATH}" >&2
+started=$(date +%s)
 litestream restore -if-db-not-exists -if-replica-exists "$BESTIARIO_DB_PATH"
+echo "bestiario-replicated: restore done in $(( $(date +%s) - started ))s, database is $(du -h "$BESTIARIO_DB_PATH" 2>/dev/null | cut -f1 || echo 'absent')" >&2
 
 # The backfill runs before replication starts, so its writes are not streamed
 # as they happen; the snapshot litestream takes when it starts carries them
 # instead. A container that dies mid-backfill therefore loses that pass and
 # redoes it on the next start, which is exactly what an idempotent backfill is
 # for.
-[ -z "$backfill_first" ] || bestiario backfill
+if [ -n "$backfill_first" ]; then
+    echo "bestiario-replicated: backfilling before sync" >&2
+    started=$(date +%s)
+    bestiario backfill
+    echo "bestiario-replicated: backfill done in $(( $(date +%s) - started ))s" >&2
+fi
 
 # Started after the backfill, never during it: publishing halfway through the
 # history walk would sign a snapshot of a partial index and present it as the
@@ -195,6 +209,7 @@ fi
 # waiting for — would be killed by the container going away, possibly in the
 # middle of a run and possibly after litestream had already replicated for the
 # last time. So the shell stays as pid 1 and shuts the two down in order.
+echo "bestiario-replicated: replicating and running: $command" >&2
 litestream replicate -exec "$command" &
 litestream=$!
 

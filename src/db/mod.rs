@@ -48,6 +48,21 @@ pub enum DbError {
 
     #[error("could not apply migrations")]
     Migrate(#[from] sqlx::migrate::MigrateError),
+
+    #[error("could not reclaim free space")]
+    Reclaim(#[source] sqlx::Error),
+}
+
+/// The share of the file that has to be free pages before
+/// [`reclaim_space`] rewrites it: a quarter, so an archive that merely
+/// churns is left alone and one that a retention pass just emptied is not.
+const RECLAIM_FREE_FRACTION: i64 = 4;
+
+/// What a [`reclaim_space`] that ran did to the file, in bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Reclaimed {
+    pub before: i64,
+    pub after: i64,
 }
 
 /// Opens the pool described by `url`, creating the database file if it does
@@ -94,7 +109,55 @@ pub async fn migrate(pool: &SqlitePool) -> Result<(), DbError> {
 pub async fn connect_and_migrate(url: &str) -> Result<SqlitePool, DbError> {
     let pool = connect(url).await?;
     migrate(&pool).await?;
+    if let Some(reclaimed) = reclaim_space(&pool).await? {
+        tracing::info!(
+            before_mb = reclaimed.before / 1_048_576,
+            after_mb = reclaimed.after / 1_048_576,
+            "reclaimed free space"
+        );
+    }
     Ok(pool)
+}
+
+/// Rewrites the file with `VACUUM` when most of it is free pages.
+///
+/// A migration that deletes rows (0005 above all) leaves the file as large
+/// as it was, and the replica with it: litestream ships pages, not rows, so
+/// a gigabyte file with a hundred megabytes of data still costs a gigabyte
+/// to restore. `VACUUM` cannot run inside a migration's transaction, so it
+/// runs here, once, the first time the pool opens afterwards.
+///
+/// `None` when the file was dense enough to leave alone.
+pub async fn reclaim_space(pool: &SqlitePool) -> Result<Option<Reclaimed>, DbError> {
+    let pages = |pragma: &'static str| async move {
+        sqlx::query_scalar::<_, i64>(pragma)
+            .fetch_one(pool)
+            .await
+            .map_err(DbError::Reclaim)
+    };
+
+    let page_size = pages("PRAGMA page_size").await?;
+    let total = pages("PRAGMA page_count").await?;
+    let free = pages("PRAGMA freelist_count").await?;
+    if free == 0 || free * RECLAIM_FREE_FRACTION < total {
+        return Ok(None);
+    }
+
+    tracing::info!(
+        free_pages = free,
+        total_pages = total,
+        "most of the database is free pages; vacuuming"
+    );
+    sqlx::query("VACUUM")
+        .execute(pool)
+        .await
+        .map_err(DbError::Reclaim)?;
+
+    let after = pages("PRAGMA page_count").await?;
+    Ok(Some(Reclaimed {
+        before: total * page_size,
+        after: after * page_size,
+    }))
 }
 
 /// The per-connection settings. Split out so that tests can build a pool that

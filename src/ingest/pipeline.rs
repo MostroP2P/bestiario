@@ -85,11 +85,15 @@ pub enum IngestOutcome {
     /// Already in the archive; nothing was written but this relay's cursor,
     /// which moves because the relay did deliver the event.
     Duplicate,
+    /// A republication of a heartbeat kind that says nothing the archive
+    /// does not already hold (§8.1 step 6a). Not archived; the instance's
+    /// `last_seen_at` and this relay's cursor still move.
+    Redundant,
     /// Turned away, for the stated reason.
     Rejected(Rejection),
 }
 
-/// What a run of the pipeline did, in three numbers.
+/// What a run of the pipeline did, in four numbers.
 ///
 /// Kept here rather than in the commands because `backfill` and `sync` both
 /// summarise a run and there is one right way to add these up.
@@ -97,6 +101,7 @@ pub enum IngestOutcome {
 pub struct Counts {
     pub stored: u64,
     pub duplicate: u64,
+    pub redundant: u64,
     pub rejected: u64,
 }
 
@@ -106,13 +111,14 @@ impl Counts {
         match outcome {
             IngestOutcome::Stored => self.stored += 1,
             IngestOutcome::Duplicate => self.duplicate += 1,
+            IngestOutcome::Redundant => self.redundant += 1,
             IngestOutcome::Rejected(_) => self.rejected += 1,
         }
     }
 
     /// How many events were looked at at all.
     pub fn total(&self) -> u64 {
-        self.stored + self.duplicate + self.rejected
+        self.stored + self.duplicate + self.redundant + self.rejected
     }
 }
 
@@ -120,6 +126,7 @@ impl std::ops::AddAssign for Counts {
     fn add_assign(&mut self, other: Self) {
         self.stored += other.stored;
         self.duplicate += other.duplicate;
+        self.redundant += other.redundant;
         self.rejected += other.rejected;
     }
 }
@@ -128,8 +135,8 @@ impl std::fmt::Display for Counts {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{} stored, {} already known, {} rejected",
-            self.stored, self.duplicate, self.rejected
+            "{} stored, {} already known, {} unchanged, {} rejected",
+            self.stored, self.duplicate, self.redundant, self.rejected
         )
     }
 }
@@ -294,6 +301,16 @@ impl Pipeline {
         };
 
         let mut tx = self.pool.begin().await?;
+
+        // Step 6a: a heartbeat that repeats what is already archived.
+        if repo::heartbeats::is_redundant(&mut *tx, event, &parsed_heartbeat(&parsed)).await? {
+            let pubkey = event.pubkey.to_hex();
+            let created_at = event.created_at.as_secs() as i64;
+            repo::instances::upsert(&mut *tx, &pubkey, None, created_at).await?;
+            Self::advance(&mut tx, event, relay_url, now).await?;
+            tx.commit().await?;
+            return Ok(IngestOutcome::Redundant);
+        }
 
         // Step 6.
         if !repo::events::insert_if_new(&mut *tx, &record).await? {
@@ -508,6 +525,19 @@ impl Pipeline {
         }
 
         Ok(())
+    }
+}
+
+/// What step 6a needs to know about a parsed event.
+fn parsed_heartbeat(parsed: &Parsed) -> repo::heartbeats::Heartbeat {
+    match parsed {
+        Parsed::Rates(snapshot) => repo::heartbeats::Heartbeat::Rates {
+            published_at: snapshot.published_at,
+        },
+        Parsed::Info(_) | Parsed::RelayList(_) => repo::heartbeats::Heartbeat::Announcement,
+        Parsed::Order(_) | Parsed::DevFee(_) | Parsed::Dispute(_) => {
+            repo::heartbeats::Heartbeat::None
+        }
     }
 }
 

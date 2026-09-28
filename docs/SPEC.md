@@ -662,6 +662,22 @@ that reaches for them does not compile.
    events are seen before its snapshot is judged; an instance that publishes
    nothing else has to be listed by hand.
 5. Filter `network` per config (`networks = ["mainnet"]`) for 38383/8383.
+6a. Heartbeat retention. mostrod republishes 10002 about once a minute and
+   38385 and 30078 about every five minutes, almost always unchanged; one
+   month of archiving every copy grew past a gigabyte. So:
+   - a 10002 or 38385 whose content and tags (compared as a set) repeat the
+     version archived immediately before it — same pubkey, kind and `d`,
+     latest `created_at` at or below its own — is **not archived**;
+   - a 30078 is **not archived** when a snapshot from the same pubkey is
+     already archived in the same hour of `published_at`.
+
+   Such an event is reported as *unchanged*: it still moves the instance's
+   `last_seen_at` and advances `sync_state` (step 8), and nothing else. The
+   history these kinds feed — the fee in force (§6.6), the rate in force
+   (§5), the relays an instance names — is fully described by the versions
+   that changed. Migration 0005 applies the same two rules to what was
+   archived before them. A `rebuild` re-derives `last_seen_at` from the
+   archive alone, so after one it can trail by up to an hour.
 6. Dedup: `INSERT OR IGNORE INTO events`. If it already existed → stop.
 7. Parse by kind → insert into the specific table + update the projection
    (`orders`/`disputes`/`instances`) in the same transaction.
