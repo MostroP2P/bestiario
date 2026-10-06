@@ -28,6 +28,8 @@ use std::time::Duration;
 use nostr_sdk::prelude::*;
 
 #[cfg(test)]
+pub(crate) mod silent;
+#[cfg(test)]
 mod tests;
 
 /// How long to wait for a relay's websocket handshake before giving up on it.
@@ -42,6 +44,16 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// the subscription and then never answers. The backfill walk retries by
 /// asking for the same window again on the next run; the cursor has not moved.
 const FETCH_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How long a sent event waits for each relay's `OK` before that relay is
+/// reported as refusing it.
+///
+/// Half the library's default of ten seconds. A relay that is working
+/// answers well within one; one that takes the event and never answers — what
+/// nos.lol did to every document of every run — would otherwise hold each
+/// send for the whole default, and a publication of ninety documents for
+/// a quarter of an hour.
+const OK_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Anything that can go wrong between a list of relay URLs and a stream of
 /// events.
@@ -114,6 +126,8 @@ pub struct RelayClient {
     /// Callers iterate this rather than the configured list, so a relay that
     /// is down is simply not walked.
     relays: Vec<RelayUrl>,
+    /// [`OK_TIMEOUT`], except in tests that cannot afford to wait it out.
+    ok_timeout: Duration,
 }
 
 impl RelayClient {
@@ -155,6 +169,7 @@ impl RelayClient {
             client,
             configured: relays.to_vec(),
             relays: connected,
+            ok_timeout: OK_TIMEOUT,
         })
     }
 
@@ -254,6 +269,16 @@ impl RelayClient {
             .map_err(|e| e.to_string())?;
 
         Ok(url)
+    }
+
+    /// The same client, waiting `timeout` for each relay's `OK` instead of
+    /// [`OK_TIMEOUT`], for tests that measure what a silent relay costs.
+    #[cfg(test)]
+    pub fn with_ok_timeout(self, timeout: Duration) -> Self {
+        Self {
+            ok_timeout: timeout,
+            ..self
+        }
     }
 
     /// The relays that answered, in configured order.
@@ -365,6 +390,7 @@ impl RelayClient {
             .client
             .send_event(event)
             .to(self.relays.clone())
+            .ok_timeout(self.ok_timeout)
             .await
             .map_err(|source| ClientError::Send {
                 event: event.id,

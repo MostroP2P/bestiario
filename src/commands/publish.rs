@@ -36,6 +36,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use anyhow::{Context as _, Result};
+use futures::{StreamExt as _, TryStreamExt as _};
 use sqlx::SqlitePool;
 
 use nostr_sdk::prelude::{Keys, ToBech32 as _};
@@ -531,6 +532,15 @@ fn abbreviated(hash: &str) -> String {
 /// Characters of a hash a listing shows.
 const HASH_PREFIX: usize = 16;
 
+/// How many documents wait for their relays' `OK`s at once.
+///
+/// One at a time, a relay that takes events and never answers costs the
+/// whole OK timeout per document — a quarter of an hour, in production,
+/// for a snapshot meant to be published every five minutes. Concurrently,
+/// it costs one timeout per window of this many. Bounded rather than all
+/// at once so a run is not a burst a relay's rate limit would refuse.
+const IN_FLIGHT: usize = 16;
+
 /// Signs every document and sends it, the index last (§7).
 ///
 /// Returns what happened rather than printing as it goes: the run either
@@ -561,18 +571,31 @@ async fn send_to(publication: &Publication, keys: &Keys, client: &RelayClient) -
         keys.public_key().to_bech32()?
     );
 
+    // §8: a payload already on the relay is not re-signed and not sent.
+    // It stays in the index with the hash, revision and clock it already
+    // had — "unchanged" is one of the things the index exists to say.
+    let to_send: Vec<_> = publication
+        .snapshot
+        .documents
+        .iter()
+        .filter(|document| !publication.not_sent.contains(&document.address.to_string()))
+        .collect();
+    let sent = to_send.len();
+
+    // Sent concurrently, and reported in snapshot order: `buffered` yields
+    // each delivery in the order its document was taken, whichever relay
+    // answered first.
+    let deliveries: Vec<_> = futures::stream::iter(to_send)
+        .map(|document| async move {
+            let delivery = client.send(&signer::sign(document, run, keys)).await?;
+            Ok::<_, anyhow::Error>((document, delivery))
+        })
+        .buffered(IN_FLIGHT)
+        .try_collect()
+        .await?;
+
     let mut refusals = Vec::new();
-    let mut sent = 0;
-    for document in &publication.snapshot.documents {
-        // §8: a payload already on the relay is not re-signed and not
-        // sent. It stays in the index with the hash, revision and clock
-        // it already had — "unchanged" is one of the things the index
-        // exists to say.
-        if publication.not_sent.contains(&document.address.to_string()) {
-            continue;
-        }
-        sent += 1;
-        let delivery = client.send(&signer::sign(document, run, keys)).await?;
+    for (document, delivery) in &deliveries {
         for (relay, reason) in &delivery.refused {
             out.push_str(&format!(
                 "  {} refused by {relay}: {reason}\n",

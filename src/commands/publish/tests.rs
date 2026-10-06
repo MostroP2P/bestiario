@@ -3,6 +3,8 @@
 
 use nostr_sdk::prelude::{Filter, Keys, Kind, MockRelay};
 
+use std::time::Duration;
+
 use super::*;
 use crate::stats::series::Data;
 use bestiario_stats::publish::restatement::Previous;
@@ -285,6 +287,41 @@ async fn a_document_no_relay_took_stops_the_index_that_would_name_it() {
         message.contains("the index naming them was not published"),
         "the operator has to be told the index was withheld: {message}"
     );
+}
+
+#[tokio::test]
+async fn a_relay_that_never_answers_costs_one_wait_not_one_per_document() {
+    // The production failure: nos.lol took every document and answered
+    // none, and a run of ninety documents waited ten seconds on each —
+    // sixteen minutes during which the snapshot it was publishing went
+    // stale. Documents wait for their `OK`s together, so a relay that
+    // never answers costs one wait per window of them, not one per
+    // document.
+    let answering = MockRelay::run().await.expect("start the local relay");
+    let silent = crate::nostr::client::silent::relay().await;
+    let silent_url = silent.url().await;
+    let wait = Duration::from_secs(1);
+    let client = RelayClient::connect(&[answering.url().await.to_string(), silent_url.to_string()])
+        .await
+        .expect("connect")
+        .with_ok_timeout(wait);
+    let publication = publication(Coverage::since(NOW - 86_400), Ceiling::configured(65_536));
+    // One wait per document is what the sequential run cost; a quarter of
+    // that is a bound concurrency meets with room to spare, and that no
+    // run waiting on the documents one at a time could.
+    let documents = u32::try_from(publication.snapshot.documents.len()).expect("a handful");
+    let deadline = wait * documents / 4;
+
+    let report = tokio::time::timeout(deadline, send_to(&publication, &keys(), &client))
+        .await
+        .expect("the silent relay was waited on once per document")
+        .expect("the answering relay took everything, so the run is a publication");
+
+    assert!(
+        report.contains(&format!("refused by {silent_url}")),
+        "the silent relay has to be named: {report}"
+    );
+    assert!(report.contains("index last"), "{report}");
 }
 
 // ---- what a second run over an unchanged archive sends (§8)

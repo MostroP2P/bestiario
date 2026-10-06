@@ -22,6 +22,11 @@ const PATIENCE: Duration = Duration::from_secs(5);
 /// practice, so a connection attempt fails rather than hanging.
 const DEAD_RELAY: &str = "ws://127.0.0.1:1";
 
+/// What a send to local relays may take beyond the wait for an `OK`.
+/// Short, because it is measured against a deadline: the library's own
+/// wait is ten seconds, and a bound past it would pass without the fix.
+const SLACK: Duration = Duration::from_secs(2);
+
 async fn relay() -> MockRelay {
     MockRelay::run().await.expect("start the local relay")
 }
@@ -453,5 +458,38 @@ async fn a_relay_that_is_gone_is_a_refusal_and_not_a_publication() {
     assert!(
         !delivery.is_published(),
         "the relay was down and the event was reported as published: {delivery:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_relay_that_never_answers_is_given_up_on_without_holding_the_others() {
+    // The production failure: nos.lol took the connection and never sent an
+    // `OK`, and each document waited out the library's ten seconds for it.
+    // The relays that did answer have to be reported as having taken it,
+    // and the silent one as refusing, within this client's own patience.
+    let answering = relay().await;
+    let silent = super::silent::relay().await;
+    let client = RelayClient::connect(&[
+        answering.url().await.to_string(),
+        silent.url().await.to_string(),
+    ])
+    .await
+    .expect("connect");
+    let event = order_at(&Keys::generate(), 1_787_800_000);
+
+    let delivery = tokio::time::timeout(OK_TIMEOUT + SLACK, client.send(&event))
+        .await
+        .expect("a relay that never answers held the send past the OK timeout")
+        .expect("a refusal is not an error");
+
+    assert_eq!(delivery.accepted, vec![answering.url().await]);
+    assert_eq!(
+        delivery
+            .refused
+            .iter()
+            .map(|(relay, _)| relay.clone())
+            .collect::<Vec<_>>(),
+        vec![silent.url().await],
+        "the silent relay has to be named as refusing: {delivery:?}"
     );
 }
