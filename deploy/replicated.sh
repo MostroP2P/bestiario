@@ -70,18 +70,27 @@ publish_every() {
     # startup. A container that is crash-looping restarts every few seconds,
     # and publishing on each start would sign and broadcast a document storm
     # to the relays — the one failure here that other people would notice.
+    #
+    # Slept in the background and waited for, rather than slept in the
+    # foreground: `wait` returns the moment the signal arrives, where
+    # `sleep 6h` as a foreground command would hold the trap — and the
+    # container's shutdown — for up to six hours.
+    sleep "$BESTIARIO_PUBLISH_EVERY" &
+    sleep_pid=$!
     while [ -z "$stopping" ]; do
-        # Slept in the background and waited for, rather than slept in the
-        # foreground: `wait` returns the moment the signal arrives, where
-        # `sleep 6h` as a foreground command would hold the trap — and the
-        # container's shutdown — for up to six hours.
-        sleep "$BESTIARIO_PUBLISH_EVERY" &
-        sleep_pid=$!
         wait "$sleep_pid" || true
         if [ -n "$stopping" ]; then
-            kill "$sleep_pid" 2>/dev/null || true
             break
         fi
+
+        # The next interval starts with this publication, not after it, so
+        # the cadence is the interval or the publication's length, whichever
+        # is longer — never their sum. Counted from the end, a five-minute
+        # interval and a sixteen-minute publication published every
+        # twenty-one minutes, and every snapshot was a quarter of an hour
+        # old by the time its index went out.
+        sleep "$BESTIARIO_PUBLISH_EVERY" &
+        sleep_pid=$!
 
         started=$(date +%s)
         if bestiario publish; then
@@ -93,6 +102,8 @@ publish_every() {
             echo "bestiario-replicated: publish failed, next attempt in ${BESTIARIO_PUBLISH_EVERY}" >&2
         fi
     done
+    # Whichever way the loop ended, an interval is still being slept.
+    kill "$sleep_pid" 2>/dev/null || true
 }
 
 # A cadence is one environment variable away from being a document storm.

@@ -33,6 +33,8 @@ jobs:
         # The release notes of .github/workflows/release.yml are derived from
         # the commit log; this checks the derivation, not a release.
         run: ./scripts/check-changelog.sh
+      - name: publication cadence of the container wrapper
+        run: ./scripts/check-publish-cadence.sh
       - name: stats layer declares no I/O dependencies
         run: ./scripts/check-stats-deps.sh
       - name: stats layer does not reach std I/O

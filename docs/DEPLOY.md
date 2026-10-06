@@ -238,8 +238,16 @@ Two writers against one SQLite file in WAL mode is ordinary — they are
 serialised by the write lock and the busy timeout — and litestream replicates
 that write like any other made to the file it watches.
 
-Four behaviours worth knowing before choosing a value:
+Five behaviours worth knowing before choosing a value:
 
+- **The interval runs from start to start.** The next interval begins when a
+  publication does, so a run that takes longer than the interval delays the
+  next by its overrun and no more. Counted from the end, the length of every
+  run was added to the cadence: a 5m interval published every twenty-one
+  minutes while each run waited on a relay that never answered. `publish`
+  bounds that wait itself — five seconds for a relay's `OK`, with sixteen
+  documents waiting at once — so a silent relay costs it seconds, not one
+  timeout per document.
 - **The first publication waits out a whole interval.** Publishing at startup
   would mean a crash-looping container signing and broadcasting a document
   storm. The cost is that an interval longer than the worker's uptime
