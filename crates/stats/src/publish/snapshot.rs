@@ -473,9 +473,7 @@ fn weeks_of(span: Window) -> Vec<(String, Window)> {
         let week = Window::new(monday, monday.saturating_add(WEEK));
         // The ISO key is the week's own, spelled by the one place that
         // spells it; a week no calendar can name has no row.
-        if let Some((key, _)) = week.weeks().into_iter().next() {
-            weeks.push((key, week));
-        }
+        weeks.extend(week.weeks().into_iter().next().map(|(key, _)| (key, week)));
         monday = monday.saturating_add(WEEK);
     }
     weeks
@@ -586,12 +584,18 @@ impl Snapshot {
             if family_of(report).is_none() {
                 continue;
             }
+            // `partition` answers `None` for a bucket outside coverage, and
+            // `coverage.partitions` names none: the filter is the contract,
+            // not a branch this loop expects to take.
             for resolution in Resolution::ALL {
-                for bucket in coverage.partitions(resolution, now) {
-                    if let Some(partition) =
-                        partition(data, report, resolution, bucket, coverage, now)
-                    {
-                        documents.push(Document {
+                documents.extend(
+                    coverage
+                        .partitions(resolution, now)
+                        .into_iter()
+                        .filter_map(|bucket| {
+                            partition(data, report, resolution, bucket, coverage, now)
+                        })
+                        .map(|partition| Document {
                             address: partition.address,
                             hash: partition.hash,
                             updated_at: now,
@@ -600,9 +604,8 @@ impl Snapshot {
                                 serde_json::to_value(&partition.payload).expect("plain data"),
                             ),
                             period: Some(partition.period),
-                        });
-                    }
-                }
+                        }),
+                );
             }
         }
 

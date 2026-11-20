@@ -73,7 +73,8 @@ pub fn priced_in(metric: &str) -> Option<String> {
     let code = metric
         .strip_prefix(&format!("{}.in.", Family::Volume.prefix()))?
         .split('.')
-        .next()?;
+        .next()
+        .unwrap_or_default();
 
     let canonical = code.len() == 3 && code.bytes().all(|byte| byte.is_ascii_uppercase());
     canonical.then(|| code.to_string())

@@ -53,8 +53,9 @@ pub(crate) fn for_relay(event: &Event) -> Event {
 /// Every fixture of `kind`, in file-name order.
 pub(crate) fn corpus(kind: u16) -> Vec<Event> {
     let dir = format!("{}/tests/fixtures/{kind}", env!("CARGO_MANIFEST_DIR"));
+    let reading = format!("reading {dir}");
     let mut names: Vec<String> = std::fs::read_dir(&dir)
-        .unwrap_or_else(|e| panic!("reading {dir}: {e}"))
+        .expect(&reading)
         .map(|entry| entry.expect("directory entry").path())
         .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
         .map(|path| {
