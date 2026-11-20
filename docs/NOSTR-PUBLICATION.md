@@ -326,6 +326,31 @@ documents restate on every run alongside the five `disputes` ones — and why
 those ten are re-signed whole even though most of what they carry is a
 profile that has not moved in weeks.
 
+`orders:<w>` carries, beside the activity block and the currency counts of
+§6.1.1, the four SPEC §6.4 durations under the names `stats timing` prints:
+`timing.time_to_fill`, `timing.time_to_complete`, `timing.full_cycle` and
+`timing.time_to_cancel`, each as `_samples` (`count`), `_p50` and `_p90`
+(`seconds`). They are the CLI's records verbatim, from the same aggregation,
+and a duration over an empty sample is `0` samples and a `missing`
+percentile, never `0` seconds. The `timing.` prefix inside an `orders`
+document names the family the figures come from. Adding them changed no
+shape, so `schema_version` stayed at 1.
+
+The sample count is published because the sample is small and not the
+whole market. A duration is the gap between two versions bestiario
+observed, and a relay keeps only the latest version of an order: an
+`in-progress` version exists in the archive only if `sync` was running
+while the trade happened, and Mostro does not publish one on every take
+path (SPEC §6.4, *Coverage*). A window reaching back before live sync has
+fewer samples, not zeros, and `_samples` says how many.
+
+The rest of `stats timing` is not published here. `book_size` and
+`book_age_avg` are about the clock: `book_age_avg` is `now - pending_at`,
+and carrying it would give the five `orders` documents a new hash on every
+run, the cost the `disputes` and `instances` documents pay above. The
+funnel's `open` / `expired_untaken` split depends on `now` too, and
+`unknown_origin` and `regressed` describe the archive more than the market.
+
 #### 6.1.1 Scoped documents: one instance's orders, by currency
 
 The grammar of §3 admits a `scope` on any window document. What is actually
