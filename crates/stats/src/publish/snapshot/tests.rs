@@ -1191,3 +1191,167 @@ fn a_currency_untraded_in_the_window_gets_no_block_in_either_scope() {
         2
     );
 }
+
+// ---- the §6.4 durations in the orders documents
+
+/// The twelve names `timing::durations` publishes, in order.
+const DURATIONS: [&str; 12] = [
+    "timing.time_to_fill_samples",
+    "timing.time_to_fill_p50",
+    "timing.time_to_fill_p90",
+    "timing.time_to_complete_samples",
+    "timing.time_to_complete_p50",
+    "timing.time_to_complete_p90",
+    "timing.full_cycle_samples",
+    "timing.full_cycle_p50",
+    "timing.full_cycle_p90",
+    "timing.time_to_cancel_samples",
+    "timing.time_to_cancel_p50",
+    "timing.time_to_cancel_p90",
+];
+
+/// The records of one document, by address, as `(name, unit, value)`.
+fn records_of(snapshot: &Snapshot, address: &str) -> Vec<(String, String, serde_json::Value)> {
+    let document = snapshot
+        .documents
+        .iter()
+        .find(|document| document.address.to_string() == address)
+        .unwrap_or_else(|| panic!("{address} is missing from {:?}", addresses(snapshot)));
+    let payload = serde_json::to_value(document.envelope.payload()).expect("serialises");
+    payload["metrics"]
+        .as_array()
+        .expect("metrics")
+        .iter()
+        .map(|metric| {
+            (
+                metric["name"].as_str().expect("name").to_string(),
+                metric["unit"].as_str().expect("unit").to_string(),
+                metric["value"].clone(),
+            )
+        })
+        .collect()
+}
+
+/// The `timing.*` records of one document, in document order.
+fn timing_records_of(
+    snapshot: &Snapshot,
+    address: &str,
+) -> Vec<(String, String, serde_json::Value)> {
+    records_of(snapshot, address)
+        .into_iter()
+        .filter(|(name, _, _)| name.starts_with("timing."))
+        .collect()
+}
+
+#[test]
+fn the_orders_document_carries_the_twelve_durations_at_every_window() {
+    // Arrange / Act
+    let snapshot = Snapshot::compute(&data(), Coverage::since(JULY), "run", SEPTEMBER);
+
+    // Assert — every window, so a client reading `orders:24h` finds the
+    // records as absent figures rather than missing names.
+    for span in Span::ALL {
+        let address = format!("orders:{}", span.as_str());
+        let names: Vec<String> = timing_records_of(&snapshot, &address)
+            .into_iter()
+            .map(|(name, _, _)| name)
+            .collect();
+        assert_eq!(names, DURATIONS, "{address}");
+    }
+
+    // Over `all`, each order was taken a minute after its `pending` and
+    // completed a day after it: samples are counts, durations seconds.
+    let all = timing_records_of(&snapshot, "orders:all");
+    let record = |name: &str| {
+        all.iter()
+            .find(|(found, _, _)| found == name)
+            .unwrap_or_else(|| panic!("no {name}"))
+            .clone()
+    };
+    let samples = record("timing.time_to_complete_samples");
+    assert_eq!((samples.1.as_str(), samples.2.as_i64()), ("count", Some(3)));
+    for name in ["timing.time_to_complete_p50", "timing.time_to_complete_p90"] {
+        let (_, unit, value) = record(name);
+        assert_eq!(unit, "seconds", "{name}");
+        assert_eq!(value.as_i64(), Some(DAY - 60), "{name}");
+    }
+    assert_eq!(record("timing.time_to_fill_p50").2.as_i64(), Some(60));
+    assert_eq!(record("timing.full_cycle_p50").2.as_i64(), Some(DAY));
+}
+
+#[test]
+fn the_published_durations_are_the_stats_timing_figures_over_the_same_window() {
+    // One aggregation, not two: what the document carries is what
+    // `bestiario stats timing --json` prints over the same window.
+    let data = data();
+    let window = Window::new(JULY, SEPTEMBER);
+
+    let published: Vec<Metric> = window_metrics(Report::Orders, &data, window, SEPTEMBER)
+        .into_iter()
+        .filter(|metric| metric.name.starts_with("timing."))
+        .collect();
+    let printed = crate::timing::report(&data.orders, window, None, SEPTEMBER);
+
+    assert_eq!(published[..], printed[..DURATIONS.len()]);
+}
+
+#[test]
+fn a_window_with_no_completion_publishes_zero_samples_and_missing_durations() {
+    // §6.3: a sample of nothing has a count of zero and no percentile —
+    // never "0 seconds", which would read as instant settlement. The
+    // archive holds July and August, and `24h` is the last day before
+    // September.
+    let snapshot = Snapshot::compute(&data(), Coverage::since(JULY), "run", SEPTEMBER);
+
+    for (name, unit, value) in timing_records_of(&snapshot, "orders:24h") {
+        if name.ends_with("_samples") {
+            assert_eq!(
+                (unit.as_str(), value.as_i64()),
+                ("count", Some(0)),
+                "{name}"
+            );
+        } else {
+            assert_eq!(unit, "missing", "{name}");
+            assert!(value.is_null(), "{name} is {value}");
+        }
+    }
+}
+
+#[test]
+fn the_durations_do_not_make_the_orders_documents_depend_on_the_clock() {
+    // Arrange — an order still on the book, so a clock-dependent figure
+    // such as `timing.book_age_avg` would move between the two runs. It
+    // expires long after both.
+    let mut orders = data().orders;
+    orders.push(Order {
+        status: Status::Pending,
+        taken_at: None,
+        success_at: None,
+        expires_at: Some(SEPTEMBER + 30 * DAY),
+        ..order("open", AUGUST + 10 * DAY, 2_000)
+    });
+    let data = Data {
+        orders,
+        ..Data::default()
+    };
+    let archive = Coverage::between(JULY, AUGUST + 10 * DAY);
+
+    // Act
+    let once = Snapshot::compute(&data, archive, "a", SEPTEMBER);
+    let again = Snapshot::compute(&data, archive, "b", SEPTEMBER + 3_600);
+
+    // Assert
+    for span in Span::ALL {
+        let address = format!("orders:{}", span.as_str());
+        let hash = |snapshot: &Snapshot| {
+            snapshot
+                .documents
+                .iter()
+                .find(|document| document.address.to_string() == address)
+                .expect("the window document")
+                .hash
+                .clone()
+        };
+        assert_eq!(hash(&once), hash(&again), "{address} moved with the clock");
+    }
+}

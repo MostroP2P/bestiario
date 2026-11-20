@@ -390,3 +390,17 @@ fn slices_are_by_the_first_version_seen_not_the_latest() {
         "timing.Alpha (pk).time_to_fill_samples"
     );
 }
+
+#[test]
+fn metrics_is_the_durations_followed_by_the_rest() {
+    // The `orders` window documents publish `durations` and `stats timing`
+    // prints `metrics`: one list of names, so the two cannot drift.
+    let timing = summarise(&dataset(), WINDOW, NOW);
+
+    let durations = durations("timing", &timing);
+    let metrics = metrics("timing", &timing);
+
+    assert_eq!(durations.len(), 12);
+    assert_eq!(metrics[..durations.len()], durations[..]);
+    assert_eq!(metrics[durations.len()].name, "timing.book_size");
+}
