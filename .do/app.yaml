@@ -82,7 +82,7 @@ workers:
       # ---------------------------------------------------------------------
       - key: BESTIARIO__NOSTR__RELAYS
         scope: RUN_TIME
-        value: "wss://relay.mostro.network,wss://nos.lol,wss://mostro-p2p.tech,wss://relay.shadowbip.com"
+        value: "wss://relay.mostro.network,wss://mostro-p2p.tech,wss://relay.shadowbip.com"
 
       # On, so that an instance's kind 10002 is followed to the relays it
       # actually publishes to. The relays above are where the network is
@@ -100,7 +100,7 @@ workers:
       # not in the dashboard.
       - key: BESTIARIO__INDEXER__INSTANCES
         scope: RUN_TIME
-        value: "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390,00000235a3e904cfe1213a8a54d6f1ec1bef7cc6bfaabd6193e82931ccf1366a,npub1qqqvcqssrmpfa65uuc3jtp6jh8ta5ekz0pz76f5ydhgtplrnddqqrqe7xr,npub1qqqqj79vck2v2p5hd3j4km0vhuk54ujllk4xdq8j49tgkz5ggsdsvgn7vr,npub1qqq8evest7uh9awvs0ur4rau58nyay7f6ymf3q9fl43wl9wj87gsrk6xv3,npub1qqqqnms7fvwu0tw3n2esunhc2ntm2chzpzmzdphajqpt2zeym2asr7ata2,00037abd44e7a846689e230d5446abcd0d56a344fa81fff85c09d1929feda486,b3626fe91b602bdbca3673bec0855221f41dc8f6d0e4027e51eaa525d68d87f2"
+        value: "82fa8cb978b43c79b2156585bac2c011176a21d2aead6d9f7c575c005be88390,00000235a3e904cfe1213a8a54d6f1ec1bef7cc6bfaabd6193e82931ccf1366a,npub1qqqvcqssrmpfa65uuc3jtp6jh8ta5ekz0pz76f5ydhgtplrnddqqrqe7xr,npub1qqqqj79vck2v2p5hd3j4km0vhuk54ujllk4xdq8j49tgkz5ggsdsvgn7vr,npub1qqq8evest7uh9awvs0ur4rau58nyay7f6ymf3q9fl43wl9wj87gsrk6xv3,npub1qqqqnms7fvwu0tw3n2esunhc2ntm2chzpzmzdphajqpt2zeym2asr7ata2,00037abd44e7a846689e230d5446abcd0d56a344fa81fff85c09d1929feda486,b3626fe91b602bdbca3673bec0855221f41dc8f6d0e4027e51eaa525d68d87f2,npub1mg36x8t42usn32upfxg35ppzfqf2xj76v7w2hf7trqj0ma79jtkqrj3q9m"
 
       - key: BESTIARIO__INDEXER__ACCEPT_UNKNOWN_INSTANCES
         scope: RUN_TIME
@@ -216,7 +216,7 @@ workers:
       # minutes rather than by hours, which is what a client reading these
       # documents as "the network right now" needs.
       - key: BESTIARIO_PUBLISH_EVERY
-        scope: RUN_TIME
+        scope: RUN_AND_BUILD_TIME
         value: "5m"
 
       - key: BESTIARIO__PUBLISH__NSEC
