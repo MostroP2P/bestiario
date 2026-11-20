@@ -542,7 +542,8 @@ things keep the sample smaller than the market:
   Cashu escrow mode, goes from `pending` to `success` on the wire: it never
   counts towards time to complete (or time to fill), although it counts
   towards full cycle when its `pending` version was seen. Time to complete
-  covers buy orders and sell orders taken without an invoice.
+  covers buy orders and sell orders taken without an invoice. The fix is
+  upstream: [MostroP2P/mostro#1129](https://github.com/MostroP2P/mostro/issues/1129).
 
 "Taken" is the first `in-progress` version published, so time to complete
 covers the buyer's invoice when one is asked for, the hold invoice, the
