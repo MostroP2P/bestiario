@@ -655,6 +655,20 @@ fn a_week_straddling_a_month_is_filed_under_one_partition_only() {
 }
 
 #[test]
+fn a_month_opening_on_a_monday_files_that_week_under_itself() {
+    // 2026-06-01 is a Monday: the week it opens began in June, not in the
+    // month before, so it is June's first row rather than May's last.
+    let june = super::super::address::Partition::new(Resolution::Weekly, month_of(2026, 6))
+        .expect("a weekly month")
+        .window();
+
+    let weeks = rows_of(Resolution::Weekly, june);
+
+    assert_eq!(weeks.first().map(|(key, _)| key.as_str()), Some("2026-W23"));
+    assert_eq!(weeks.first().map(|(_, week)| week.from), Some(june.from));
+}
+
+#[test]
 fn a_weekly_row_is_a_whole_week_rather_than_the_part_inside_the_month() {
     let august = weekly(august());
     let json = payload_of(&august);

@@ -272,6 +272,18 @@ fn an_unknown_network_is_an_error_rather_than_a_silent_none() {
 }
 
 #[test]
+fn an_fa_tag_with_no_amount_is_empty_rather_than_a_wrong_count() {
+    // `["fa"]` — the tag is there and names no amount.
+    let mut tags = valid_tags();
+    tags.retain(|(name, _)| *name != "fa");
+    tags.push(("fa", vec![]));
+
+    let error = parse(&order_with(&tags)).expect_err("empty fa");
+
+    assert_eq!(error, ParseError::EmptyTag { tag: "fa" });
+}
+
+#[test]
 fn a_three_valued_fa_is_an_error_rather_than_a_truncated_range() {
     let error = parse(&order_but("fa", &["1", "2", "3"])).expect_err("three-valued fa");
 

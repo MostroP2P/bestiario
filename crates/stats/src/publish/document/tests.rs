@@ -287,3 +287,11 @@ fn an_envelope_gives_back_what_it_was_built_from() {
     assert_eq!(envelope.revision(), 1);
     assert_eq!(envelope.payload(), &payload);
 }
+
+#[test]
+fn a_timestamp_no_date_can_hold_is_written_as_its_seconds() {
+    // `rfc3339` never panics on what an archive hands it: a timestamp past
+    // every representable date is written as the number it is.
+    assert_eq!(rfc3339(0), "1970-01-01T00:00:00+00:00");
+    assert_eq!(rfc3339(i64::MAX), i64::MAX.to_string());
+}
