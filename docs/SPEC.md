@@ -549,8 +549,11 @@ things keep the sample smaller than the market:
 covers the buyer's invoice when one is asked for, the hold invoice, the
 fiat transfer and the release. A disputed trade stays `in-progress` until
 a solver settles it, and one settled in the buyer's favour contributes its
-whole dispute time: it belongs in p90 and does not move p50, which is why
-no mean is reported. Both ends are stamped by the same node, so clock skew
+whole dispute time. In a large sample such a trade sits in the tail and
+moves p90 more than p50; in a small one it can set both — with a single
+sample it *is* p50 — which is another reason the sample count is
+published beside them. A mean would follow that tail at any sample size,
+which is why none is reported. Both ends are stamped by the same node, so clock skew
 between nodes does not enter.
 
 ### 6.5 Instances (the bestiary)
