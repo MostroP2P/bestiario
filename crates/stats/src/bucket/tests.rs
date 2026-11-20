@@ -210,6 +210,28 @@ fn a_monthly_partition_is_a_year_and_it_spans_every_year_covered() {
 }
 
 #[test]
+fn a_month_in_a_year_the_grammar_cannot_spell_has_no_partition() {
+    // 9999-12-01 to mid-January of the year 10000: the January has no
+    // four-digit year to be addressed by, so it is skipped rather than
+    // named — the answer the monthly resolution gives for the year.
+    const DECEMBER_9999: i64 = 253_399_622_400;
+    const JANUARY_10000: i64 = 253_403_510_400;
+    let across = Coverage::since(DECEMBER_9999);
+
+    for resolution in [Resolution::Daily, Resolution::Weekly] {
+        assert_eq!(
+            across.partitions(resolution, JANUARY_10000),
+            vec![month_of(9999, 12)],
+            "{resolution:?}"
+        );
+    }
+    assert_eq!(
+        across.partitions(Resolution::Monthly, JANUARY_10000),
+        vec![year_of(9999)]
+    );
+}
+
+#[test]
 fn the_extent_is_reported_and_enforced_at_both_ends() {
     let extent = Coverage::between(THURSDAY, THURSDAY + DAY);
 

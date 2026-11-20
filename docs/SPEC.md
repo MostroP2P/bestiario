@@ -522,6 +522,40 @@ indistinguishable from a quiet day.
 | Time to cancel | `canceled.created_at − pending.created_at` |
 | Book age | average age of live `pending` orders |
 
+Each duration is dated by the version that ends it and reported as p50 and
+p90 with its sample count. The four durations are published in the
+`orders:<w>` window documents (`docs/NOSTR-PUBLICATION.md` §6.1); the book
+is not, because it is measured against the clock.
+
+**Coverage.** A duration needs both of its versions in the archive, and two
+things keep the sample smaller than the market:
+
+- Kind 38383 is addressable, so a relay keeps only an order's latest
+  version. A backfill meets a finished order at `success` with its
+  `in-progress` version gone; only `sync`, running while the trade
+  happens, records it. Time to fill and time to complete therefore grow
+  only with live-sync uptime, and a gap in `sync` shrinks the sample for
+  that period without a marker.
+- Mostro publishes `in-progress` only for a buy order in
+  `waiting-payment` or a sell order in `waiting-buyer-invoice` (see §6.9).
+  A sell order taken with an invoice in the take message, or taken in
+  Cashu escrow mode, goes from `pending` to `success` on the wire: it never
+  counts towards time to complete (or time to fill), although it counts
+  towards full cycle when its `pending` version was seen. Time to complete
+  covers buy orders and sell orders taken without an invoice. The fix is
+  upstream: [MostroP2P/mostro#1129](https://github.com/MostroP2P/mostro/issues/1129).
+
+"Taken" is the first `in-progress` version published, so time to complete
+covers the buyer's invoice when one is asked for, the hold invoice, the
+fiat transfer and the release. A disputed trade stays `in-progress` until
+a solver settles it, and one settled in the buyer's favour contributes its
+whole dispute time. In a large sample such a trade sits in the tail and
+moves p90 more than p50; in a small one it can set both — with a single
+sample it *is* p50 — which is another reason the sample count is
+published beside them. A mean would follow that tail at any sample size,
+which is why none is reported. Both ends are stamped by the same node, so clock skew
+between nodes does not enter.
+
 ### 6.5 Instances (the bestiary)
 
 | Metric | Definition |
@@ -572,6 +606,11 @@ indistinguishable from a quiet day.
 - Dispute → order: 38386 does not include `order-id`.
 - Cancellation reason (expired, admin, cooperative): collapsed into `canceled`.
 - Intermediate statuses (`fiat-sent`, `dispute`): arrive as `in-progress`.
+- When a sell order was taken with an invoice, or in Cashu escrow mode:
+  Mostro publishes `in-progress` only for a buy order in `waiting-payment`
+  or a sell order in `waiting-buyer-invoice`, so on those paths the order
+  goes from `pending` straight to `success` and has no take time (§6.4,
+  *Coverage*).
 - Whether a given day was actually being indexed: the archive knows its
   earliest event, not which days had a live subscription. Buckets before
   that event report `—`; a gap *after* it — a sync that was down for a day —

@@ -47,7 +47,7 @@ use crate::bucket::Coverage;
 use crate::metric::{Metric, MetricKind, Value};
 use crate::series::{self, Data};
 use crate::window::{Period, Window};
-use crate::{compare, instances, market, summary};
+use crate::{compare, instances, market, summary, timing};
 
 use super::address::{
     Address, Bucket, Partition as Slot, Report, Resolution, Scope, Window as Span,
@@ -148,9 +148,19 @@ fn window_metrics(report: Report, data: &Data, window: Window, now: i64) -> Vec<
         // reaches this document and not the series. A column per currency
         // per bucket would put the size problem of §9.1 in the one shape
         // that already repeats a row per day.
+        //
+        // And SPEC §6.4: how long each stage of an order takes, dated by
+        // the version that ends it — the records `stats timing` prints,
+        // through the same aggregation. Only the durations: the book is a
+        // figure about the clock and would restate these five documents on
+        // every run (§6.1).
         Report::Orders => {
             let mut metrics = series::block_of(series::Family::Activity, data, window, now);
             metrics.extend(fiat_counts(&data.orders, window, now));
+            metrics.extend(timing::durations(
+                "timing",
+                &timing::summarise(&data.orders, window, now),
+            ));
             metrics
         }
         Report::Volume => series::block_of(series::Family::Volume, data, window, now),
@@ -463,9 +473,7 @@ fn weeks_of(span: Window) -> Vec<(String, Window)> {
         let week = Window::new(monday, monday.saturating_add(WEEK));
         // The ISO key is the week's own, spelled by the one place that
         // spells it; a week no calendar can name has no row.
-        if let Some((key, _)) = week.weeks().into_iter().next() {
-            weeks.push((key, week));
-        }
+        weeks.extend(week.weeks().into_iter().next().map(|(key, _)| (key, week)));
         monday = monday.saturating_add(WEEK);
     }
     weeks
@@ -576,12 +584,18 @@ impl Snapshot {
             if family_of(report).is_none() {
                 continue;
             }
+            // `partition` answers `None` for a bucket outside coverage, and
+            // `coverage.partitions` names none: the filter is the contract,
+            // not a branch this loop expects to take.
             for resolution in Resolution::ALL {
-                for bucket in coverage.partitions(resolution, now) {
-                    if let Some(partition) =
-                        partition(data, report, resolution, bucket, coverage, now)
-                    {
-                        documents.push(Document {
+                documents.extend(
+                    coverage
+                        .partitions(resolution, now)
+                        .into_iter()
+                        .filter_map(|bucket| {
+                            partition(data, report, resolution, bucket, coverage, now)
+                        })
+                        .map(|partition| Document {
                             address: partition.address,
                             hash: partition.hash,
                             updated_at: now,
@@ -590,9 +604,8 @@ impl Snapshot {
                                 serde_json::to_value(&partition.payload).expect("plain data"),
                             ),
                             period: Some(partition.period),
-                        });
-                    }
-                }
+                        }),
+                );
             }
         }
 

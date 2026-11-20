@@ -285,16 +285,21 @@ pub fn report(
         .collect()
 }
 
-/// One [`Timing`] as metrics, all observed.
-pub fn metrics(prefix: &str, timing: &Timing) -> Vec<Metric> {
+/// The four §6.4 durations of one [`Timing`] — samples, p50, p90 — as
+/// metrics, all observed. What the `orders` window documents publish
+/// (`docs/NOSTR-PUBLICATION.md` §6.1); [`metrics`] is these followed by
+/// the book, the funnel and the diagnostics, so the document and
+/// `stats timing` share one list of names.
+///
+/// The book is left out on purpose: `book_age_avg` is measured against
+/// the clock, and a figure about the clock would restate a document on
+/// every run whether or not the archive moved.
+pub fn durations(prefix: &str, timing: &Timing) -> Vec<Metric> {
     let observed = |name: &str, value: Value| Metric::observed(format!("{prefix}.{name}"), value);
     let count = |name: &str, value: u64| observed(name, Value::Count(value as i64));
     let seconds = |name: &str, value: Option<i64>| {
         observed(name, value.map_or(Value::Missing, Value::Seconds))
     };
-    let ratio =
-        |name: &str, value: Option<f64>| observed(name, value.map_or(Value::Missing, Value::ratio));
-    let funnel = &timing.funnel;
 
     vec![
         count("time_to_fill_samples", timing.time_to_fill_samples),
@@ -309,6 +314,23 @@ pub fn metrics(prefix: &str, timing: &Timing) -> Vec<Metric> {
         count("time_to_cancel_samples", timing.time_to_cancel_samples),
         seconds("time_to_cancel_p50", timing.time_to_cancel_p50),
         seconds("time_to_cancel_p90", timing.time_to_cancel_p90),
+    ]
+}
+
+/// One [`Timing`] as metrics, all observed: the [`durations`], then the
+/// book, the funnel and the diagnostics.
+pub fn metrics(prefix: &str, timing: &Timing) -> Vec<Metric> {
+    let observed = |name: &str, value: Value| Metric::observed(format!("{prefix}.{name}"), value);
+    let count = |name: &str, value: u64| observed(name, Value::Count(value as i64));
+    let seconds = |name: &str, value: Option<i64>| {
+        observed(name, value.map_or(Value::Missing, Value::Seconds))
+    };
+    let ratio =
+        |name: &str, value: Option<f64>| observed(name, value.map_or(Value::Missing, Value::ratio));
+    let funnel = &timing.funnel;
+
+    let mut metrics = durations(prefix, timing);
+    metrics.extend([
         count("book_size", timing.book_size),
         seconds("book_age_avg", timing.book_age_avg),
         count("funnel.created", funnel.created),
@@ -325,7 +347,8 @@ pub fn metrics(prefix: &str, timing: &Timing) -> Vec<Metric> {
         count("funnel.open", funnel.open),
         count("unknown_origin", timing.unknown_origin),
         count("regressed", timing.regressed),
-    ]
+    ]);
+    metrics
 }
 
 #[cfg(test)]
