@@ -401,7 +401,9 @@ currency it traded:
 ```
 
 Every metric matching `orders.<CODE>.created` is one bar of the chart. The
-currency codes are the three-letter codes instances publish.
+currency codes are the ones the orders carried: usually three letters, but
+`USDT`, `USDC`, `LBTC` and `RBTC` are traded too (§8), so do not assume a
+length.
 
 A currency has **no block at all** — rather than a block of zeros — when
 every figure the block would carry is zero. So the currencies you see are
@@ -452,7 +454,8 @@ question is about:
   where Mostro counts the order's fiat amount in sats of the asset
   (protocol §11.9). For those, `total` and the three tickets have unit
   `sats`, not `fiat`: they are Lightning ↔ on-chain (or other-network)
-  swaps, and "1,000,000 BTC" would be a million times too much.
+  swaps, and a million sats read as "1,000,000 BTC" would be 100 million
+  times too much.
 - `sats` and `completed` are **every** completed order in the currency, the
   range ones included. So `∑ volume.fiat.<CODE>.sats == volume.sats`, and
   the currencies partition the window's sats exactly.
