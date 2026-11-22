@@ -313,9 +313,9 @@ fn a_fiat_slice_drops_the_fiat_ranking_and_keeps_the_rest() {
     assert!(!names.iter().any(|name| name.contains("fiat_top3")));
     assert!(!names.iter().any(|name| name.contains("fiat_hhi")));
     assert!(!names.iter().any(|name| name.contains("new_fiats")));
-    // Per block: 21 − 6 ranking rows − 1 new_fiats row; USD alone also
+    // Per block: 22 − 6 ranking rows − 1 new_fiats row; USD alone also
     // carries the absolute range width, which needs a single currency.
-    assert_eq!(by_fiat.len(), 3 * 14 + 1);
+    assert_eq!(by_fiat.len(), 3 * 15 + 1);
     assert!(names.contains(&"market.USD.range_width_fiat_avg"));
     assert!(!names.contains(&"market.ARS.range_width_fiat_avg"));
 }
@@ -324,7 +324,7 @@ fn a_fiat_slice_drops_the_fiat_ranking_and_keeps_the_rest() {
 fn kind_and_instance_slices_keep_every_row() {
     let by_kind = report(&dataset(), WINDOW, Some(Dimension::Kind));
     assert_eq!(by_kind[0].name, "market.buy.orders");
-    assert_eq!(by_kind.len(), 2 * 21);
+    assert_eq!(by_kind.len(), 2 * 22);
 
     let by_instance = report(&dataset(), WINDOW, Some(Dimension::Instance));
     assert_eq!(by_instance[0].name, "market.Alpha (pk).orders");
