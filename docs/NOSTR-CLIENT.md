@@ -547,12 +547,22 @@ amount; `sats` and `completed` are every completed order in the currency.
 `unpriced_sats` is how much of the window it could not speak for. Render the
 two differently.
 
+There is no `volume.in.<CODE>.ticket_avg`, and it is left out on purpose.
+`total / orders` would be a mean over the orders that happened to have a rate,
+not over every completed trade, and which orders lack one is not random: an
+instance that publishes no rates, a currency with no quote. Shown beside the
+`volume.fiat.<CODE>.ticket_*` figures, which cover every fixed-amount order in
+their currency, it would read as the typical trade on the network and is not.
+`volume.ticket_avg` (sats) and the per-currency tickets answer that question
+without the conversion.
+
 ### 8.4 `market:<window>`
 
 | Metric | Kind | Unit | Meaning |
 | --- | --- | --- | --- |
 | `market.orders` | observed | count | Orders created in the window |
 | `market.buy_orders_share` | observed | ratio | Buys over orders created |
+| `market.sell_orders_share` | observed | ratio | Sells over orders created |
 | `market.buy_volume_share` | observed | ratio | Buy sats over sats completed |
 | `market.premium_avg` | observed | ratio | Mean premium over completed orders |
 | `market.premium_p50` | observed | ratio | Median premium |
