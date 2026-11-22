@@ -118,13 +118,14 @@ fn approx(actual: Option<f64>, expected: f64) -> bool {
 }
 
 #[test]
-fn pressure_is_the_buy_share_of_orders_created_and_of_sats_completed() {
+fn pressure_is_the_share_of_each_side_in_orders_created_and_of_sats_completed() {
     // Arrange / Act
     let market = summarise(&dataset(), WINDOW);
 
     // Assert
     assert_eq!(market.orders, 5);
     assert!(approx(market.buy_orders_share, 0.6));
+    assert!(approx(market.sell_orders_share, 0.4));
     assert!(approx(market.buy_volume_share, 0.8125));
 }
 
@@ -217,6 +218,7 @@ fn an_empty_window_has_no_shares_and_empty_rankings() {
 
     assert_eq!(market.orders, 0);
     assert_eq!(market.buy_orders_share, None);
+    assert_eq!(market.sell_orders_share, None);
     assert_eq!(market.premium_p50, None);
     assert_eq!(market.range_width_avg, None);
     assert!(market.fiats_by_orders.entries.is_empty());
@@ -233,6 +235,7 @@ fn the_global_report_names_the_figures_in_order_all_observed() {
         [
             "market.orders",
             "market.buy_orders_share",
+            "market.sell_orders_share",
             "market.buy_volume_share",
             "market.premium_avg",
             "market.premium_p50",
@@ -310,9 +313,9 @@ fn a_fiat_slice_drops_the_fiat_ranking_and_keeps_the_rest() {
     assert!(!names.iter().any(|name| name.contains("fiat_top3")));
     assert!(!names.iter().any(|name| name.contains("fiat_hhi")));
     assert!(!names.iter().any(|name| name.contains("new_fiats")));
-    // Per block: 21 − 6 ranking rows − 1 new_fiats row; USD alone also
+    // Per block: 22 − 6 ranking rows − 1 new_fiats row; USD alone also
     // carries the absolute range width, which needs a single currency.
-    assert_eq!(by_fiat.len(), 3 * 14 + 1);
+    assert_eq!(by_fiat.len(), 3 * 15 + 1);
     assert!(names.contains(&"market.USD.range_width_fiat_avg"));
     assert!(!names.contains(&"market.ARS.range_width_fiat_avg"));
 }
@@ -321,7 +324,7 @@ fn a_fiat_slice_drops_the_fiat_ranking_and_keeps_the_rest() {
 fn kind_and_instance_slices_keep_every_row() {
     let by_kind = report(&dataset(), WINDOW, Some(Dimension::Kind));
     assert_eq!(by_kind[0].name, "market.buy.orders");
-    assert_eq!(by_kind.len(), 2 * 21);
+    assert_eq!(by_kind.len(), 2 * 22);
 
     let by_instance = report(&dataset(), WINDOW, Some(Dimension::Instance));
     assert_eq!(by_instance[0].name, "market.Alpha (pk).orders");

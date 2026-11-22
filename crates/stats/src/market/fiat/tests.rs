@@ -90,6 +90,10 @@ fn the_view_carries_the_pressure_and_the_premium_of_the_currency() {
         value(&metrics, "buy_orders_share"),
         Value::Ratio(share) if (share - 2.0 / 3.0).abs() < 1e-9
     ));
+    assert!(matches!(
+        value(&metrics, "sell_orders_share"),
+        Value::Ratio(share) if (share - 1.0 / 3.0).abs() < 1e-9
+    ));
     // 10 000 of the 40 000 sats completed are buys.
     assert!(matches!(
         value(&metrics, "buy_volume_share"),
@@ -148,6 +152,7 @@ fn a_currency_nobody_traded_is_zeros_and_dashes_not_an_empty_report() {
     assert!(!metrics.is_empty());
     assert_eq!(value("orders"), &Value::Count(0));
     assert_eq!(value("buy_orders_share"), &Value::Missing);
+    assert_eq!(value("sell_orders_share"), &Value::Missing);
     assert_eq!(value("instances"), &Value::Count(0));
     assert_eq!(value("instances_top3_by_orders"), &Value::Missing);
     assert_eq!(value("time_to_fill_p50"), &Value::Missing);
