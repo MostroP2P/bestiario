@@ -72,6 +72,10 @@ pub struct Market {
     pub orders: u64,
     /// Buys over orders created; `None` with none created.
     pub buy_orders_share: Option<f64>,
+    /// Sells over orders created; `None` with none created. Published
+    /// apart rather than left to the reader as `1 − buy_orders_share`:
+    /// a client renders what is signed and derives nothing.
+    pub sell_orders_share: Option<f64>,
     /// Buy sats over sats completed; `None` with nothing completed.
     pub buy_volume_share: Option<f64>,
     /// Premiums in percent, over completed orders.
@@ -120,6 +124,10 @@ pub fn summarise(orders: &[Order], window: Window) -> Market {
         .iter()
         .filter(|order| order.direction == Direction::Buy)
         .count();
+    let sells = book
+        .iter()
+        .filter(|order| order.direction == Direction::Sell)
+        .count();
     // In `i128`: `amt` is admitted up to `i64::MAX`, so two such orders
     // overflow an `i64` sum — a panic in debug, a wrapped negative in
     // release, and a share silently reported as missing. The share itself
@@ -162,6 +170,7 @@ pub fn summarise(orders: &[Order], window: Window) -> Market {
     Market {
         orders: book.len() as u64,
         buy_orders_share: share(buys, book.len()),
+        sell_orders_share: share(sells, book.len()),
         buy_volume_share: (sats > 0).then(|| buy_sats as f64 / sats as f64),
         premium_avg: (!all.is_empty()).then(|| all.iter().sum::<f64>() / all.len() as f64),
         premium_p50: percentile(&all, 0.5),
@@ -311,6 +320,7 @@ pub fn metrics(prefix: &str, market: &Market, fiat: Option<&str>) -> Vec<Metric>
     let mut metrics = vec![
         observed("orders", Value::Count(market.orders as i64)),
         observed("buy_orders_share", ratio(market.buy_orders_share)),
+        observed("sell_orders_share", ratio(market.sell_orders_share)),
         observed("buy_volume_share", ratio(market.buy_volume_share)),
         observed("premium_avg", percent(market.premium_avg)),
         observed("premium_p50", percent(market.premium_p50)),
