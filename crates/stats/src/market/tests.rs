@@ -118,13 +118,14 @@ fn approx(actual: Option<f64>, expected: f64) -> bool {
 }
 
 #[test]
-fn pressure_is_the_buy_share_of_orders_created_and_of_sats_completed() {
+fn pressure_is_the_share_of_each_side_in_orders_created_and_of_sats_completed() {
     // Arrange / Act
     let market = summarise(&dataset(), WINDOW);
 
     // Assert
     assert_eq!(market.orders, 5);
     assert!(approx(market.buy_orders_share, 0.6));
+    assert!(approx(market.sell_orders_share, 0.4));
     assert!(approx(market.buy_volume_share, 0.8125));
 }
 
@@ -217,6 +218,7 @@ fn an_empty_window_has_no_shares_and_empty_rankings() {
 
     assert_eq!(market.orders, 0);
     assert_eq!(market.buy_orders_share, None);
+    assert_eq!(market.sell_orders_share, None);
     assert_eq!(market.premium_p50, None);
     assert_eq!(market.range_width_avg, None);
     assert!(market.fiats_by_orders.entries.is_empty());
@@ -233,6 +235,7 @@ fn the_global_report_names_the_figures_in_order_all_observed() {
         [
             "market.orders",
             "market.buy_orders_share",
+            "market.sell_orders_share",
             "market.buy_volume_share",
             "market.premium_avg",
             "market.premium_p50",
