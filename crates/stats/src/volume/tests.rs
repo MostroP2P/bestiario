@@ -506,3 +506,37 @@ fn a_period_groups_the_window_and_not_the_orders() {
     assert_eq!(Dimension::Month.grouping(), None);
     assert_eq!(Dimension::Day.grouping(), None);
 }
+
+#[test]
+fn a_btc_pegged_currency_publishes_its_amounts_in_sats() {
+    // Arrange: two Lightning ↔ on-chain swaps, `fa` in sats (§11.9).
+    let orders = vec![
+        Order {
+            fiat_code: "BTC".into(),
+            fiat_amount: Some(1_000_000.0),
+            ..order("swap-a", Status::Success, Some(1_100), 1_005_000)
+        },
+        Order {
+            fiat_code: "BTC".into(),
+            fiat_amount: Some(295_901.0),
+            ..order("swap-b", Status::Success, Some(1_200), 295_900)
+        },
+    ];
+
+    // Act
+    let metrics = report(&orders, WINDOW, None, None, ALL);
+    let named = |name: &str| {
+        metrics
+            .iter()
+            .find(|metric| metric.name == name)
+            .map(|metric| metric.value.clone())
+            .unwrap_or_else(|| panic!("`{name}` is reported"))
+    };
+
+    // Assert: in sats, the mean rounded to the nearest one.
+    assert_eq!(named("volume.fiat.BTC.total"), Value::Sats(1_295_901));
+    assert_eq!(named("volume.fiat.BTC.ticket_avg"), Value::Sats(647_951));
+    assert_eq!(named("volume.fiat.BTC.ticket_p50"), Value::Sats(295_901));
+    assert_eq!(named("volume.fiat.BTC.ticket_p90"), Value::Sats(1_000_000));
+    assert_eq!(named("volume.fiat.BTC.orders"), Value::Count(2));
+}

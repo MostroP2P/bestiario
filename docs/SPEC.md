@@ -490,7 +490,7 @@ indistinguishable from a quiet day.
 | Metric | Definition |
 |---|---|
 | Sats volume | ∑ `amount_sats` of completed |
-| Fiat volume per currency | ∑ `fiat_amount` of completed, by `fiat` |
+| Fiat volume per currency | ∑ `fiat_amount` of completed, by `fiat`. For a BTC-pegged code (`BTC`, `LBTC`, `RBTC`, any casing) Mostro counts `fiat_amount` in sats of the asset (protocol §11.9), so the figure is reported in sats, not in whole coins |
 | Sats volume per currency | ∑ `amount_sats` of completed, by `fiat` — every completed order, the range ones included, so the currencies partition the window's sats |
 | Volume in reference currency (inf) | ∑ `amount_sats × rate(fiat, ≤ success_at)`; reports `rate_age` |
 | Average / p50 / p90 ticket | over `amount_sats` and over fiat |

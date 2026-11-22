@@ -565,3 +565,23 @@ fn an_order_is_credited_to_every_method_it_names() {
         vec![("CUP".to_string(), 1_361)]
     );
 }
+
+#[test]
+fn a_btc_pegged_range_width_is_in_sats() {
+    // Arrange: a swap offered between 100k and 500k sats (§11.9).
+    let orders = vec![Order {
+        fiat_range: Some((100_000.0, 500_000.0)),
+        fiat_amount: None,
+        ..order("swap", Direction::Sell, "BTC", 1_100, 10_000)
+    }];
+
+    // Act
+    let by_fiat = report(&orders, WINDOW, Some(Dimension::Fiat));
+    let width = by_fiat
+        .iter()
+        .find(|metric| metric.name == "market.BTC.range_width_fiat_avg")
+        .map(|metric| metric.value.clone());
+
+    // Assert
+    assert_eq!(width, Some(Value::Sats(400_000)));
+}

@@ -128,3 +128,45 @@ fn a_fiat_value_carries_the_currency_it_is_denominated_in() {
         })
     );
 }
+
+#[test]
+fn a_btc_pegged_order_amount_is_in_sats() {
+    // Mostro counts `fa` of a BTC-pegged code in sats of the asset (protocol
+    // §11.9): `fa=1000000` in `BTC` is a million sats, not a million coins.
+    for code in ["BTC", "LBTC", "RBTC", "rbtc"] {
+        assert_eq!(
+            Value::order_amount(1_000_000.0, code),
+            Value::Sats(1_000_000),
+            "{code}"
+        );
+    }
+}
+
+#[test]
+fn a_fractional_btc_pegged_amount_is_rounded_to_the_nearest_sat() {
+    assert_eq!(Value::order_amount(634_380.5, "BTC"), Value::Sats(634_381));
+    assert_eq!(Value::order_amount(634_380.4, "BTC"), Value::Sats(634_380));
+}
+
+#[test]
+fn a_fiat_or_stablecoin_order_amount_stays_in_its_currency() {
+    // Stablecoins are counted in whole coins (§11.8), like fiat.
+    for code in ["USD", "USDT", "USDC", "DOC"] {
+        assert_eq!(
+            Value::order_amount(100.0, code),
+            Value::fiat(100.0, code),
+            "{code}"
+        );
+    }
+}
+
+#[test]
+fn a_btc_pegged_amount_that_is_no_number_of_sats_is_missing() {
+    for amount in [f64::NAN, f64::INFINITY, 1e30] {
+        assert_eq!(
+            Value::order_amount(amount, "BTC"),
+            Value::Missing,
+            "{amount}"
+        );
+    }
+}

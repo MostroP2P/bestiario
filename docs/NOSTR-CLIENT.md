@@ -401,7 +401,9 @@ currency it traded:
 ```
 
 Every metric matching `orders.<CODE>.created` is one bar of the chart. The
-currency codes are the three-letter codes instances publish.
+currency codes are the ones the orders carried: usually three letters, but
+`USDT`, `USDC`, `LBTC` and `RBTC` are traded too (§8), so do not assume a
+length.
 
 A currency has **no block at all** — rather than a block of zeros — when
 every figure the block would carry is zero. So the currencies you see are
@@ -447,7 +449,13 @@ question is about:
 
 - `total`, `ticket_avg`, `ticket_p50`, `ticket_p90` and `orders` are the
   completed orders with a **fixed** fiat amount. A range order names no
-  single amount, so it is in none of them. These are in the currency.
+  single amount, so it is in none of them. These are in the currency —
+  except for a BTC-pegged code (`BTC`, `LBTC`, `RBTC`, in any casing),
+  where Mostro counts the order's fiat amount in sats of the asset
+  (protocol §11.9). For those, `total` and the three tickets have unit
+  `sats`, not `fiat`: they are Lightning ↔ on-chain (or other-network)
+  swaps, and a million sats read as "1,000,000 BTC" would be 100 million
+  times too much.
 - `sats` and `completed` are **every** completed order in the currency, the
   range ones included. So `∑ volume.fiat.<CODE>.sats == volume.sats`, and
   the currencies partition the window's sats exactly.
@@ -461,8 +469,10 @@ many successful orders in ARS", either `volume.fiat.ARS.completed` or
 
 ## 8. The complete metric catalogue
 
-Every figure, by document. `<CODE>` is a three-letter currency code,
-`<instance>` an instance key (§9), `<n>` a rank starting at 1.
+Every figure, by document. `<CODE>` is a currency code as the order
+carried it: usually three uppercase letters, but not always — `USDT`,
+`USDC`, `LBTC` and `RBTC` are traded too, so a client must not assume a
+length. `<instance>` an instance key (§9), `<n>` a rank starting at 1.
 
 ### 8.1 `summary:<window>`
 
@@ -517,13 +527,13 @@ other is already a change.
 | `volume.size.gt_1m` | observed | count | Over 1 000 000 sats |
 | `volume.buy_sats` | observed | sats | Volume of completed buy orders |
 | `volume.sell_sats` | observed | sats | Volume of completed sell orders |
-| `volume.fiat.<CODE>.total` | observed | fiat | Fiat traded in that currency |
+| `volume.fiat.<CODE>.total` | observed | fiat (sats for a BTC-pegged code, §7) | Fiat traded in that currency |
 | `volume.fiat.<CODE>.orders` | observed | count | Fixed-amount orders behind it, and the denominator of the tickets |
 | `volume.fiat.<CODE>.sats` | observed | sats | Sats that currency moved. Over **every** completed order in it, range orders included, so these add up to `volume.sats` |
 | `volume.fiat.<CODE>.completed` | observed | count | Completed orders behind the sats — never below `orders`, and above it when a range order completed |
-| `volume.fiat.<CODE>.ticket_avg` | observed | fiat | Mean ticket in that currency |
-| `volume.fiat.<CODE>.ticket_p50` | observed | fiat | Median ticket |
-| `volume.fiat.<CODE>.ticket_p90` | observed | fiat | 90th percentile ticket |
+| `volume.fiat.<CODE>.ticket_avg` | observed | fiat (sats for a BTC-pegged code) | Mean ticket in that currency |
+| `volume.fiat.<CODE>.ticket_p50` | observed | fiat (sats for a BTC-pegged code) | Median ticket |
+| `volume.fiat.<CODE>.ticket_p90` | observed | fiat (sats for a BTC-pegged code) | 90th percentile ticket |
 | `volume.in.<CODE>.total` | **inferred** | fiat | Everything priced into one reference currency |
 | `volume.in.<CODE>.orders` | **inferred** | count | Orders it could price |
 | `volume.in.<CODE>.unpriced_sats` | **inferred** | sats | Sats it could not price, for want of a rate |

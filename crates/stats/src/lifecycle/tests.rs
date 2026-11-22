@@ -143,3 +143,31 @@ fn an_instant_no_calendar_can_render_is_shown_as_the_number_it_is() {
         &Value::Text(unrenderable.to_string())
     );
 }
+
+#[test]
+fn a_btc_pegged_order_shows_its_amount_in_sats() {
+    // §11.9: `fa` of a BTC-pegged code is sats of the asset.
+    let fixed = Version {
+        fiat_code: "BTC".into(),
+        ..version(100, Status::Pending, Fiat::Fixed(1_000_000.0))
+    };
+    let range = Version {
+        fiat_code: "RBTC".into(),
+        ..version(
+            200,
+            Status::Pending,
+            Fiat::Range {
+                min: 100_000.0,
+                max: 500_000.0,
+            },
+        )
+    };
+
+    let metrics = report("abc", &[fixed, range], &[]);
+
+    assert_eq!(value(&metrics, "order.1.fiat"), &Value::Sats(1_000_000));
+    assert_eq!(
+        value(&metrics, "order.2.fiat"),
+        &Value::Text("100000–500000 sats of RBTC".into())
+    );
+}

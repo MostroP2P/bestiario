@@ -310,7 +310,7 @@ pub fn metrics(prefix: &str, volume: &Volume) -> Vec<Metric> {
     for (code, fiat) in &volume.fiat {
         let figure = |pick: fn(&FiatFigures) -> f64| {
             fiat.figures.as_ref().map_or(Value::Missing, |figures| {
-                Value::fiat(pick(figures), code.clone())
+                Value::order_amount(pick(figures), code.clone())
             })
         };
         metrics.push(observed(
