@@ -9,7 +9,7 @@
 use chrono::{DateTime, Utc};
 
 use crate::activity::{Direction, Status};
-use crate::metric::{Metric, Value};
+use crate::metric::{Metric, Value, is_btc_pegged};
 
 /// The fiat side of one version.
 #[derive(Debug, Clone, PartialEq)]
@@ -60,7 +60,10 @@ pub fn report(order_id: &str, versions: &[Version], fees: &[FeeSeen]) -> Vec<Met
             observed(
                 "fiat",
                 match &version.fiat {
-                    Fiat::Fixed(amount) => Value::fiat(*amount, version.fiat_code.clone()),
+                    Fiat::Fixed(amount) => Value::order_amount(*amount, version.fiat_code.clone()),
+                    Fiat::Range { min, max } if is_btc_pegged(&version.fiat_code) => {
+                        Value::Text(format!("{min:.0}–{max:.0} sats of {}", version.fiat_code))
+                    }
                     Fiat::Range { min, max } => {
                         Value::Text(format!("{min:.2}–{max:.2} {}", version.fiat_code))
                     }

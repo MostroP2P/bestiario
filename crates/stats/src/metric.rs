@@ -37,6 +37,21 @@ pub enum MetricKind {
 /// constructors [`ratio`](Self::ratio) and [`fiat`](Self::fiat) make that
 /// substitution up front, so an aggregation dividing by zero produces a
 /// missing figure rather than a `NaN` that is one only at the output.
+/// The codes pegged 1:1 to bitcoin itself — bitcoin on another network,
+/// and on-chain bitcoin against Lightning. Mostro counts their `fa` in sats
+/// of the asset, not in whole coins (protocol §11.9). The `Peg::Btc` rows of
+/// mostrod's `KNOWN_PEGGED`; a code added there is added here.
+pub const BTC_PEGGED: [&str; 3] = ["BTC", "LBTC", "RBTC"];
+
+/// Whether `code`, in any casing, is [BTC-pegged](BTC_PEGGED). Any casing
+/// because mostrod matches it that way, and an order carries the code as
+/// its maker typed it.
+pub fn is_btc_pegged(code: &str) -> bool {
+    BTC_PEGGED
+        .iter()
+        .any(|pegged| pegged.eq_ignore_ascii_case(code))
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     /// A plain count. Signed: a delta against the previous period is one.
@@ -80,6 +95,27 @@ impl Value {
                 amount,
                 code: code.into(),
             }
+        } else {
+            Self::Missing
+        }
+    }
+
+    /// The fiat side of an order, `fa`, in the order's own currency: a fiat
+    /// amount, except for a [BTC-pegged](is_btc_pegged) code, where Mostro
+    /// counts `fa` in sats of the asset (protocol §11.9) and the amount is
+    /// [`Sats`](Self::Sats), rounded to the nearest one. Published as fiat,
+    /// a swap of a million sats would read as a million BTC.
+    ///
+    /// [`Missing`](Self::Missing) when `amount` is not a finite number, or,
+    /// for a BTC-pegged code, not one an `i64` of sats can hold.
+    pub fn order_amount(amount: f64, code: impl Into<String>) -> Self {
+        let code = code.into();
+        if !is_btc_pegged(&code) {
+            return Self::fiat(amount, code);
+        }
+        let sats = amount.round();
+        if sats.is_finite() && (i64::MIN as f64..i64::MAX as f64).contains(&sats) {
+            Self::Sats(sats as i64)
         } else {
             Self::Missing
         }

@@ -322,7 +322,10 @@ pub fn metrics(prefix: &str, market: &Market, fiat: Option<&str>) -> Vec<Metric>
         observed("range_width_avg", ratio(market.range_width_avg)),
     ];
     if let Some((code, width)) = fiat.zip(market.range_width_fiat_avg) {
-        metrics.push(observed("range_width_fiat_avg", Value::fiat(width, code)));
+        metrics.push(observed(
+            "range_width_fiat_avg",
+            Value::order_amount(width, code),
+        ));
     }
     if fiat.is_none() {
         metrics.push(ranked("fiat_top3_by_orders", &market.fiats_by_orders, ""));
