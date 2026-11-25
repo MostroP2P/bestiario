@@ -185,6 +185,33 @@ fn in_progress_now_dates_an_order_caught_mid_flight_by_its_creation() {
 }
 
 #[test]
+fn in_progress_now_leaves_out_an_order_taken_after_now() {
+    // A publisher's clock running fast: as far as this report can tell the
+    // order has not been taken yet, as with a dispute opened ahead of the
+    // clock (`crate::disputes`). Its age would otherwise be negative, and
+    // inside any horizon however far ahead it was dated.
+    let now = 200_000;
+    let taken = Order {
+        taken_at: Some(now + IN_PROGRESS_HORIZON),
+        ..order("f", now - 60, Status::InProgress)
+    };
+    let caught = order("c", now + 1, Status::InProgress);
+
+    assert_eq!(summarise(&[taken, caught], WINDOW, now).in_progress_now, 0);
+}
+
+#[test]
+fn in_progress_now_counts_an_order_taken_at_this_very_second() {
+    let now = 200_000;
+    let taken = Order {
+        taken_at: Some(now),
+        ..order("n", now - 60, Status::InProgress)
+    };
+
+    assert_eq!(summarise(&[taken], WINDOW, now).in_progress_now, 1);
+}
+
+#[test]
 fn in_progress_horizon_is_one_day() {
     assert_eq!(IN_PROGRESS_HORIZON, 24 * 60 * 60);
 }

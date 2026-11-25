@@ -242,8 +242,14 @@ pub fn summarise_against(
             .iter()
             .filter(|order| order.status == Status::InProgress)
             // Dated by its taker; an order first caught mid-flight has none
-            // and is dated by its creation instead.
-            .filter(|order| now - order.taken_at.unwrap_or(order.created_at) < IN_PROGRESS_HORIZON)
+            // and is dated by its creation instead. Dated ahead of the clock
+            // — a publisher's clock running fast — it has not been taken yet
+            // as far as this report can tell, as with a dispute in
+            // `crate::disputes`.
+            .filter(|order| {
+                now.checked_sub(order.taken_at.unwrap_or(order.created_at))
+                    .is_some_and(|age| (0..IN_PROGRESS_HORIZON).contains(&age))
+            })
             .count() as u64,
         created_delta: growth(current.created, previous.created),
         completed_delta: growth(current.completed, previous.completed),
