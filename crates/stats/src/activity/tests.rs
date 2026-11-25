@@ -149,6 +149,47 @@ fn open_now_counts_pending_orders_that_have_not_expired() {
 }
 
 #[test]
+fn in_progress_now_counts_an_order_taken_within_the_last_day() {
+    let now = 200_000;
+    let taken = Order {
+        taken_at: Some(now - IN_PROGRESS_HORIZON + 1),
+        ..order("t", now - IN_PROGRESS_HORIZON - 10, Status::InProgress)
+    };
+
+    assert_eq!(summarise(&[taken], WINDOW, now).in_progress_now, 1);
+}
+
+#[test]
+fn in_progress_now_leaves_out_an_order_taken_more_than_a_day_ago() {
+    // Its outcome never reached the archive — the final version expired off
+    // the relays, or was published while nothing was listening — so its
+    // last word is `in-progress` forever. Counting it would make the figure
+    // about *now* a sum of every trade the archive lost track of.
+    let now = 200_000;
+    let stale = Order {
+        taken_at: Some(now - IN_PROGRESS_HORIZON),
+        ..order("s", now - IN_PROGRESS_HORIZON - 10, Status::InProgress)
+    };
+
+    assert_eq!(summarise(&[stale], WINDOW, now).in_progress_now, 0);
+}
+
+#[test]
+fn in_progress_now_dates_an_order_caught_mid_flight_by_its_creation() {
+    // No taker version was seen, so the order's own date is all there is.
+    let now = 200_000;
+    let recent = order("r", now - 60, Status::InProgress);
+    let old = order("o", now - IN_PROGRESS_HORIZON - 60, Status::InProgress);
+
+    assert_eq!(summarise(&[recent, old], WINDOW, now).in_progress_now, 1);
+}
+
+#[test]
+fn in_progress_horizon_is_one_day() {
+    assert_eq!(IN_PROGRESS_HORIZON, 24 * 60 * 60);
+}
+
+#[test]
 fn a_pending_order_with_no_expiry_is_not_reported_as_open() {
     // No expiry means the version did not say, and "open" is a claim the
     // data has to make.

@@ -481,7 +481,7 @@ indistinguishable from a quiet day.
 | Completion rate | completed / (completed + canceled) |
 | No-taker abandonment rate | direct `pending → canceled` / created |
 | Open orders now | live `pending` (`expires_at > now`) |
-| In-progress orders now | live `in-progress` |
+| In-progress orders now | `in-progress`, taken within the last 24 h (the `in-progress` version's `created_at`, else the order's): an order whose outcome never reached the archive would otherwise count forever, and a dispute argued for longer than a day drops out with it |
 | Δ month over month | growth % of created and completed |
 | Activity by hour of day / day of week | histogram of created and completed (UTC) |
 

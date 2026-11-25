@@ -423,7 +423,7 @@ Each currency block carries the same nine figures as the instance total:
 | `created_delta` | ratio | Growth against the previous window of the same length |
 | `completed_delta` | ratio | The same for `completed` |
 | `open_now` | count | `pending` orders still live — about *now*, not the window |
-| `in_progress_now` | count | Orders with a taker — also about *now* |
+| `in_progress_now` | count | Orders taken within the last 24 h and not yet finished — also about *now* |
 
 **These sum.** An order names exactly one currency and belongs to exactly
 one instance, so the currency blocks partition the instance's orders and the

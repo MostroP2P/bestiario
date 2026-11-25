@@ -172,7 +172,8 @@ pub struct Activity {
     /// `pending` orders whose `expires_at` is still ahead of the clock.
     /// A figure about *now*, not about the window.
     pub open_now: u64,
-    /// `in-progress` orders, whatever their age. Also about *now*.
+    /// `in-progress` orders taken within [`IN_PROGRESS_HORIZON`] of `now`.
+    /// Also about *now*.
     pub in_progress_now: u64,
     /// Growth of `created` against the previous window of the same length;
     /// `None` when that window had none to grow from.
@@ -180,6 +181,16 @@ pub struct Activity {
     /// The same for `completed`.
     pub completed_delta: Option<f64>,
 }
+
+/// How long an `in-progress` order counts as a trade in course, in seconds.
+///
+/// An order whose outcome never reached the archive — its final version
+/// expired off the relays, or was published while nothing was listening —
+/// says `in-progress` forever, and an unbounded count of those is a count of
+/// every trade the archive lost track of rather than of what is happening
+/// now. A day is longer than a trade takes; a dispute argued for longer than
+/// that also drops out, which `docs/SPEC.md` §6.1 states.
+pub const IN_PROGRESS_HORIZON: i64 = 24 * 60 * 60;
 
 /// Counts of created and completed orders per bucket — 24 hours or 7 days.
 #[derive(Debug, Clone, PartialEq)]
@@ -230,6 +241,9 @@ pub fn summarise_against(
         in_progress_now: orders
             .iter()
             .filter(|order| order.status == Status::InProgress)
+            // Dated by its taker; an order first caught mid-flight has none
+            // and is dated by its creation instead.
+            .filter(|order| now - order.taken_at.unwrap_or(order.created_at) < IN_PROGRESS_HORIZON)
             .count() as u64,
         created_delta: growth(current.created, previous.created),
         completed_delta: growth(current.completed, previous.completed),
